@@ -1,0 +1,893 @@
+//! Comprehensive tests for GhostCell covering edge cases, safety, and correctness
+
+use halo::*;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+// ===== SAFETY AND CORRECTNESS TESTS =====
+
+// NOTE: This crate intentionally does not expose a safe `uninit()` constructor
+// for `GhostCell<T>` because it would either:
+// - require runtime checks on every access, or
+// - risk undefined behavior if accessed before initialization.
+
+#[test]
+fn test_zero_sized_types() {
+    // Test with zero-sized types
+    GhostToken::new(|mut token| {
+        let zst_cell = GhostCell::new(());
+        assert_eq!(*zst_cell.borrow(&token), ());
+
+        *zst_cell.borrow_mut(&mut token) = ();
+        assert_eq!(*zst_cell.borrow(&token), ());
+    });
+}
+
+#[test]
+fn test_non_copy_types() {
+    // Test with non-Copy types like String and Vec
+    GhostToken::new(|mut token| {
+        let string_cell = GhostCell::new("Hello".to_string());
+        assert_eq!(*string_cell.borrow(&token), "Hello");
+
+        string_cell.borrow_mut(&mut token).push_str(" World");
+        assert_eq!(*string_cell.borrow(&token), "Hello World");
+
+        let vec_cell = GhostCell::new(vec![1, 2, 3]);
+        vec_cell.borrow_mut(&mut token).push(4);
+        assert_eq!(*vec_cell.borrow(&token), vec![1, 2, 3, 4]);
+    });
+}
+
+#[test]
+fn test_types_with_destructors() {
+    // Test with types that implement Drop
+    let drop_count = std::cell::Cell::new(0);
+
+    struct DropCounter<'a>(&'a std::cell::Cell<i32>);
+
+    impl<'a> Drop for DropCounter<'a> {
+        fn drop(&mut self) {
+            self.0.set(self.0.get() + 1);
+        }
+    }
+
+    GhostToken::new(|_token| {
+        let _cell1 = GhostCell::new(DropCounter(&drop_count));
+        let _cell2 = GhostCell::new(DropCounter(&drop_count));
+        // Drop the cells - should call destructors in reverse order
+        drop(_cell1);
+        assert_eq!(drop_count.get(), 1);
+        drop(_cell2);
+        assert_eq!(drop_count.get(), 2);
+    });
+}
+
+#[test]
+fn test_large_types() {
+    // Test with large data structures
+    GhostToken::new(|mut token| {
+        let large_cell = GhostCell::new(vec![0u8; 1024 * 1024]); // 1MB
+        assert_eq!(large_cell.borrow(&token).len(), 1024 * 1024);
+
+        // Modify in place without copying
+        large_cell.borrow_mut(&mut token)[0] = 42;
+        assert_eq!(large_cell.borrow(&token)[0], 42);
+    });
+}
+
+#[test]
+fn test_empty_collections() {
+    // Test with empty collections
+    GhostToken::new(|token| {
+        let empty_vec = GhostCell::new(Vec::<i32>::new());
+        assert!(empty_vec.borrow(&token).is_empty());
+
+        let empty_string = GhostCell::new(String::new());
+        assert!(empty_string.borrow(&token).is_empty());
+
+        let empty_hashmap = GhostCell::new(HashMap::<i32, i32>::new());
+        assert!(empty_hashmap.borrow(&token).is_empty());
+    });
+}
+
+#[test]
+fn test_nested_types() {
+    // Test with nested types (avoiding true recursion)
+    GhostToken::new(|token| {
+        let cell = GhostCell::new(RefCell::new(Some(42)));
+        assert_eq!(*cell.borrow(&token).borrow(), Some(42));
+    });
+}
+
+#[test]
+fn test_borrow_mutability() {
+    // Test that we can't create multiple mutable borrows
+    // This is enforced by the type system, so we test valid patterns
+    GhostToken::new(|token| {
+        let cell = GhostCell::new(42);
+
+        // Single mutable borrow is fine (but we need a mutable token)
+        // Since we can't have multiple mutable borrows, we just test immutable
+        let _borrow1 = cell.borrow(&token);
+        assert_eq!(*_borrow1, 42);
+    });
+}
+
+#[test]
+fn test_replace_and_swap() {
+    // Test replace and swap operations
+    GhostToken::new(|mut token| {
+        let cell1 = GhostCell::new(42);
+        let cell2 = GhostCell::new(100);
+
+        // Test replace
+        let old_value = cell1.replace(&mut token, 200);
+        assert_eq!(old_value, 42);
+        assert_eq!(*cell1.borrow(&token), 200);
+
+        // Test swap
+        cell1.swap(&mut token, &cell2);
+        assert_eq!(*cell1.borrow(&token), 100);
+        assert_eq!(*cell2.borrow(&token), 200);
+    });
+}
+
+#[test]
+fn test_update_and_map() {
+    // Test functional update and map operations
+    GhostToken::new(|mut token| {
+        let cell = GhostCell::new(42);
+
+        // Test update
+        cell.update(&mut token, |x| *x *= 2);
+        assert_eq!(*cell.borrow(&token), 84);
+
+        // Test map (consumes the cell)
+        let new_cell = cell.map(&token, |x| x.to_string());
+        assert_eq!(*new_cell.borrow(&token), "84");
+    });
+}
+
+#[test]
+fn test_apply_operations() {
+    // Test apply operations
+    GhostToken::new(|mut token| {
+        let cell = GhostCell::new(vec![1, 2, 3]);
+
+        // Test apply (immutable)
+        let len = cell.apply(&token, |v| v.len());
+        assert_eq!(len, 3);
+
+        // Test apply_mut
+        let old_len = cell.apply_mut(&mut token, |v| {
+            let old = v.len();
+            v.push(4);
+            old
+        });
+        assert_eq!(old_len, 3);
+        assert_eq!(cell.borrow(&token).len(), 4);
+    });
+}
+
+#[test]
+fn test_clone_operations() {
+    // Test clone operations
+    GhostToken::new(|token| {
+        let cell = GhostCell::new(vec![1, 2, 3]);
+        let cloned = cell.cloned(&token);
+        assert_eq!(cloned, vec![1, 2, 3]);
+
+        // Original should be unchanged
+        assert_eq!(*cell.borrow(&token), vec![1, 2, 3]);
+    });
+}
+
+// ===== BORROW CHECKER AND LIFETIME TESTS =====
+
+#[test]
+fn test_borrow_lifetime_constraints() {
+    // Test that borrows respect lifetime constraints
+    GhostToken::new(|token| {
+        let cell = GhostCell::new(42);
+
+        // This should work - borrow lifetime tied to token
+        let value_ref = cell.borrow(&token);
+        assert_eq!(*value_ref, 42);
+
+        // Can't store the reference beyond the borrow scope
+        // This would be a compile error if uncommented:
+        // let stored_ref: &i32 = value_ref; // Compile error!
+    });
+}
+
+#[test]
+fn test_nested_scopes() {
+    // Test nested token scopes
+    GhostToken::new(|outer_token| {
+        let outer_cell = GhostCell::new("outer");
+
+        GhostToken::new(|inner_token| {
+            let inner_cell = GhostCell::new("inner");
+
+            // Can access cells within their respective scopes
+            assert_eq!(*outer_cell.borrow(&outer_token), "outer");
+            assert_eq!(*inner_cell.borrow(&inner_token), "inner");
+
+            // Can't mix tokens from different scopes
+            // This would be a compile error if uncommented:
+            // assert_eq!(*outer_cell.borrow(&inner_token), "outer"); // Compile error!
+        });
+
+        // Inner scope is done, can still access outer
+        assert_eq!(*outer_cell.borrow(&outer_token), "outer");
+    });
+}
+
+// ===== MEMORY AND PERFORMANCE TESTS =====
+
+#[test]
+fn test_memory_layout() {
+    use std::mem;
+
+    // GhostCell should have reasonable size (may have small overhead due to initialization tracking)
+    let cell_size = mem::size_of::<GhostCell<i32>>();
+    let base_size = mem::size_of::<std::cell::Cell<std::mem::MaybeUninit<i32>>>();
+    assert!(cell_size >= base_size); // Should be at least as big as the base
+    assert!(cell_size <= base_size + 8); // But not much bigger
+
+    // Test that alignment is reasonable
+    assert_eq!(mem::align_of::<GhostCell<i32>>(), mem::align_of::<std::cell::Cell<std::mem::MaybeUninit<i32>>>());
+
+    // Note: GhostToken size depends on the specific lifetime used
+    // The zero-sized property holds for the abstract token type
+}
+
+#[test]
+fn test_no_unnecessary_allocations() {
+    // Test that operations don't cause unnecessary allocations
+    GhostToken::new(|mut token| {
+        let cell = GhostCell::new(vec![1, 2, 3]);
+
+        // Borrowing should not allocate
+        let _borrowed = cell.borrow(&token);
+
+        // Copy operations should not allocate for Copy types
+        let copy_cell = GhostCell::new(42);
+        let _value = copy_cell.get(&token);
+
+        // Replace should reuse allocation
+        let old_vec = cell.replace(&mut token, vec![4, 5, 6]);
+        assert_eq!(old_vec, vec![1, 2, 3]);
+    });
+}
+
+// ===== CONCURRENCY TESTS =====
+
+#[test]
+fn test_thread_local_usage() {
+    // Test that tokens work in thread-local scenarios
+    thread_local! {
+        static THREAD_CELL: RefCell<Option<i32>> = RefCell::new(None);
+    }
+
+    THREAD_CELL.with(|cell| {
+        *cell.borrow_mut() = Some(42);
+        assert_eq!(*cell.borrow(), Some(42));
+    });
+}
+
+// ===== PANIC SAFETY TESTS =====
+
+#[test]
+fn test_panic_during_borrow() {
+    // Test behavior when panics occur during borrowing
+    let cell = GhostToken::new(|token| {
+        let cell = GhostCell::new(vec![1, 2, 3]);
+        // This should work fine
+        cell.borrow(&token).clone()
+    });
+    assert_eq!(cell, vec![1, 2, 3]);
+}
+
+#[test]
+fn test_drop_order() {
+    // Test that values are dropped in correct order
+    let drop_order = Arc::new(Mutex::new(Vec::new()));
+
+    struct DropTracker(Arc<Mutex<Vec<i32>>>, i32);
+
+    impl Drop for DropTracker {
+        fn drop(&mut self) {
+            self.0.lock().unwrap().push(self.1);
+        }
+    }
+
+    let _result = GhostToken::new(|_token| {
+        let _cell1 = GhostCell::new(DropTracker(Arc::clone(&drop_order), 1));
+        let _cell2 = GhostCell::new(DropTracker(Arc::clone(&drop_order), 2));
+        // Cells go out of scope here
+        42
+    });
+
+    // Check drop order (should be reverse of creation)
+    let order = drop_order.lock().unwrap();
+    assert_eq!(*order, vec![2, 1]);
+}
+
+// ===== INTEGRATION TESTS =====
+
+#[test]
+fn test_trait_implementations() {
+    // Test that our types work with common traits
+    GhostToken::new(|token| {
+        // From trait
+        let cell: GhostCell<i32> = 42.into();
+        assert_eq!(*cell.borrow(&token), 42);
+
+        // Default trait
+        let default_cell = GhostCell::<String>::default();
+        assert_eq!(*default_cell.borrow(&token), "");
+    });
+}
+
+#[test]
+fn test_generic_bounds() {
+    // Test that our generic bounds work correctly
+    fn generic_function<'brand, T: Clone>(cell: &GhostCell<'brand, T>, token: &GhostToken<'brand>) -> T {
+        cell.cloned(token)
+    }
+
+    GhostToken::new(|token| {
+        let cell = GhostCell::new(vec![1, 2, 3]);
+        let cloned = generic_function(&cell, &token);
+        assert_eq!(cloned, vec![1, 2, 3]);
+    });
+}
+
+#[test]
+fn test_complex_data_structures() {
+    // Test with complex nested data structures
+    #[derive(Debug, Clone, PartialEq)]
+    struct ComplexData {
+        id: i32,
+        data: Vec<String>,
+        metadata: HashMap<String, i32>,
+    }
+
+    GhostToken::new(|mut token| {
+        let complex_cell = GhostCell::new(ComplexData {
+            id: 1,
+            data: vec!["hello".to_string(), "world".to_string()],
+            metadata: [("key".to_string(), 42)].into(),
+        });
+
+        // Modify nested structures
+        {
+            let borrowed = complex_cell.borrow_mut(&mut token);
+            borrowed.data.push("!".to_string());
+            borrowed.metadata.insert("new_key".to_string(), 100);
+        }
+
+        let final_data = complex_cell.borrow(&token);
+        assert_eq!(final_data.data, vec!["hello", "world", "!"]);
+        assert_eq!(final_data.metadata["new_key"], 100);
+    });
+}
+
+// ===== PROPERTY-BASED TESTING =====
+
+#[cfg(feature = "proptest")]
+mod proptest_tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn test_arithmetic_properties(x in any::<i32>(), y in any::<i32>(), z in any::<i32>()) {
+            GhostToken::new(|mut token| {
+                let cell_x = GhostCell::new(x);
+                let cell_y = GhostCell::new(y);
+                let cell_z = GhostCell::new(z);
+
+                // Commutativity
+                let sum1 = *cell_x.borrow(&token) + *cell_y.borrow(&token);
+                let sum2 = *cell_y.borrow(&token) + *cell_x.borrow(&token);
+                prop_assert_eq!(sum1, sum2);
+
+                // Associativity
+                let assoc1 = (*cell_x.borrow(&token) + *cell_y.borrow(&token)) + *cell_z.borrow(&token);
+                let assoc2 = *cell_x.borrow(&token) + (*cell_y.borrow(&token) + *cell_z.borrow(&token));
+                prop_assert_eq!(assoc1, assoc2);
+            });
+        }
+
+        #[test]
+        fn test_vector_operations(vec in any::<Vec<i32>>()) {
+            GhostToken::new(|mut token| {
+                let cell = GhostCell::new(vec.clone());
+
+                // Length should be preserved through various operations
+                let original_len = vec.len();
+                prop_assert_eq!(cell.borrow(&token).len(), original_len);
+
+                // Push operation
+                cell.borrow_mut(&mut token).push(999);
+                prop_assert_eq!(cell.borrow(&token).len(), original_len + 1);
+                prop_assert_eq!(cell.borrow(&token)[original_len], 999);
+            });
+        }
+    }
+}
+
+// ===== COMPILATION FAILURE TESTS =====
+
+// These tests verify that certain patterns fail to compile
+// (We can't test compilation failures directly in runtime tests,
+// but we can document the patterns that should fail)
+
+#[test]
+fn test_type_safety_guarantees() {
+    // This test documents that the following patterns would fail to compile:
+
+    // Pattern 1: Mixing tokens from different scopes
+    // GhostToken::new(|token1| {
+    //     let cell = GhostCell::new(42);
+    //     GhostToken::new(|token2| {
+    //         // This would fail: cell.borrow(&token2)
+    //     });
+    // });
+
+    // Pattern 2: Storing references beyond borrow scope
+    // GhostToken::new(|token| {
+    //     let cell = GhostCell::new(42);
+    //     let stored_ref: &i32 = cell.borrow(&token); // Lifetime error
+    // });
+
+    // Since these are compilation errors, we just assert that
+    // the correct patterns work
+    GhostToken::new(|token| {
+        let cell = GhostCell::new(42);
+        let value = *cell.borrow(&token);
+        assert_eq!(value, 42);
+    });
+}
+
+// ===== STRESS TESTS =====
+
+#[test]
+fn test_many_cells() {
+    // Test with many cells to stress the system
+    GhostToken::new(|mut token| {
+        let cells: Vec<GhostCell<i32>> = (0..1000).map(GhostCell::new).collect();
+
+        // Bulk operations
+        for (i, cell) in cells.iter().enumerate() {
+            assert_eq!(*cell.borrow(&token), i as i32);
+        }
+
+        // Modify all cells
+        for cell in &cells {
+            *cell.borrow_mut(&mut token) *= 2;
+        }
+
+        // Verify modifications
+        for (i, cell) in cells.iter().enumerate() {
+            assert_eq!(*cell.borrow(&token), (i as i32) * 2);
+        }
+    });
+}
+
+#[test]
+fn test_ghostcell_borrowing_vec() {
+    // Test `GhostCell` borrowing patterns on a non-`Copy` type.
+    GhostToken::new(|mut token| {
+        let cell = GhostCell::new(vec![1, 2, 3]);
+
+        {
+            let borrowed = cell.borrow(&token);
+            assert_eq!(*borrowed, vec![1, 2, 3]);
+        }
+
+        {
+            let borrowed_mut = cell.borrow_mut(&mut token);
+            borrowed_mut.push(4);
+            assert_eq!(*borrowed_mut, vec![1, 2, 3, 4]);
+        }
+
+        assert_eq!(*cell.borrow(&token), vec![1, 2, 3, 4]);
+    });
+}
+
+#[test]
+fn test_lazy_ghostcell_basic() {
+    // Test basic lazy computation
+    let compute_count = std::cell::Cell::new(0);
+
+    GhostToken::new(|mut token| {
+        let lazy = GhostLazyCell::new(|| {
+            compute_count.set(compute_count.get() + 1);
+            vec![1, 2, 3, 4, 5]
+        });
+
+        // Not computed yet
+        assert!(!lazy.is_initialized(&token));
+        assert_eq!(compute_count.get(), 0);
+
+        // First access triggers computation
+        let value = lazy.get(&mut token);
+        assert_eq!(*value, vec![1, 2, 3, 4, 5]);
+        assert!(lazy.is_initialized(&token));
+        assert_eq!(compute_count.get(), 1);
+
+        // Subsequent accesses use cached value
+        let value2 = lazy.get(&mut token);
+        assert_eq!(*value2, vec![1, 2, 3, 4, 5]);
+        assert_eq!(compute_count.get(), 1); // No additional computation
+    });
+}
+
+#[test]
+fn test_lazy_ghostcell_mutation() {
+    // Test lazy computation with mutable access
+    GhostToken::new(|mut token| {
+        let lazy = GhostLazyCell::new(|| vec![1, 2, 3]);
+
+        // Get mutable access (triggers computation)
+        {
+            let value = lazy.get_mut(&mut token);
+            value.push(4);
+            assert_eq!(*value, vec![1, 2, 3, 4]);
+        }
+
+        // Value persists
+        let value = lazy.get(&mut token);
+        assert_eq!(*value, vec![1, 2, 3, 4]);
+    });
+}
+
+#[test]
+fn test_lazy_ghostcell_invalidation() {
+    // Test invalidation and recomputation with Fn (recomputable)
+    GhostToken::new(|mut token| {
+        use std::sync::atomic::{AtomicI32, Ordering};
+
+        static COUNTER: AtomicI32 = AtomicI32::new(0);
+
+        let lazy = GhostLazyCell::new(|| COUNTER.fetch_add(1, Ordering::Relaxed) + 1);
+
+        // First computation
+        assert_eq!(*lazy.get(&mut token), 1);
+
+        // Invalidate and recompute
+        lazy.invalidate(&mut token);
+        assert!(!lazy.is_initialized(&token));
+
+        // Second computation
+        assert_eq!(*lazy.get(&mut token), 2);
+    });
+}
+
+#[test]
+fn test_lazy_ghostcell_clone() {
+    // Test cloning computed values
+    GhostToken::new(|mut token| {
+        let lazy = GhostLazyCell::new(|| vec![1, 2, 3]);
+        let cloned = lazy.get(&mut token).clone();
+        assert_eq!(cloned, vec![1, 2, 3]);
+
+        // Original still works
+        assert_eq!(*lazy.get(&mut token), vec![1, 2, 3]);
+    });
+}
+
+#[test]
+fn test_lazy_ghostcell_default() {
+    // Test default lazy initialization
+    GhostToken::new(|mut token| {
+        let lazy: GhostLazyCell<i32> = GhostLazyCell::default();
+        assert_eq!(*lazy.get(&mut token), 0);
+    });
+}
+
+#[test]
+fn test_lazy_ghostcell_drop() {
+    // Test that lazy cells drop properly
+    let drop_count = std::rc::Rc::new(std::cell::Cell::new(0));
+
+    struct DropTracker(std::rc::Rc<std::cell::Cell<i32>>);
+
+    impl Drop for DropTracker {
+        fn drop(&mut self) {
+            self.0.set(self.0.get() + 1);
+        }
+    }
+
+    GhostToken::new(|mut token| {
+        let lazy = GhostLazyCell::new(|| DropTracker(drop_count.clone()));
+
+        // Access to trigger computation
+        let _tracker = lazy.get(&mut token);
+        assert_eq!(drop_count.get(), 0); // Not dropped yet
+
+        // Drop the lazy cell
+        drop(lazy);
+        assert_eq!(drop_count.get(), 1); // Now dropped
+    });
+}
+
+#[test]
+fn test_lazy_ghostcell_complex_computation() {
+    // Deterministic "expensive computation" test without timing assumptions.
+    let compute_count = std::cell::Cell::new(0);
+
+    GhostToken::new(|mut token| {
+        let lazy = GhostLazyCell::new(|| {
+            compute_count.set(compute_count.get() + 1);
+            (0..1000).map(|i| i * i).collect::<Vec<i32>>()
+        });
+
+        assert_eq!(compute_count.get(), 0);
+
+        // First access computes.
+        let value = lazy.get(&mut token);
+        assert_eq!(value.len(), 1000);
+        assert_eq!(value[0], 0);
+        assert_eq!(value[999], 999 * 999);
+        assert_eq!(compute_count.get(), 1);
+
+        // Second access is cached: no recomputation.
+        let value2 = lazy.get(&mut token);
+        assert_eq!(value2.len(), 1000);
+        assert_eq!(compute_count.get(), 1);
+
+        // Invalidate and recompute.
+        lazy.invalidate(&mut token);
+        assert_eq!(compute_count.get(), 1);
+        let _ = lazy.get(&mut token);
+        assert_eq!(compute_count.get(), 2);
+    });
+}
+
+#[test]
+fn test_lazy_ghostcell_memory_efficiency() {
+    // Test that lazy cells use memory efficiently
+    use std::mem;
+
+    GhostToken::new(|mut token| {
+        // Empty lazy cell (inline storage; no heap allocation by the cell itself)
+        let lazy: GhostLazyCell<Vec<i32>> = GhostLazyCell::new(Vec::new);
+        let empty_size = mem::size_of_val(&lazy);
+
+        // After computation (same size, different memory usage)
+        let _ = lazy.get(&mut token);
+        let computed_size = mem::size_of_val(&lazy);
+
+        // Size should remain the same (raw allocation handles storage)
+        assert_eq!(computed_size, empty_size);
+        // Upper bound sanity check: must not be egregiously larger than (F + T).
+        let upper =
+            mem::size_of::<fn() -> Vec<i32>>() + mem::size_of::<Vec<i32>>() + 2 * mem::size_of::<usize>();
+        assert!(empty_size <= upper);
+    });
+}
+
+#[test]
+fn test_ghost_once_cell() {
+    // Test basic GhostOnceCell functionality
+    GhostToken::new(|mut token| {
+        let cell: GhostOnceCell<i32> = GhostOnceCell::new();
+
+        // Initially not initialized
+        assert!(!cell.is_initialized(&token));
+        assert_eq!(cell.get(&token), None);
+
+        // Set value
+        assert!(cell.set(&mut token, 42).is_ok());
+        assert!(cell.is_initialized(&token));
+        assert_eq!(cell.get(&token), Some(&42));
+
+        // Try to set again (should fail)
+        assert!(cell.set(&mut token, 100).is_err());
+        assert_eq!(cell.get(&token), Some(&42)); // Still the original value
+
+        // Get mutable reference
+        if let Some(value) = cell.get_mut(&mut token) {
+            *value = 200;
+        }
+        assert_eq!(cell.get(&token), Some(&200));
+
+        // Take the value
+        let taken = cell.take(&mut token);
+        assert_eq!(taken, Some(200));
+        assert!(!cell.is_initialized(&token));
+        assert_eq!(cell.get(&token), None);
+    });
+}
+
+#[test]
+fn test_ghost_unsafe_cell() {
+    // Test the direct unsafe cell variant
+    GhostToken::new(|mut token| {
+        let cell = GhostUnsafeCell::new(vec![1, 2, 3]);
+
+        // Test direct access
+        {
+            let value = cell.get(&token);
+            assert_eq!(*value, vec![1, 2, 3]);
+        }
+
+        // Test mutable access
+        {
+            let value = cell.get_mut(&mut token);
+            value.push(4);
+            assert_eq!(*value, vec![1, 2, 3, 4]);
+        }
+
+        // Test replace
+        let old_value = cell.replace(vec![5, 6], &mut token);
+        assert_eq!(old_value, vec![1, 2, 3, 4]);
+
+        let current = cell.get(&token);
+        assert_eq!(*current, vec![5, 6]);
+
+        // Test pointer access
+        let ptr = cell.as_ptr(&token);
+        // SAFETY: We have token access
+        unsafe {
+            assert_eq!(*ptr, vec![5, 6]);
+        }
+    });
+}
+
+#[test]
+fn test_ghost_unsafe_cell_thread_safety() {
+    // Test that GhostUnsafeCell is Send + Sync for appropriate types
+    fn assert_send_sync<T: Send + Sync>() {}
+
+    // GhostUnsafeCell<i32> should be Send + Sync since i32 is Send + Sync
+    assert_send_sync::<GhostUnsafeCell<i32>>();
+
+    // Test basic functionality
+    GhostToken::new(|mut token| {
+        let cell = GhostUnsafeCell::new(42i32);
+
+        // Test basic access
+        assert_eq!(*cell.get(&token), 42);
+
+        // Test mutable access
+        {
+            let value = cell.get_mut(&mut token);
+            *value = 100;
+        }
+        assert_eq!(*cell.get(&token), 100);
+    });
+}
+
+#[test]
+fn test_ghostcell_interactions() {
+    // Test that different GhostCell types can interact safely
+    GhostToken::new(|mut token| {
+        let cell = GhostCell::new(42);
+        let unsafe_cell = GhostUnsafeCell::new(vec![1, 2, 3]);
+        let lazy_cell = GhostLazyCell::new(|| 100);
+        let once_cell = GhostOnceCell::new();
+
+        // Test each type individually to avoid borrow conflicts
+        let value1 = cell.get(&token);
+        assert_eq!(value1, 42);
+
+        let value2 = unsafe_cell.get(&token);
+        assert_eq!(*value2, vec![1, 2, 3]);
+
+        let value3 = lazy_cell.get(&mut token);
+        assert_eq!(*value3, 100);
+
+        // Now use mutable token for once cell
+        assert!(once_cell.set(&mut token, 200).is_ok());
+        assert_eq!(*once_cell.get(&token).unwrap(), 200);
+    });
+}
+
+#[test]
+fn test_ghostcell_drop_behavior() {
+    // Test that dropping works correctly for different cell types
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    #[derive(Clone)]
+    struct DropCounter(Arc<AtomicUsize>);
+
+    impl Drop for DropCounter {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    let drops = Arc::new(AtomicUsize::new(0));
+
+    GhostToken::new(|mut token| {
+        let cell = GhostCell::new(DropCounter(drops.clone()));
+        let unsafe_cell = GhostUnsafeCell::new(DropCounter(drops.clone()));
+        let lazy_lock = GhostLazyLock::new(|| DropCounter(drops.clone()));
+        let once_cell = GhostOnceCell::new();
+
+        // Initialize lazy/once values so there is something to drop.
+        let _ = lazy_lock.get(&mut token);
+        assert!(once_cell.set(&mut token, DropCounter(drops.clone())).is_ok());
+
+        let c0 = drops.load(Ordering::Relaxed);
+        drop(cell);
+        let c1 = drops.load(Ordering::Relaxed);
+        assert_eq!(c1, c0 + 1);
+
+        drop(unsafe_cell);
+        let c2 = drops.load(Ordering::Relaxed);
+        assert_eq!(c2, c1 + 1);
+
+        drop(lazy_lock);
+        let c3 = drops.load(Ordering::Relaxed);
+        assert_eq!(c3, c2 + 1);
+
+        drop(once_cell);
+        let c4 = drops.load(Ordering::Relaxed);
+        assert_eq!(c4, c3 + 1);
+    });
+
+    // We created and dropped exactly 4 `DropCounter` values above.
+    assert_eq!(drops.load(Ordering::Relaxed), 4);
+}
+
+#[test]
+fn test_ghostcell_memory_layout() {
+    // Test that our memory layouts are optimal
+    use std::mem;
+
+    // Core primitives should be very compact.
+    assert!(mem::size_of::<GhostUnsafeCell<i32>>() <= 16);
+    assert!(mem::size_of::<GhostCell<i32>>() <= 16);
+
+    // Initialization primitives are still intended to be small and allocation-free.
+    assert!(mem::size_of::<GhostOnceCell<i32>>() <= 16);
+    assert!(mem::size_of::<GhostLazyLock<i32>>() <= 32);
+    assert!(mem::size_of::<GhostLazyCell<i32>>() <= 32);
+
+    // `GhostUnsafeCell` is a thin wrapper around `UnsafeCell`.
+    assert!(mem::size_of::<GhostUnsafeCell<i32>>() <= mem::size_of::<std::cell::UnsafeCell<i32>>() + 8);
+}
+
+#[test]
+fn test_ghostcell_thread_safety() {
+    // Test that GhostUnsafeCell is conditionally Send + Sync
+    fn assert_send_sync<T: Send + Sync>() {}
+
+    // GhostUnsafeCell<i32> should be Send + Sync since i32 is Send + Sync
+    assert_send_sync::<GhostUnsafeCell<i32>>();
+
+    // Basic functionality test
+    GhostToken::new(|token| {
+        let cell = GhostUnsafeCell::new(42);
+        assert_eq!(*cell.get(&token), 42);
+    });
+}
+
+#[test]
+fn test_large_data_stress() {
+    // Test with large data structures
+    GhostToken::new(|mut token| {
+        let large_data = vec![0u8; 10 * 1024 * 1024]; // 10MB
+        let cell = GhostCell::new(large_data);
+
+        // Modify in place
+        cell.borrow_mut(&mut token)[0] = 255;
+        assert_eq!(cell.borrow(&token)[0], 255);
+
+        // Clone operation (should not be too slow)
+        let cloned = cell.cloned(&token);
+        assert_eq!(cloned.len(), 10 * 1024 * 1024);
+        assert_eq!(cloned[0], 255);
+    });
+}

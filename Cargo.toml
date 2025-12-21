@@ -1,0 +1,36 @@
+[package]
+name = "halo"
+version = "0.1.0"
+edition = "2021"
+description = "A protective toolkit for safe, high-performance data structures using ghost tokens"
+authors = ["Ryan Clanton"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ryanclanton/halo"
+keywords = ["rust", "interior-mutability", "ghost-tokens", "branded-types", "zero-copy", "concurrency", "data-structures"]
+categories = ["data-structures", "memory-management", "concurrency", "algorithms"]
+
+[dependencies]
+# Intentionally minimal: core primitives only.
+
+[features]
+default = []
+proptest = []
+
+[dev-dependencies]
+criterion = "0.5"
+proptest = "1.2"
+
+[[bench]]
+name = "halo_benchmark"
+harness = false
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+debug = false
+
+[profile.bench]
+inherits = "release"
+debug = true

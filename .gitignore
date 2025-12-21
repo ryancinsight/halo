@@ -1,0 +1,14 @@
+/target/
+/criterion-data/
+
+# Rust / Cargo
+**/*.rs.bk
+Cargo.lock
+
+# IDEs
+/.vscode/
+/.idea/
+
+# OS
+.DS_Store
+Thumbs.db
