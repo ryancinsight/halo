@@ -121,6 +121,9 @@ fn main() {
             "ghost_parallel_reachable_lockfree_worklist_batched_hi",
             "High-contention reachability: Chase–Lev deque vs batched Treiber stack",
         ),
+        ("branded_vec_push_pop", "std_vec_push_pop", "BrandedVec vs std::vec::Vec (push/pop)"),
+        ("branded_vec_deque_push_pop", "std_vec_deque_push_pop", "BrandedVecDeque vs std::collections::VecDeque (push/pop)"),
+        ("branded_hash_map_insert_get", "std_hash_map_insert_get", "BrandedHashMap vs std::collections::HashMap (insert/get)"),
     ];
 
     let mut missing = Vec::new();

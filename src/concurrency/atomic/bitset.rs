@@ -39,6 +39,7 @@ impl<'brand> GhostAtomicBitset<'brand> {
     /// Panics if `bit >= len_bits()`.
     pub fn is_set(&self, bit: usize) -> bool {
         assert!(bit < self.bits);
+        // SAFETY: index checked above.
         unsafe { self.is_set_unchecked(bit) }
     }
 
@@ -48,6 +49,7 @@ impl<'brand> GhostAtomicBitset<'brand> {
     /// Panics if `bit >= len_bits()`.
     pub fn test_and_set(&self, bit: usize, order: Ordering) -> bool {
         assert!(bit < self.bits);
+        // SAFETY: index checked above.
         unsafe { self.test_and_set_unchecked(bit, order) }
     }
 
@@ -56,6 +58,7 @@ impl<'brand> GhostAtomicBitset<'brand> {
     #[inline(always)]
     pub unsafe fn is_set_unchecked(&self, bit: usize) -> bool {
         let (word, mask) = bit_word_mask(bit);
+        // SAFETY: word index derived from bit < self.bits.
         (self.words.get_unchecked(word).load(Ordering::Relaxed) & mask) != 0
     }
 
@@ -64,12 +67,13 @@ impl<'brand> GhostAtomicBitset<'brand> {
     #[inline(always)]
     pub unsafe fn test_and_set_unchecked(&self, bit: usize, order: Ordering) -> bool {
         let (word, mask) = bit_word_mask(bit);
+        // SAFETY: word index derived from bit < self.bits.
         let prev = self.fetch_or_word_unchecked(word, mask, order);
         (prev & mask) == 0
     }
 
     /// # Safety
-    /// Caller must ensure `word < self.word_len()`.
+    /// Caller must ensure `word < self.words.len()`.
     #[inline(always)]
     pub(crate) unsafe fn fetch_or_word_unchecked(
         &self,
@@ -77,6 +81,7 @@ impl<'brand> GhostAtomicBitset<'brand> {
         mask: usize,
         order: Ordering,
     ) -> usize {
+        // SAFETY: caller guarantees word index is valid.
         self.words.get_unchecked(word).fetch_or(mask, order)
     }
 }

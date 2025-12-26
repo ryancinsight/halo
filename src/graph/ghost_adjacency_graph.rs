@@ -13,24 +13,36 @@ use core::sync::atomic::Ordering;
 use crate::{
     concurrency::atomic::GhostAtomicBool,
     concurrency::worklist::{GhostChaseLevDeque, GhostTreiberStack},
-    GhostCell, GhostToken,
+    collections::branded_vec::BrandedVec,
+    GhostToken,
 };
 
 /// A dynamic adjacency list graph whose edges are branded.
 ///
 /// Allows efficient insertion/deletion of edges and vertices at runtime.
 /// Each adjacency list is independently mutable through ghost tokens.
+///
+/// ### Performance Characteristics
+/// | Operation | Complexity | Notes |
+/// |-----------|------------|-------|
+/// | `add_vertex` | \(O(1)\) amortized | Appends to internal vectors |
+/// | `remove_vertex` | \(O(n + m)\) | Must scan all adjacency lists |
+/// | `add_edge` | \(O(\text{out-degree})\) | Checks for existence first |
+/// | `remove_edge` | \(O(\text{out-degree})\) | Linear scan of adjacency list |
+/// | `out_degree` | \(O(1)\) | returns `Vec::len` |
+/// | `in_degree` | \(O(n + m)\) | Scans all adjacency lists |
 pub struct GhostAdjacencyGraph<'brand> {
-    adjacency: Vec<GhostCell<'brand, Vec<usize>>>,
+    adjacency: BrandedVec<'brand, Vec<usize>>,
     visited: Vec<GhostAtomicBool<'brand>>,
 }
 
 impl<'brand> GhostAdjacencyGraph<'brand> {
     /// Creates an empty graph with `vertex_count` vertices and zero edges.
     pub fn new(vertex_count: usize) -> Self {
-        let adjacency = (0..vertex_count)
-            .map(|_| GhostCell::new(Vec::new()))
-            .collect();
+        let mut adjacency = BrandedVec::with_capacity(vertex_count);
+        for _ in 0..vertex_count {
+            adjacency.push(Vec::new());
+        }
         let visited = (0..vertex_count)
             .map(|_| GhostAtomicBool::new(false))
             .collect();
@@ -49,10 +61,10 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
                 assert!(v < vertex_count, "edge {u}->{v} out of bounds for n={vertex_count}");
             }
         }
-        let adjacency = adjacency_lists
-            .into_iter()
-            .map(GhostCell::new)
-            .collect();
+        let mut adjacency = BrandedVec::with_capacity(vertex_count);
+        for list in adjacency_lists {
+            adjacency.push(list);
+        }
         let visited = (0..vertex_count)
             .map(|_| GhostAtomicBool::new(false))
             .collect();
@@ -65,7 +77,7 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
     /// Returns the index of the new vertex.
     pub fn add_vertex(&mut self) -> usize {
         let idx = self.adjacency.len();
-        self.adjacency.push(GhostCell::new(Vec::new()));
+        self.adjacency.push(Vec::new());
         self.visited.push(GhostAtomicBool::new(false));
         idx
     }
@@ -78,11 +90,11 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
         assert!(vertex < self.adjacency.len(), "vertex {vertex} out of bounds");
 
         // Remove incoming edges (u -> vertex), and shift indices above `vertex` down by 1.
-        for (u, cell) in self.adjacency.iter().enumerate() {
+        for u in 0..self.adjacency.len() {
             if u == vertex {
                 continue;
             }
-            let nbrs = cell.borrow_mut(token);
+            let nbrs = self.adjacency.borrow_mut(token, u);
             // Remove all occurrences of `vertex`.
             nbrs.retain(|&v| v != vertex);
             // Shift indices above removed vertex.
@@ -105,7 +117,7 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
     pub fn add_edge(&self, token: &mut GhostToken<'brand>, from: usize, to: usize) {
         assert!(from < self.vertex_count(), "from vertex {from} out of bounds");
         assert!(to < self.vertex_count(), "to vertex {to} out of bounds");
-        let nbrs = self.adjacency[from].borrow_mut(token);
+        let nbrs = self.adjacency.borrow_mut(token, from);
         if !nbrs.iter().any(|&v| v == to) {
             nbrs.push(to);
         }
@@ -118,7 +130,7 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
     pub fn remove_edge(&self, token: &mut GhostToken<'brand>, from: usize, to: usize) -> bool {
         assert!(from < self.vertex_count(), "from vertex {from} out of bounds");
         assert!(to < self.vertex_count(), "to vertex {to} out of bounds");
-        let nbrs = self.adjacency[from].borrow_mut(token);
+        let nbrs = self.adjacency.borrow_mut(token, from);
         let before = nbrs.len();
         nbrs.retain(|&v| v != to);
         before != nbrs.len()
@@ -139,7 +151,7 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
     /// Returns the out-degree of a vertex.
     pub fn out_degree(&self, token: &GhostToken<'brand>, vertex: usize) -> usize {
         assert!(vertex < self.vertex_count(), "vertex {vertex} out of bounds");
-        self.adjacency[vertex].borrow(token).len()
+        self.adjacency.borrow(token, vertex).len()
     }
 
     /// Returns the in-degree of a vertex.
@@ -168,7 +180,7 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
         vertex: usize,
     ) -> impl Iterator<Item = usize> + 'a {
         assert!(vertex < self.vertex_count(), "vertex {vertex} out of bounds");
-        self.adjacency[vertex].borrow(token).iter().copied()
+        self.adjacency.borrow(token, vertex).iter().copied()
     }
 
     /// Returns the in-neighbors of a vertex.
@@ -294,23 +306,23 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
         }
 
         // Iterative DFS to compute finishing order.
-        let mut visited = vec![false; n];
+        self.reset_visited();
         let mut order = Vec::with_capacity(n);
         for start in 0..n {
-            if visited[start] {
+            if self.visited[start].load(Ordering::Relaxed) {
                 continue;
             }
             // stack of (node, neighbor_iterator)
             let mut stack = Vec::new();
-            visited[start] = true;
+            self.visited[start].store(true, Ordering::Relaxed);
             stack.push((start, self.out_neighbors(token, start)));
 
             while let Some((u, mut it)) = stack.pop() {
                 if let Some(v) = it.next() {
                     // Push back the node and its updated iterator.
                     stack.push((u, it));
-                    if !visited[v] {
-                        visited[v] = true;
+                    if !self.visited[v].load(Ordering::Relaxed) {
+                        self.visited[v].store(true, Ordering::Relaxed);
                         stack.push((v, self.out_neighbors(token, v)));
                     }
                 } else {
@@ -321,6 +333,7 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
         }
 
         // Second pass on transpose graph in reverse finishing order.
+        // We reuse the `visited` array by treating "not visited" as "comp[v] == usize::MAX".
         let mut comp = vec![usize::MAX; n];
         let mut cid = 0usize;
         for &start in order.iter().rev() {

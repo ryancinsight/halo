@@ -20,6 +20,11 @@ impl<'brand, T> GhostCell<'brand, T> {
             inner: GhostUnsafeCell::new(value),
         }
     }
+
+    /// Consumes the cell and returns the contained value.
+    pub fn into_inner(self) -> T {
+        self.inner.into_inner()
+    }
 }
 
 impl<'brand, T: Default> Default for GhostCell<'brand, T> {

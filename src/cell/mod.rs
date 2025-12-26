@@ -11,4 +11,4 @@ pub mod raw;
 
 pub use ghost::GhostCell;
 pub use lazy::{GhostLazyCell, GhostLazyLock, GhostOnceCell};
-pub use raw::GhostUnsafeCell;
+pub use raw::{GhostUnsafeCell, GhostCell as RawGhostCell, GhostRefCell};

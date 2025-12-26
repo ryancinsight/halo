@@ -23,6 +23,15 @@ use crate::{
 ///
 /// Edges only exist between left and right vertex sets, never within sets.
 /// This enables efficient matching and flow algorithms with branded safety.
+///
+/// ### Performance Characteristics
+/// | Operation | Complexity | Notes |
+/// |-----------|------------|-------|
+/// | `from_left_adjacency` | \(O(n + m)\) | Builds CSR and CSC representation |
+/// | `left_neighbors` | \(O(1)\) | Out-neighbors of left vertices |
+/// | `right_neighbors` | \(O(1)\) | In-neighbors of right vertices (transpose) |
+/// | `left_degree`/`right_degree` | \(O(1)\) | Using cached offsets |
+/// | `maximum_matching` | \(O(m\sqrt{n})\) | Hopcroft-Karp algorithm |
 pub struct GhostBipartiteGraph<'brand, const EDGE_CHUNK: usize> {
     left_count: usize,
     right_count: usize,
@@ -165,13 +174,17 @@ impl<'brand, const EDGE_CHUNK: usize> GhostBipartiteGraph<'brand, EDGE_CHUNK> {
     /// Returns the degree of a left vertex.
     pub fn left_degree(&self, left: usize) -> usize {
         assert!(left < self.left_count, "left vertex {left} out of bounds");
-        self.left_neighbors(left).count()
+        let start = self.left_to_right_offsets[left];
+        let end = self.left_to_right_offsets[left + 1];
+        end - start
     }
 
     /// Returns the degree of a right vertex.
     pub fn right_degree(&self, right: usize) -> usize {
         assert!(right < self.right_count, "right vertex {right} out of bounds");
-        self.right_neighbors(right).count()
+        let start = self.right_to_left_offsets[right];
+        let end = self.right_to_left_offsets[right + 1];
+        end - start
     }
 
     /// Checks if an edge exists from left to right vertex.

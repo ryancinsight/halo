@@ -22,6 +22,17 @@ use core::sync::atomic::AtomicUsize;
 /// The branding is *not* required for atomic correctness; it is used to keep this
 /// graph inside the Ghost branded ecosystem and prevent accidental mixing of state
 /// across unrelated token scopes in larger designs.
+///
+/// ### Performance Characteristics
+/// | Operation | Complexity | Notes |
+/// |-----------|------------|-------|
+/// | `from_adjacency` | \(O(n + m)\) | Builds CSR from adjacency list |
+/// | `neighbors` | \(O(1)\) | Returns iterator over out-neighbors |
+/// | `in_neighbors` | \(O(n + m)\) | **Slow**: scans all edges in CSR |
+/// | `degree` | \(O(1)\) | Returns out-degree |
+/// | `has_edge` | \(O(\text{out-degree})\) | Linear scan of neighbors |
+/// | `dfs`/`bfs` | \(O(n + m)\) | Standard traversals |
+/// | `parallel_reachable_count` | \(O(n + m)\) | Lock-free concurrent traversal |
 pub struct GhostCsrGraph<'brand, const EDGE_CHUNK: usize> {
     offsets: Vec<usize>,
     edges: ChunkedVec<usize, EDGE_CHUNK>,
@@ -362,11 +373,14 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCsrGraph<'brand, EDGE_CHUNK> {
     /// This is safe to run concurrently from multiple threads: the only shared mutation
     /// is `visited` (atomics). The returned order is deterministic only for single-threaded
     /// execution.
+    ///
+    /// **Time complexity**: \(O(n + m)\)
+    /// **Space complexity**: \(O(n)\) for stack and result
     pub fn dfs(&self, start: usize) -> Vec<usize> {
         assert!(start < self.node_count(), "start out of bounds");
 
-        let mut out = Vec::new();
-        let mut stack = Vec::new();
+        let mut out = Vec::with_capacity(self.node_count());
+        let mut stack = Vec::with_capacity(64);
 
         if self.try_visit(start) {
             stack.push(start);
@@ -400,10 +414,13 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCsrGraph<'brand, EDGE_CHUNK> {
     /// This is the same traversal as [`dfs`](Self::dfs), but avoids building an output
     /// vector and therefore is a better baseline for benchmarking “reachable count”
     /// style algorithms.
+    ///
+    /// **Time complexity**: \(O(n + m)\)
+    /// **Space complexity**: \(O(n)\) for stack
     pub fn dfs_count(&self, start: usize) -> usize {
         assert!(start < self.node_count(), "start out of bounds");
 
-        let mut stack = Vec::new();
+        let mut stack = Vec::with_capacity(64);
         let mut count = 0usize;
 
         if self.try_visit(start) {
@@ -431,6 +448,40 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCsrGraph<'brand, EDGE_CHUNK> {
         }
 
         count
+    }
+
+    /// Breadth-first traversal using a queue, guarded by an atomic visited bitmap.
+    ///
+    /// **Time complexity**: \(O(n + m)\)
+    /// **Space complexity**: \(O(n)\) for queue and result
+    pub fn bfs(&self, start: usize) -> Vec<usize> {
+        assert!(start < self.node_count(), "start out of bounds");
+
+        let mut out = Vec::with_capacity(self.node_count());
+        let mut q = std::collections::VecDeque::with_capacity(64);
+
+        if self.try_visit(start) {
+            q.push_back(start);
+        } else {
+            return out;
+        }
+
+        while let Some(u) = q.pop_front() {
+            out.push(u);
+
+            let start_i = unsafe { *self.offsets.get_unchecked(u) };
+            let end_i = unsafe { *self.offsets.get_unchecked(u + 1) };
+            let mut i = start_i;
+            while i < end_i {
+                let v = unsafe { *self.edges.get_unchecked(i) };
+                if unsafe { self.try_visit_unchecked(v) } {
+                    q.push_back(v);
+                }
+                i += 1;
+            }
+        }
+
+        out
     }
 
     /// Parallel reachability count using a lock-free worklist + atomic visited.

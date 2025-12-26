@@ -78,3 +78,4 @@ Artifacts are under:
 - Optimized `GhostAtomicBitset` bit indexing to use shifts/masks instead of division/mod on the hot path.
 - Reworked CSR bitset-based parallel reachability to group neighbor updates by bitset-word (reduces atomic contention from word sharing).
 
+

@@ -64,6 +64,29 @@ impl<'brand, T> BrandedVec<'brand, T> {
         self.inner.pop()
     }
 
+    /// Inserts an element at position `index`.
+    pub fn insert(&mut self, index: usize, value: T) {
+        self.inner.insert(index, GhostCell::new(value));
+    }
+
+    /// Removes and returns the element at position `index`.
+    pub fn remove(&mut self, index: usize) -> GhostCell<'brand, T> {
+        self.inner.remove(index)
+    }
+
+    /// Removes an element from the vector and returns it, replaces it with the last element.
+    pub fn swap_remove(&mut self, index: usize) -> GhostCell<'brand, T> {
+        self.inner.swap_remove(index)
+    }
+
+    /// Retains only the elements specified by the predicate.
+    pub fn retain<F>(&mut self, token: &mut GhostToken<'brand>, mut f: F)
+    where
+        F: FnMut(&mut T) -> bool,
+    {
+        self.inner.retain(|c| f(c.borrow_mut(token)));
+    }
+
     /// Returns a token-gated shared reference to element `idx`, if in bounds.
     pub fn get<'a>(&'a self, token: &'a GhostToken<'brand>, idx: usize) -> Option<&'a T> {
         self.inner.get(idx).map(|c| c.borrow(token))
@@ -108,9 +131,9 @@ impl<'brand, T> BrandedVec<'brand, T> {
     /// each `&mut T` is scoped to one callback invocation, which preserves the
     /// token linearity invariant without requiring an `Iterator<Item = &mut T>`.
     pub fn for_each_mut(&self, token: &mut GhostToken<'brand>, mut f: impl FnMut(&mut T)) {
-        for i in 0..self.len() {
+        for cell in &self.inner {
             // Each borrow is scoped to this loop iteration.
-            let x = self.borrow_mut(token, i);
+            let x = cell.borrow_mut(token);
             f(x);
         }
     }
@@ -160,4 +183,5 @@ mod tests {
         });
     }
 }
+
 

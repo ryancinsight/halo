@@ -2,35 +2,49 @@
 name = "halo"
 version = "0.1.0"
 edition = "2021"
+authors = ["Ryan Clanton <ryanclanton@outlook.com>"]
 description = "A protective toolkit for safe, high-performance data structures using ghost tokens"
-authors = ["Ryan Clanton"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/ryanclanton/halo"
-keywords = ["rust", "interior-mutability", "ghost-tokens", "branded-types", "zero-copy", "concurrency", "data-structures"]
-categories = ["data-structures", "memory-management", "concurrency", "algorithms"]
+repository = "https://github.com/ryancinsight/halo"
+readme = "README.md"
+keywords = ["ghost-cell", "data-structures", "concurrency", "memory-safety", "performance"]
+categories = ["data-structures", "concurrency", "memory-management"]
 
 [dependencies]
-# Intentionally minimal: core primitives only.
-
-[features]
-default = []
-proptest = []
+anyhow = "1.0"
+crossbeam-utils = "0.8"
+rayon = { version = "1.8", optional = true }
+tracing = { version = "0.1", optional = true }
+serde = { version = "1.0", optional = true, features = ["derive"] }
+num-traits = "0.2"
+zerocopy = "0.7"
 
 [dev-dependencies]
 criterion = "0.5"
-proptest = "1.2"
+proptest = "1.4"
+loom = "0.7"
 
 [[bench]]
 name = "halo_benchmark"
 harness = false
+
+[[bench]]
+name = "ghostcell_benchmark"
+harness = false
+
+[[bench]]
+name = "collections_benchmark"
+harness = false
+
+[features]
+default = []
+parallel = ["rayon"]
+tracing = ["dep:tracing"]
+serde = ["dep:serde"]
 
 [profile.release]
 opt-level = 3
 lto = true
 codegen-units = 1
 panic = "abort"
-debug = false
-
-[profile.bench]
-inherits = "release"
 debug = true

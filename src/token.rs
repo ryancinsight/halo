@@ -67,6 +67,23 @@ impl<'brand> GhostToken<'brand> {
     pub const fn is_compatible(&self, _other: &Self) -> bool {
         true // Type system ensures compatibility at compile time
     }
+
+    /// Returns whether the token represents a valid branding scope.
+    ///
+    /// This is always true for valid tokens, but allows for const evaluation.
+    pub const fn is_valid(&self) -> bool {
+        true
+    }
+
+    /// Creates a token from a raw pointer (unsafe, zero-cost operation).
+    ///
+    /// # Safety
+    /// This function is unsafe because it allows creating tokens without
+    /// proper scoping. Use only when you can guarantee the branding invariant.
+    #[inline(always)]
+    pub const unsafe fn from_raw(_ptr: *const ()) -> Self {
+        Self(PhantomData)
+    }
 }
 
 // NOTE:

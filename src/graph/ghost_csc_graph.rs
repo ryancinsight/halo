@@ -25,6 +25,15 @@ use crate::{
 /// The branding is *not* required for atomic correctness; it is used to keep this
 /// graph inside the Ghost branded ecosystem and prevent accidental mixing of state
 /// across unrelated token scopes in larger designs.
+///
+/// ### Performance Characteristics
+/// | Operation | Complexity | Notes |
+/// |-----------|------------|-------|
+/// | `from_adjacency` | \(O(n + m)\) | Builds CSC (transpose) from adjacency list |
+/// | `in_neighbors` | \(O(1)\) | Returns iterator over incoming neighbors |
+/// | `in_degree` | \(O(1)\) | Returns in-degree |
+/// | `has_edge` | \(O(\text{in-degree})\) | Linear scan of in-neighbors |
+/// | `to_csr` | \(O(n + m)\) | Converts back to CSR |
 pub struct GhostCscGraph<'brand, const EDGE_CHUNK: usize> {
     col_offsets: Vec<usize>,
     row_indices: ChunkedVec<usize, EDGE_CHUNK>,

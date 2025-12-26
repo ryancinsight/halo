@@ -950,6 +950,284 @@ fn bench_scoped_parallel_patterns(c: &mut Criterion) {
     });
 }
 
+use std::collections::{BTreeMap, HashMap, VecDeque};
+use halo::collections::{BrandedVec, BrandedVecDeque, BrandedHashMap, BrandedArena};
+use halo::{RawGhostCell, GhostRefCell, GhostToken};
+
+fn bench_branded_vec(c: &mut Criterion) {
+    const N: usize = 1000;
+    c.bench_function("std_vec_push_pop", |b| {
+        b.iter(|| {
+            let mut v = Vec::new();
+            for i in 0..N {
+                v.push(i);
+            }
+            while let Some(_) = v.pop() {}
+        });
+    });
+
+    c.bench_function("branded_vec_push_pop", |b| {
+        b.iter(|| {
+            let mut v = BrandedVec::new();
+            for i in 0..N {
+                v.push(i);
+            }
+            while let Some(_) = v.pop() {}
+        });
+    });
+}
+
+fn bench_branded_vec_deque(c: &mut Criterion) {
+    const N: usize = 1000;
+    c.bench_function("std_vec_deque_push_pop", |b| {
+        b.iter(|| {
+            let mut v = VecDeque::new();
+            for i in 0..N {
+                v.push_back(i);
+            }
+            for _ in 0..N {
+                v.pop_front();
+            }
+        });
+    });
+
+    c.bench_function("branded_vec_deque_push_pop", |b| {
+        b.iter(|| {
+            let mut v = BrandedVecDeque::new();
+            for i in 0..N {
+                v.push_back(i);
+            }
+            for _ in 0..N {
+                v.pop_front();
+            }
+        });
+    });
+}
+
+fn bench_branded_hash_map(c: &mut Criterion) {
+    const N: usize = 1000;
+    c.bench_function("std_hash_map_insert_get", |b| {
+        b.iter(|| {
+            let mut m = HashMap::new();
+            for i in 0..N {
+                m.insert(i, i);
+            }
+            for i in 0..N {
+                black_box(m.get(&i));
+            }
+        });
+    });
+
+    c.bench_function("branded_hash_map_insert_get", |b| {
+        GhostToken::new(|token| {
+            b.iter(|| {
+                let mut m = BrandedHashMap::new();
+                for i in 0..N {
+                    m.insert(i, i);
+                }
+                for i in 0..N {
+                    black_box(m.get(&token, &i));
+                }
+            });
+        });
+    });
+}
+
+fn bench_branded_arena(c: &mut Criterion) {
+    const N: usize = 1000;
+
+    // Standard generational arena (default threshold)
+    c.bench_function("branded_arena_generational", |b| {
+        b.iter(|| {
+            let mut arena = BrandedArena::<u64>::new();
+            for i in 0..N {
+                arena.alloc(i as u64);
+            }
+        });
+    });
+
+    // Aggressive generational (low threshold)
+    c.bench_function("branded_arena_aggressive_gen", |b| {
+        b.iter(|| {
+            let mut arena = BrandedArena::<u64>::with_generation_threshold(100);
+            for i in 0..N {
+                arena.alloc(i as u64);
+            }
+        });
+    });
+
+    // Conservative generational (high threshold)
+    c.bench_function("branded_arena_conservative_gen", |b| {
+        b.iter(|| {
+            let mut arena = BrandedArena::<u64>::with_generation_threshold(N * 2);
+            for i in 0..N {
+                arena.alloc(i as u64);
+            }
+        });
+    });
+
+    // Bulk operations benchmark
+    c.bench_function("branded_arena_bulk_ops", |b| {
+        GhostToken::new(|mut token| {
+            let mut arena = BrandedArena::<u64>::new();
+            for i in 0..N {
+                arena.alloc(i as u64);
+            }
+
+            b.iter(|| {
+                let mut sum = 0u64;
+                arena.for_each_value(&token, |val| sum += val);
+                sum
+            });
+        });
+    });
+
+    // Bulk allocation benchmark - tests snmalloc-inspired batch allocation
+    c.bench_function("branded_arena_bulk_alloc", |b| {
+        b.iter(|| {
+            let mut arena = BrandedArena::<u64>::new();
+            let values: Vec<u64> = (0..N).map(|i| i as u64).collect();
+            let _keys = arena.alloc_batch(values);
+        });
+    });
+
+    // Adaptive threshold benchmark - tests snmalloc-inspired adaptive memory management
+    c.bench_function("branded_arena_adaptive_threshold", |b| {
+        let mut arena = BrandedArena::<u64>::new();
+        // Pre-populate with mixed nursery/mature allocation pattern
+        for i in 0..N {
+            arena.alloc(i as u64);
+        }
+
+        b.iter(|| {
+            arena.adapt_threshold();
+        });
+    });
+
+    // Maintenance operations benchmark - tests mimalloc-inspired periodic optimization
+    c.bench_function("branded_arena_maintenance", |b| {
+        let mut arena = BrandedArena::<u64>::new();
+        // Pre-populate
+        for i in 0..N/10 { // Smaller dataset for maintenance
+            arena.alloc(i as u64);
+        }
+
+        b.iter(|| {
+            arena.maintenance();
+        });
+    });
+
+    // Epoch tracking benchmark - tests mimalloc-inspired deferred reclamation foundation
+    c.bench_function("branded_arena_epoch_tracking", |b| {
+        let mut arena = BrandedArena::<u64>::new();
+
+        b.iter(|| {
+            for i in 0..100 { // Smaller inner loop for epoch measurement
+                arena.alloc(i as u64);
+                black_box(arena.current_epoch());
+            }
+        });
+    });
+
+    // Size-classed allocation comparison - tests different chunk sizes
+    c.bench_function("branded_arena_size_class_small", |b| {
+        b.iter(|| {
+            let mut arena: BrandedArena<u64, 32> = BrandedArena::new(); // Small chunks
+            for i in 0..N/4 { // Fewer allocations due to smaller N
+                arena.alloc(i as u64);
+            }
+        });
+    });
+
+    c.bench_function("branded_arena_size_class_large", |b| {
+        b.iter(|| {
+            let mut arena: BrandedArena<u64, 1024> = BrandedArena::new(); // Large chunks
+            for i in 0..N/4 {
+                arena.alloc(i as u64);
+            }
+        });
+    });
+}
+
+fn bench_raw_ghost_cell(c: &mut Criterion) {
+    const N: usize = 100000;
+
+    c.bench_function("std_cell_get_set", |b| {
+        let cell = std::cell::Cell::new(0usize);
+        b.iter(|| {
+            for _ in 0..N {
+                let val = cell.get();
+                cell.set(val + 1);
+            }
+        });
+    });
+
+    c.bench_function("raw_ghost_cell_get_set", |b| {
+        GhostToken::new(|token| {
+            let cell = RawGhostCell::new(0usize);
+            b.iter(|| {
+                for _ in 0..N {
+                    let val = cell.get(&token);
+                    cell.set(&token, val + 1);
+                }
+            });
+        });
+    });
+
+    c.bench_function("raw_ghost_cell_replace", |b| {
+        GhostToken::new(|token| {
+            let cell = RawGhostCell::new(0usize);
+            b.iter(|| {
+                for i in 0..N {
+                    cell.replace(&token, i);
+                }
+            });
+        });
+    });
+}
+
+fn bench_raw_ghost_ref_cell(c: &mut Criterion) {
+    const N: usize = 10000;
+
+    c.bench_function("std_refcell_borrow", |b| {
+        let cell = std::cell::RefCell::new(0usize);
+        b.iter(|| {
+            for i in 0..N {
+                *cell.borrow_mut() = i;
+                let _val = *cell.borrow();
+            }
+        });
+    });
+
+    c.bench_function("raw_ghost_ref_cell_borrow", |b| {
+        GhostToken::new(|mut token| {
+            let cell = GhostRefCell::new(0usize);
+            b.iter(|| {
+                for i in 0..N {
+                    *cell.borrow_mut(&mut token) = i;
+                    let _val = *cell.borrow(&token);
+                }
+            });
+        });
+    });
+
+    c.bench_function("raw_ghost_ref_cell_try_borrow", |b| {
+        GhostToken::new(|mut token| {
+            let cell = GhostRefCell::new(0usize);
+            b.iter(|| {
+                for i in 0..N {
+                    if let Some(mut borrow) = cell.try_borrow_mut(&mut token) {
+                        *borrow = i;
+                    }
+                    if let Some(borrow) = cell.try_borrow(&token) {
+                        let _val = *borrow;
+                    }
+                }
+            });
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_ghostcell_basic,
@@ -967,6 +1245,12 @@ criterion_group!(
     bench_dfs_csr,
     bench_parallel_graph_traversal,
     bench_parallel_graph_traversal_high_contention,
-    bench_unsafe_cells
+    bench_unsafe_cells,
+    bench_branded_vec,
+    bench_branded_vec_deque,
+    bench_branded_hash_map,
+    bench_branded_arena,
+    bench_raw_ghost_cell,
+    bench_raw_ghost_ref_cell
 );
 criterion_main!(benches);

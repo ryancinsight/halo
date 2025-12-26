@@ -9,9 +9,24 @@ use crate::concurrency::worklist::{GhostChaseLevDeque, GhostTreiberStack};
 /// A DAG whose visited bitmap is branded.
 ///
 /// Provides topological ordering and DAG-specific algorithms.
-/// The underlying representation is CSR for efficient traversal.
+/// The underlying representation includes both CSR and CSC for efficient traversal in both directions.
+///
+/// ### Performance Characteristics
+/// | Operation | Complexity | Notes |
+/// |-----------|------------|-------|
+/// | `from_adjacency` | \(O(n + m)\) | Builds CSR and CSC representation |
+/// | `topological_sort` | \(O(n + m)\) | Kahn's algorithm (cached) |
+/// | `longest_path_lengths` | \(O(n + m)\) | DP on DAG |
+/// | `dp_compute` | \(O(n + m)\) | General DP framework |
+///
+/// ### Zero-cost Abstractions
+/// - **Const generics**: Compile-time chunk sizing for optimal memory layout
+/// - **Branded types**: Compile-time separation of graph instances
+/// - **Lazy computation**: Topological sort cached after first computation
+#[repr(C)]
 pub struct GhostDag<'brand, const EDGE_CHUNK: usize> {
     graph: crate::graph::GhostCsrGraph<'brand, EDGE_CHUNK>,
+    transpose: crate::graph::GhostCscGraph<'brand, EDGE_CHUNK>,
     topo_order: Option<Vec<usize>>,
 }
 
@@ -22,9 +37,11 @@ impl<'brand, const EDGE_CHUNK: usize> GhostDag<'brand, EDGE_CHUNK> {
     /// Panics if any edge references an out-of-bounds vertex.
     pub fn from_adjacency(adjacency: &[Vec<usize>]) -> Self {
         let graph = crate::graph::GhostCsrGraph::from_adjacency(adjacency);
+        let transpose = crate::graph::GhostCscGraph::from_adjacency(adjacency);
 
         Self {
             graph,
+            transpose,
             topo_order: None,
         }
     }
@@ -182,26 +199,26 @@ impl<'brand, const EDGE_CHUNK: usize> GhostDag<'brand, EDGE_CHUNK> {
         let topo = self.topological_sort()?.to_vec();
         let n = self.graph.node_count();
 
-        // Build predecessor lists once.
-        let mut preds: Vec<Vec<usize>> = vec![Vec::new(); n];
-        for u in 0..n {
-            for v in self.graph.neighbors(u) {
-                preds[v].push(u);
-            }
-        }
-
         let mut values: Vec<Option<T>> = (0..n).map(|_| None).collect();
         for u in topo {
-            let mut pairs: Vec<(usize, &T)> = Vec::with_capacity(preds[u].len());
-            for &p in &preds[u] {
-                let pv = values[p].as_ref().expect("topological order ensures predecessor computed");
+            // Using the cached transpose for efficient in-neighbor access.
+            let mut pairs: Vec<(usize, &T)> = Vec::with_capacity(self.transpose.in_degree(u));
+            for p in self.transpose.in_neighbors(u) {
+                let pv = values[p]
+                    .as_ref()
+                    .expect("topological order ensures predecessor computed");
                 pairs.push((p, pv));
             }
             let out = f(u, &pairs);
             values[u] = Some(out);
         }
 
-        Some(values.into_iter().map(|v| v.expect("all nodes computed")).collect())
+        Some(
+            values
+                .into_iter()
+                .map(|v| v.expect("all nodes computed"))
+                .collect(),
+        )
     }
 
     // Delegate methods to underlying graph
@@ -220,9 +237,9 @@ impl<'brand, const EDGE_CHUNK: usize> GhostDag<'brand, EDGE_CHUNK> {
         self.graph.neighbors(node)
     }
 
-    /// In-neighbors iterator (allocates a `Vec` internally).
+    /// In-neighbors iterator.
     pub fn in_neighbors(&self, node: usize) -> impl Iterator<Item = usize> + '_ {
-        self.graph.in_neighbors(node).into_iter()
+        self.transpose.in_neighbors(node)
     }
 
     /// Out-degree.
@@ -232,7 +249,7 @@ impl<'brand, const EDGE_CHUNK: usize> GhostDag<'brand, EDGE_CHUNK> {
 
     /// In-degree.
     pub fn in_degree(&self, node: usize) -> usize {
-        self.graph.in_degree(node)
+        self.transpose.in_degree(node)
     }
 
     /// Edge membership test.
