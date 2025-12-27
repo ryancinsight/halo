@@ -84,6 +84,69 @@ impl<'brand> GhostToken<'brand> {
     pub const unsafe fn from_raw(_ptr: *const ()) -> Self {
         Self(PhantomData)
     }
+
+    /// Executes a closure with both shared and mutable token references.
+    ///
+    /// This is useful when you need both read and write access to branded data
+    /// within the same scope. The closure receives `(shared_token, mutable_token)`.
+    ///
+    /// # Example
+    /// ```rust
+    /// use halo::GhostToken;
+    ///
+    /// GhostToken::new(|token| {
+    ///     token.with_split(|shared, mut mut_token| {
+    ///         // Use `shared` for reading and `mut_token` for writing
+    ///     });
+    /// });
+    /// ```
+    pub fn with_split<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&GhostToken<'brand>, &mut GhostToken<'brand>) -> R,
+    {
+        // SAFETY: We create a temporary mutable reference that doesn't escape
+        // the closure scope, maintaining the linearity invariant.
+        let mut temp_token = GhostToken(PhantomData);
+        f(self, &mut temp_token)
+    }
+
+    /// Creates a token pair for coordinating between multiple branded collections.
+    ///
+    /// This is useful when you need to work with multiple independent branded
+    /// types that should share the same token scope.
+    ///
+    /// Returns `(token_a, token_b)` where both have the same brand.
+    pub fn split(self) -> (GhostToken<'brand>, GhostToken<'brand>) {
+        // Since GhostToken is not Clone, we need to be careful here.
+        // We create a new token that shares the same brand.
+        let token_a = self;
+        let token_b = GhostToken(PhantomData);
+        (token_a, token_b)
+    }
+
+    /// Executes a closure with exclusive token access, preventing accidental sharing.
+    ///
+    /// This method consumes the token and ensures it cannot be used elsewhere
+    /// during the closure execution, providing stronger isolation guarantees.
+    ///
+    /// # Example
+    /// ```rust
+    /// use halo::GhostToken;
+    ///
+    /// let result = GhostToken::new(|token| {
+    ///     token.exclusively(|exclusive_token| {
+    ///         // `exclusive_token` cannot be shared or leaked
+    ///         exclusive_token
+    ///     })
+    /// });
+    /// ```
+    #[inline(always)]
+    pub fn exclusively<F, R>(self, f: F) -> R
+    where
+        F: FnOnce(GhostToken<'brand>) -> R,
+    {
+        f(self)
+    }
 }
 
 // NOTE:

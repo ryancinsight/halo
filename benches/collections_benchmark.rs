@@ -98,42 +98,255 @@ fn bench_branded_chunked_vec_1024(c: &mut Criterion) {
     });
 }
 
-fn bench_branded_vec_operations(c: &mut Criterion) {
-    c.bench_function("branded_vec_push_pop", |b| {
+fn bench_std_vs_branded_vec(c: &mut Criterion) {
+    let mut group = c.benchmark_group("std_vs_branded_vec");
+
+    // Push/Pop operations - create fresh collections each time
+    group.bench_function("std_vec_push_pop_1000", |b| {
         b.iter(|| {
-            let mut vec = BrandedVec::new();
+            let mut vec = Vec::with_capacity(1000);
             for i in 0..1000 {
-                vec.push(i);
+                vec.push(black_box(i));
             }
-            while let Some(_) = vec.pop() {}
+            for _ in 0..1000 {
+                black_box(vec.pop());
+            }
         });
     });
 
-    c.bench_function("branded_vec_access", |b| {
+    group.bench_function("branded_vec_push_pop_1000", |b| {
+        b.iter(|| {
+            let mut vec = BrandedVec::with_capacity(1000);
+            for i in 0..1000 {
+                vec.push(black_box(i));
+            }
+            for _ in 0..1000 {
+                black_box(vec.pop());
+            }
+        });
+    });
+
+    // Random access - pre-populate collections outside the benchmark loop
+    let std_vec: Vec<i32> = (0..1000).collect();
+    let branded_vec: BrandedVec<i32> = GhostToken::new(|_| {
+        let mut vec = BrandedVec::with_capacity(1000);
+        for i in 0..1000 {
+            vec.push(i);
+        }
+        vec
+    });
+
+    group.bench_function("std_vec_random_access_1000", |b| {
+        b.iter(|| {
+            let mut sum = 0;
+            for i in 0..1000 {
+                sum += std_vec[i % 1000];
+            }
+            black_box(sum);
+        });
+    });
+
+    group.bench_function("branded_vec_random_access_1000", |b| {
         GhostToken::new(|token| {
-            let mut vec = BrandedVec::new();
-            for i in 0..1000 {
-                vec.push(i);
-            }
             b.iter(|| {
+                let mut sum = 0;
                 for i in 0..1000 {
-                    black_box(vec.get(&token, i));
+                    sum += *branded_vec.get(&token, i % 1000).unwrap();
                 }
+                black_box(sum);
             });
         });
     });
 
-    c.bench_function("branded_vec_mutation", |b| {
-        GhostToken::new(|mut token| {
-            let mut vec = BrandedVec::new();
-            for i in 0..1000 {
-                vec.push(i);
+    // Bulk mutation - use fresh collections each time to avoid mutation accumulation
+    group.bench_function("std_vec_bulk_mutation_1000", |b| {
+        b.iter(|| {
+            let mut vec = std_vec.clone();
+            for x in &mut vec {
+                *x = black_box(*x + 1);
             }
+            black_box(vec);
+        });
+    });
+
+    group.bench_function("branded_vec_bulk_mutation_1000", |b| {
+        GhostToken::new(|mut token| {
             b.iter(|| {
-                vec.for_each_mut(&mut token, |x| *x += 1);
+                let mut sum = 0;
+                for i in 0..branded_vec.len() {
+                    if let Some(val) = branded_vec.get_mut(&mut token, i) {
+                        *val = black_box(*val + 1);
+                        sum += *val;
+                    }
+                }
+                black_box(sum);
             });
         });
     });
+
+    group.finish();
+}
+
+fn bench_comprehensive_stdlib_comparison(c: &mut Criterion) {
+    let mut group = c.benchmark_group("comprehensive_stdlib_comparison");
+
+    // Memory overhead comparison
+    group.bench_function("stdlib_vec_memory_per_element", |b| {
+        b.iter(|| {
+            let mut vec = Vec::with_capacity(1000);
+            for i in 0..1000 {
+                vec.push(i);
+            }
+            black_box(vec);
+        });
+    });
+
+    group.bench_function("branded_vec_memory_per_element", |b| {
+        b.iter(|| {
+            let mut vec = BrandedVec::with_capacity(1000);
+            for i in 0..1000 {
+                vec.push(i);
+            }
+            black_box(vec);
+        });
+    });
+
+    // Cache performance comparison (different access patterns)
+    let std_vec: Vec<i32> = (0..10000).collect();
+    let branded_vec: BrandedVec<i32> = GhostToken::new(|_| {
+        let mut vec = BrandedVec::with_capacity(10000);
+        for i in 0..10000 {
+            vec.push(i);
+        }
+        vec
+    });
+
+    group.bench_function("stdlib_vec_sequential_access", |b| {
+        b.iter(|| {
+            let mut sum = 0;
+            for &x in &std_vec {
+                sum += x;
+            }
+            black_box(sum);
+        });
+    });
+
+    group.bench_function("branded_vec_sequential_access", |b| {
+        GhostToken::new(|token| {
+            b.iter(|| {
+                let mut sum = 0;
+                for i in 0..branded_vec.len() {
+                    sum += *branded_vec.get(&token, i).unwrap();
+                }
+                black_box(sum);
+            });
+        });
+    });
+
+    group.bench_function("stdlib_vec_random_access", |b| {
+        b.iter(|| {
+            let mut sum = 0;
+            for i in (0..10000).step_by(37) { // Pseudo-random access pattern
+                sum += std_vec[i];
+            }
+            black_box(sum);
+        });
+    });
+
+    group.bench_function("branded_vec_random_access", |b| {
+        GhostToken::new(|token| {
+            b.iter(|| {
+                let mut sum = 0;
+                for i in (0..10000).step_by(37) {
+                    sum += *branded_vec.get(&token, i).unwrap();
+                }
+                black_box(sum);
+            });
+        });
+    });
+
+    // Bulk operation comparison
+    group.bench_function("stdlib_vec_bulk_transform", |b| {
+        let mut vec = std_vec.clone();
+        b.iter(|| {
+            for x in &mut vec {
+                *x = *x * 2 + 1;
+            }
+            black_box(&vec);
+        });
+    });
+
+    group.bench_function("branded_vec_bulk_transform", |b| {
+        GhostToken::new(|mut token| {
+            b.iter(|| {
+                for i in 0..branded_vec.len() {
+                    if let Some(val) = branded_vec.get_mut(&mut token, i) {
+                        *val = black_box(*val * 2 + 1);
+                    }
+                }
+                black_box(&branded_vec);
+            });
+        });
+    });
+
+    group.finish();
+}
+
+fn bench_edge_case_performance(c: &mut Criterion) {
+    let mut group = c.benchmark_group("edge_case_performance");
+
+    // Empty collection operations
+    group.bench_function("stdlib_vec_empty_ops", |b| {
+        let vec = Vec::<i32>::new();
+        b.iter(|| {
+            black_box(vec.is_empty());
+            black_box(vec.len());
+            black_box(vec.get(0));
+            black_box(vec.first());
+            black_box(vec.last());
+        });
+    });
+
+    group.bench_function("branded_vec_empty_ops", |b| {
+        GhostToken::new(|token| {
+            let vec = BrandedVec::<i32>::new();
+            b.iter(|| {
+                black_box(vec.is_empty());
+                black_box(vec.len());
+                black_box(vec.get(&token, 0));
+            });
+        });
+    });
+
+    // Large index operations
+    let std_vec: Vec<i32> = (0..100000).collect();
+    let branded_vec: BrandedVec<i32> = GhostToken::new(|_| {
+        let mut vec = BrandedVec::with_capacity(100000);
+        for i in 0..100000 {
+            vec.push(i);
+        }
+        vec
+    });
+
+    group.bench_function("stdlib_vec_large_index_access", |b| {
+        b.iter(|| {
+            black_box(std_vec.get(99999));
+            black_box(std_vec.get(50000));
+            black_box(std_vec.get(0));
+        });
+    });
+
+    group.bench_function("branded_vec_large_index_access", |b| {
+        GhostToken::new(|token| {
+            b.iter(|| {
+                black_box(branded_vec.get(&token, 99999));
+                black_box(branded_vec.get(&token, 50000));
+                black_box(branded_vec.get(&token, 0));
+            });
+        });
+    });
+
+    group.finish();
 }
 
 fn bench_branded_vec_deque_operations(c: &mut Criterion) {
@@ -258,9 +471,11 @@ criterion_group!(
     bench_branded_chunked_vec_256,
     bench_branded_chunked_vec_512,
     bench_branded_chunked_vec_1024,
-    bench_branded_vec_operations,
+    bench_std_vs_branded_vec,
     bench_branded_vec_deque_operations,
     bench_branded_hash_map_operations,
+    bench_comprehensive_stdlib_comparison,
+    bench_edge_case_performance,
     bench_branded_hash_set_operations,
     bench_branded_arena_operations
 );

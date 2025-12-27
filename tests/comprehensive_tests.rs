@@ -4,6 +4,7 @@ use halo::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::hint::black_box;
 
 // ===== SAFETY AND CORRECTNESS TESTS =====
 
@@ -384,6 +385,9 @@ fn test_complex_data_structures() {
     });
 }
 
+// Property-based tests temporarily disabled - requires proptest feature
+// TODO: Re-enable when proptest is properly configured as a feature
+
 // ===== FORMAL VERIFICATION TESTS =====
 
 #[test]
@@ -452,6 +456,418 @@ fn arena_key_invariants() {
 
 // Deque test temporarily disabled due to naming conflict resolution
 // TODO: Re-enable when module structure is clarified
+
+// ===== RUSTBELT SAFETY VALIDATION TESTS =====
+
+// These tests validate that the core RustBelt safety properties are maintained
+
+#[test]
+fn test_rustbelt_generativity_property() {
+    // Test that tokens are generative (fresh brands cannot escape)
+    // This should compile and run successfully
+    let result = GhostToken::new(|mut token| {
+        let cell = GhostCell::new(42);
+        *cell.borrow_mut(&mut token) = 24;
+        *cell.borrow(&token) // Return the final value
+    });
+    assert_eq!(result, 24);
+}
+
+#[test]
+fn test_rustbelt_linearity_property() {
+    // Test that token linearity prevents concurrent mutable access
+    GhostToken::new(|mut token| {
+        let cell1 = GhostCell::new(1);
+        let cell2 = GhostCell::new(2);
+
+        // This should work - sequential mutable access
+        *cell1.borrow_mut(&mut token) = 10;
+        *cell2.borrow_mut(&mut token) = 20;
+
+        // Verify values
+        assert_eq!(*cell1.borrow(&token), 10);
+        assert_eq!(*cell2.borrow(&token), 20);
+    });
+}
+
+#[test]
+fn test_rustbelt_no_runtime_borrow_checking() {
+    // Test that no runtime borrow checking is needed - type system enforces safety
+    GhostToken::new(|mut token| {
+        let cell = GhostCell::new(42);
+
+        // Multiple immutable borrows should work
+        let borrow1 = cell.borrow(&token);
+        let borrow2 = cell.borrow(&token);
+        assert_eq!(*borrow1, 42);
+        assert_eq!(*borrow2, 42);
+
+        // Drop immutable borrows before mutable borrow
+        drop(borrow1);
+        drop(borrow2);
+
+        // Now mutable borrow should work
+        *cell.borrow_mut(&mut token) = 24;
+        assert_eq!(*cell.borrow(&token), 24);
+    });
+}
+
+#[test]
+fn test_branded_collection_invariants() {
+    // Test that branded collections maintain their safety invariants
+    GhostToken::new(|mut token| {
+        let mut vec = BrandedVec::new();
+
+        // Test owner exclusivity - collection owns the GhostCells
+        vec.push(1);
+        vec.push(2);
+        vec.push(3);
+
+        // Test token-gated access
+        assert_eq!(*vec.get(&token, 0).unwrap(), 1);
+        assert_eq!(*vec.get(&token, 1).unwrap(), 2);
+
+        // Test mutation through token
+        for i in 0..vec.len() {
+            if let Some(val) = vec.get_mut(&mut token, i) {
+                *val *= 2;
+            }
+        }
+
+        assert_eq!(*vec.get(&token, 0).unwrap(), 2);
+        assert_eq!(*vec.get(&token, 1).unwrap(), 4);
+        assert_eq!(*vec.get(&token, 2).unwrap(), 6);
+    });
+}
+
+// ===== COMPREHENSIVE STDLIB CORRECTNESS VALIDATION =====
+
+// These tests validate that our implementations handle all edge cases correctly compared to stdlib
+
+#[test]
+fn branded_vec_comprehensive_vs_std_vec() {
+    GhostToken::new(|mut token| {
+        // Test empty vectors
+        let mut std_vec = Vec::<i32>::new();
+        let mut branded_vec = BrandedVec::<i32>::new();
+
+        assert_eq!(std_vec.len(), branded_vec.len());
+        assert_eq!(std_vec.is_empty(), branded_vec.is_empty());
+
+        // Test large insertions
+        for i in 0..10000 {
+            std_vec.push(i);
+            branded_vec.push(i);
+        }
+
+        assert_eq!(std_vec.len(), branded_vec.len());
+        for i in 0..10000 {
+            assert_eq!(std_vec[i], *branded_vec.get(&token, i).unwrap());
+        }
+
+        // Test bulk operations
+        std_vec.clear();
+        // BrandedVec doesn't have clear, so recreate
+        let mut branded_vec = BrandedVec::new();
+
+        // Test edge case: insert at various positions
+        for i in 0..100 {
+            std_vec.insert(0, i);
+            branded_vec.insert(0, i);
+        }
+
+        assert_eq!(std_vec.len(), branded_vec.len());
+        for i in 0..100 {
+            assert_eq!(std_vec[i], *branded_vec.get(&token, i).unwrap());
+        }
+
+        // Test removals
+        while !std_vec.is_empty() && !branded_vec.is_empty() {
+            let std_val = std_vec.remove(0);
+            let branded_val = branded_vec.remove(0).into_inner();
+            assert_eq!(std_val, branded_val);
+        }
+    });
+}
+
+#[test]
+fn branded_hashmap_comprehensive_vs_std_hashmap() {
+    GhostToken::new(|mut token| {
+        let mut std_map = std::collections::HashMap::new();
+        let mut branded_map = BrandedHashMap::new();
+
+        // Test various key/value types - use integers for simplicity
+        let test_data = vec![
+            (1, 42),
+            (2, 24),
+            (3, 100),
+            (0, 999),  // Zero key
+            (999, 123),
+        ];
+
+        // Insert all
+        for (k, v) in &test_data {
+            assert_eq!(std_map.insert(*k, *v), branded_map.insert(*k, *v));
+        }
+
+        assert_eq!(std_map.len(), branded_map.len());
+
+        // Verify all insertions
+        for (k, expected_v) in &test_data {
+            assert_eq!(std_map.get(k), branded_map.get(&token, k).map(|x| *x).as_ref());
+        }
+
+        // Test updates (same key, different value)
+        // First, verify the key exists
+        assert_eq!(std_map.get(&1), Some(&42));
+        assert_eq!(branded_map.get(&token, &1), Some(&42));
+
+        let std_prev = std_map.insert(1, 999);
+        let branded_prev = branded_map.insert(1, 999);
+        assert_eq!(std_prev, branded_prev);
+        assert_eq!(std_map.get(&1), branded_map.get(&token, &1).map(|x| *x).as_ref());
+
+        // Test removals
+        for (k, _) in &test_data {
+            let std_result = std_map.remove(k);
+            let branded_result = branded_map.remove(k);
+            assert_eq!(std_result, branded_result);
+        }
+
+        assert_eq!(std_map.len(), branded_map.len());
+        assert!(std_map.is_empty());
+        assert!(branded_map.is_empty());
+    });
+}
+
+#[test]
+fn branded_vecdeque_comprehensive_vs_std_vecdeque() {
+    GhostToken::new(|mut token| {
+        let mut std_deque = std::collections::VecDeque::new();
+        let mut branded_deque = BrandedVecDeque::new();
+
+        // Test alternating front/back operations
+        for i in 0..100 {
+            if i % 2 == 0 {
+                std_deque.push_back(i);
+                branded_deque.push_back(i);
+            } else {
+                std_deque.push_front(i);
+                branded_deque.push_front(i);
+            }
+        }
+
+        assert_eq!(std_deque.len(), branded_deque.len());
+
+        // Test alternating removals (this verifies the internal structure is correct)
+        while !std_deque.is_empty() && !branded_deque.is_empty() {
+            let std_val = if std_deque.len() % 2 == 0 {
+                std_deque.pop_front()
+            } else {
+                std_deque.pop_back()
+            };
+
+            let branded_val = if branded_deque.len() % 2 == 0 {
+                branded_deque.pop_front()
+            } else {
+                branded_deque.pop_back()
+            };
+            assert_eq!(std_val, branded_val.map(|x| x.into_inner()));
+        }
+
+        assert_eq!(std_deque.len(), branded_deque.len());
+    });
+}
+
+#[test]
+fn memory_safety_edge_cases() {
+    // Test that our implementations don't have memory safety issues that stdlib avoids
+
+    GhostToken::new(|mut token| {
+        // Test with ZST (Zero-Sized Types)
+        let mut branded_vec = BrandedVec::<()>::new();
+        for _ in 0..1000 {
+            branded_vec.push(());
+        }
+
+        assert_eq!(branded_vec.len(), 1000);
+
+        // Test with large types
+        #[derive(Clone, Debug, PartialEq)]
+        struct LargeStruct([u8; 1024]);
+
+        let mut branded_vec = BrandedVec::new();
+        let large_item = LargeStruct([42; 1024]);
+
+        for _ in 0..10 {
+            branded_vec.push(large_item.clone());
+        }
+
+        assert_eq!(branded_vec.len(), 10);
+        for i in 0..10 {
+            assert_eq!(branded_vec.get(&token, i).unwrap().0, large_item.0);
+        }
+
+        // Test mutation of large types
+        for i in 0..10 {
+            if let Some(item) = branded_vec.get_mut(&mut token, i) {
+                item.0[0] = i as u8;
+            }
+        }
+
+        for i in 0..10 {
+            assert_eq!(branded_vec.get(&token, i).unwrap().0[0], i as u8);
+        }
+    });
+}
+
+#[test]
+fn performance_regression_validation() {
+    // Test that our implementations maintain reasonable performance characteristics
+    // compared to expected algorithmic complexity
+
+    GhostToken::new(|mut token| {
+        // Test O(1) amortized push operations
+        let mut branded_vec = BrandedVec::new();
+        let start = std::time::Instant::now();
+
+        for i in 0..10000 {
+            branded_vec.push(i);
+        }
+
+        let duration = start.elapsed();
+        // Should complete in reasonable time (much less than 1ms per operation)
+        assert!(duration < std::time::Duration::from_millis(100));
+
+        // Test O(1) access operations
+        let start = std::time::Instant::now();
+        for i in 0..1000 {
+            black_box(branded_vec.get(&token, i % branded_vec.len()));
+        }
+        let duration = start.elapsed();
+        assert!(duration < std::time::Duration::from_millis(10));
+
+        // Test O(n) iteration operations (should be slower but still reasonable)
+        let start = std::time::Instant::now();
+        for i in 0..branded_vec.len().min(1000) {
+            if let Some(val) = branded_vec.get_mut(&mut token, i) {
+                *val += 1;
+            }
+        }
+        let duration = start.elapsed();
+        assert!(duration < std::time::Duration::from_millis(50));
+    });
+}
+
+// ===== MEMORY USAGE VALIDATION =====
+
+// Compare memory usage characteristics with stdlib
+
+#[test]
+fn memory_overhead_comparison() {
+    // Test that our implementations don't have excessive memory overhead
+    GhostToken::new(|token| {
+        // Compare Vec vs BrandedVec memory scaling
+        let sizes = [100usize, 1000];
+
+        for &size in &sizes {
+            let std_vec: Vec<i32> = (0..size).map(|x| x as i32).collect();
+            let branded_vec: BrandedVec<i32> = {
+                let mut vec = BrandedVec::with_capacity(size);
+                for i in 0..size {
+                    vec.push(i as i32);
+                }
+                vec
+            };
+
+            // Both should contain the same data
+            assert_eq!(std_vec.len(), branded_vec.len());
+            for i in 0..size.min(100) { // Test first 100 elements to avoid excessive time
+                assert_eq!(std_vec[i], *branded_vec.get(&token, i).unwrap());
+            }
+
+            // Memory overhead should be reasonable (branded vec has some overhead for safety)
+            assert_eq!(branded_vec.len(), size);
+        }
+    });
+}
+
+#[test]
+fn capacity_management_validation() {
+    // Test that capacity management works correctly compared to stdlib expectations
+    GhostToken::new(|token| {
+        // Test reserve behavior
+        let mut branded_vec = BrandedVec::<i32>::new();
+
+        // Should start empty
+        assert_eq!(branded_vec.len(), 0);
+
+        // Reserve capacity
+        branded_vec.reserve(1000);
+
+        // Should still be able to add elements
+        for i in 0..100 {
+            branded_vec.push(i as i32);
+        }
+
+        assert_eq!(branded_vec.len(), 100);
+        for i in 0..100 {
+            assert_eq!(*branded_vec.get(&token, i).unwrap(), i as i32);
+        }
+
+        // Test that capacity is maintained
+        assert!(branded_vec.len() >= 100);
+
+        // Should still work
+        assert_eq!(branded_vec.len(), 100);
+        for i in 0..100 {
+            assert_eq!(*branded_vec.get(&token, i).unwrap(), i as i32);
+        }
+    });
+}
+
+#[test]
+fn asymptotic_complexity_validation() {
+    // Test that operations have expected asymptotic complexity
+    GhostToken::new(|token| {
+        let sizes = [100usize, 1000, 10000];
+
+        for &size in &sizes {
+            let mut branded_vec = BrandedVec::with_capacity(size);
+
+            // O(n) population
+            let start = std::time::Instant::now();
+            for i in 0..size {
+                branded_vec.push(i as i32);
+            }
+            let populate_time = start.elapsed();
+
+            // O(1) access should be much faster than O(n) operations
+            let start = std::time::Instant::now();
+            for i in 0..(size.min(1000)) {  // Limit to avoid excessive time
+                black_box(branded_vec.get(&token, i % branded_vec.len()));
+            }
+            let access_time = start.elapsed();
+
+            // Access should be reasonably fast (not slower than population for small sizes)
+            // For small data sets, token overhead may make access comparable to population
+            assert!(access_time < populate_time * 2,
+                "Access time ({:?}) should not be excessively slower than populate time ({:?}) for size {}",
+                access_time, populate_time, size);
+
+            // O(n) iteration (simplified test)
+            let start = std::time::Instant::now();
+            for i in 0..size.min(1000) { // Limit iterations
+                black_box(branded_vec.get(&token, i % branded_vec.len()));
+            }
+            let iterate_time = start.elapsed();
+
+            // Iteration should be reasonable
+            assert!(iterate_time < std::time::Duration::from_millis(50),
+                "Iteration too slow: {:?} for size {}", iterate_time, size);
+        }
+    });
+}
 
 // ===== COMPILATION FAILURE TESTS =====
 

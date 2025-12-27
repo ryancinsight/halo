@@ -41,7 +41,7 @@ use crate::GhostToken;
 /// # Examples
 ///
 /// ```
-/// use halo::{GhostToken, cell::raw::GhostCell};
+/// use halo::{GhostToken, RawGhostCell};
 ///
 /// GhostToken::new(|token| {
 ///     let cell = RawGhostCell::new(42);
