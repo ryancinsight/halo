@@ -1,8 +1,7 @@
 use core::ptr;
 
 use crate::GhostToken;
-
-use super::ghost_cell::GhostCell;
+use super::super::GhostCell;
 
 impl<'brand, T> GhostCell<'brand, T> {
     /// Borrows the cell immutably.

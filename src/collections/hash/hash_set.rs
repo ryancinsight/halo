@@ -7,7 +7,7 @@
 
 use std::hash::{Hash, BuildHasher};
 use std::collections::hash_map::RandomState;
-use crate::collections::branded_hash_map::BrandedHashMap;
+use super::hash_map::BrandedHashMap;
 use crate::GhostToken;
 
 /// A hash set with branded membership.

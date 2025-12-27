@@ -1,22 +1,18 @@
 //! Collections optimized for Ghost-style usage.
+//!
+//! Collections are organized by data structure type:
+//! - `vec`: Vector and vector-like collections
+//! - `hash`: Hash-based collections (maps and sets)
+//! - `other`: Specialized collections (deques, arenas)
 
-pub mod chunked_vec;
-pub mod branded_vec;
-pub mod branded_vec_deque;
-pub mod branded_hash_map;
-pub mod branded_hash_set;
-pub mod branded_arena;
-pub mod branded_chunked_vec;
-pub mod branded_deque;
+pub mod vec;
+pub mod hash;
+pub mod other;
 
-pub use chunked_vec::ChunkedVec;
-pub use branded_vec::BrandedVec;
-pub use branded_vec_deque::BrandedVecDeque;
-pub use branded_hash_map::BrandedHashMap;
-pub use branded_hash_set::BrandedHashSet;
-pub use branded_arena::BrandedArena;
-pub use branded_chunked_vec::BrandedChunkedVec;
-pub use branded_deque::BrandedDeque;
+// Re-export commonly used types from submodules
+pub use vec::{BrandedVec, BrandedVecDeque, BrandedChunkedVec, ChunkedVec};
+pub use hash::{BrandedHashMap, BrandedHashSet};
+pub use other::{BrandedDeque, BrandedArena};
 
 
 

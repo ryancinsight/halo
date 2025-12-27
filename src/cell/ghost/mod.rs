@@ -5,8 +5,11 @@
 
 pub mod ghost_cell;
 
+#[path = "ops/borrow.rs"]
 mod ops_borrow;
+#[path = "ops/copy.rs"]
 mod ops_copy;
+#[path = "ops/functional.rs"]
 mod ops_functional;
 
 pub use ghost_cell::GhostCell;

@@ -15,7 +15,7 @@
 use core::sync::atomic::Ordering;
 use crate::{
     concurrency::atomic::GhostAtomicBool,
-    graph::ghost_ecc_graph::EccEdge,
+    graph::compressed::ecc_graph::EccEdge,
 };
 
 

@@ -1,15 +1,12 @@
 //! Raw, token-branded building blocks.
 //!
 //! This layer intentionally exposes *minimal* surface area and concentrates
-//! unsafe code in a small number of modules.
+//! unsafe code in a small number of modules. Cell implementations are organized
+//! by their core functionality in the `cells` submodule.
 
-pub mod ghost_unsafe_cell;
-pub mod ghost_cell;
-pub mod ghost_ref_cell;
+pub mod cells;
 
-pub use ghost_unsafe_cell::GhostUnsafeCell;
-pub use ghost_cell::GhostCell;
-pub use ghost_ref_cell::GhostRefCell;
+pub use cells::{GhostUnsafeCell, GhostCell, GhostRefCell};
 
 
 

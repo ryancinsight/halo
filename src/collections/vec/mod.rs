@@ -1,0 +1,14 @@
+//! Vector-based collections optimized for Ghost-style usage.
+//!
+//! This module contains vector and vector-like data structures that are
+//! branded for safe concurrent access patterns.
+
+pub mod base_chunked_vec;
+pub mod vec;
+pub mod vec_deque;
+pub mod chunked_vec;
+
+pub use base_chunked_vec::ChunkedVec;
+pub use vec::BrandedVec;
+pub use vec_deque::BrandedVecDeque;
+pub use chunked_vec::BrandedChunkedVec;

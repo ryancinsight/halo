@@ -13,7 +13,7 @@ use core::sync::atomic::Ordering;
 use crate::{
     concurrency::atomic::GhostAtomicBool,
     concurrency::worklist::{GhostChaseLevDeque, GhostTreiberStack},
-    collections::branded_vec::BrandedVec,
+    collections::vec::BrandedVec,
     GhostToken,
 };
 
