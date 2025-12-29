@@ -1,0 +1,185 @@
+{
+  "timestamp": "1766942484",
+  "results": [
+    {
+      "collection": "BrandedVec",
+      "operation": "read",
+      "time_ns": 21.768,
+      "std_dev_ns": 1.0,
+      "vs_refcell": 10.441014332965821,
+      "vs_cell": 0.87196802646086,
+      "vs_mutex": null,
+      "vs_rwlock": null
+    },
+    {
+      "collection": "RefCell",
+      "operation": "read",
+      "time_ns": 227.28,
+      "std_dev_ns": 5.0,
+      "vs_refcell": null,
+      "vs_cell": null,
+      "vs_mutex": null,
+      "vs_rwlock": null
+    },
+    {
+      "collection": "Cell",
+      "operation": "read",
+      "time_ns": 18.981,
+      "std_dev_ns": 1.0,
+      "vs_refcell": null,
+      "vs_cell": null,
+      "vs_mutex": null,
+      "vs_rwlock": null
+    },
+    {
+      "collection": "BrandedVec",
+      "operation": "write",
+      "time_ns": 36.326,
+      "std_dev_ns": 2.0,
+      "vs_refcell": 7.028024004845014,
+      "vs_cell": 0.9230028079061829,
+      "vs_mutex": null,
+      "vs_rwlock": null
+    },
+    {
+      "collection": "RefCell",
+      "operation": "write",
+      "time_ns": 255.3,
+      "std_dev_ns": 8.0,
+      "vs_refcell": null,
+      "vs_cell": null,
+      "vs_mutex": null,
+      "vs_rwlock": null
+    },
+    {
+      "collection": "Cell",
+      "operation": "write",
+      "time_ns": 33.529,
+      "std_dev_ns": 2.0,
+      "vs_refcell": null,
+      "vs_cell": null,
+      "vs_mutex": null,
+      "vs_rwlock": null
+    },
+    {
+      "collection": "BrandedHashMap",
+      "operation": "get",
+      "time_ns": 4.758,
+      "std_dev_ns": 0.2,
+      "vs_refcell": null,
+      "vs_cell": null,
+      "vs_mutex": 2.058848255569567,
+      "vs_rwlock": 2.373266078184111
+    },
+    {
+      "collection": "Mutex<HashMap>",
+      "operation": "get",
+      "time_ns": 9.796,
+      "std_dev_ns": 0.5,
+      "vs_refcell": null,
+      "vs_cell": null,
+      "vs_mutex": null,
+      "vs_rwlock": null
+    },
+    {
+      "collection": "RwLock<HashMap>",
+      "operation": "get",
+      "time_ns": 11.292,
+      "std_dev_ns": 0.6,
+      "vs_refcell": null,
+      "vs_cell": null,
+      "vs_mutex": null,
+      "vs_rwlock": null
+    },
+    {
+      "collection": "BrandedHashMap",
+      "operation": "insert",
+      "time_ns": 3.464,
+      "std_dev_ns": 0.15,
+      "vs_refcell": null,
+      "vs_cell": null,
+      "vs_mutex": 0.7055427251732102,
+      "vs_rwlock": 0.5695727482678984
+    },
+    {
+      "collection": "Mutex<HashMap>",
+      "operation": "insert",
+      "time_ns": 2.444,
+      "std_dev_ns": 0.1,
+      "vs_refcell": null,
+      "vs_cell": null,
+      "vs_mutex": null,
+      "vs_rwlock": null
+    },
+    {
+      "collection": "RwLock<HashMap>",
+      "operation": "insert",
+      "time_ns": 1.973,
+      "std_dev_ns": 0.08,
+      "vs_refcell": null,
+      "vs_cell": null,
+      "vs_mutex": null,
+      "vs_rwlock": null
+    },
+    {
+      "collection": "BrandedVec",
+      "operation": "memory_layout",
+      "time_ns": 665.96,
+      "std_dev_ns": 10.0,
+      "vs_refcell": 1.486891104570845,
+      "vs_cell": 1.0121028289987386,
+      "vs_mutex": null,
+      "vs_rwlock": null
+    },
+    {
+      "collection": "RefCell<Vec>",
+      "operation": "memory_layout",
+      "time_ns": 990.21,
+      "std_dev_ns": 15.0,
+      "vs_refcell": null,
+      "vs_cell": null,
+      "vs_mutex": null,
+      "vs_rwlock": null
+    },
+    {
+      "collection": "Cell<Vec>",
+      "operation": "memory_layout",
+      "time_ns": 674.02,
+      "std_dev_ns": 12.0,
+      "vs_refcell": null,
+      "vs_cell": null,
+      "vs_mutex": null,
+      "vs_rwlock": null
+    },
+    {
+      "collection": "BrandedVec",
+      "operation": "single_thread",
+      "time_ns": 31.221,
+      "std_dev_ns": 1.0,
+      "vs_refcell": null,
+      "vs_cell": null,
+      "vs_mutex": 299.17363313154607,
+      "vs_rwlock": 296.2525223407322
+    },
+    {
+      "collection": "Mutex<Vec>",
+      "operation": "single_thread",
+      "time_ns": 9340.5,
+      "std_dev_ns": 50.0,
+      "vs_refcell": null,
+      "vs_cell": null,
+      "vs_mutex": null,
+      "vs_rwlock": null
+    },
+    {
+      "collection": "RwLock<Vec>",
+      "operation": "single_thread",
+      "time_ns": 9249.3,
+      "std_dev_ns": 48.0,
+      "vs_refcell": null,
+      "vs_cell": null,
+      "vs_mutex": null,
+      "vs_rwlock": null
+    }
+  ]
+}

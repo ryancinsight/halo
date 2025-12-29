@@ -125,13 +125,10 @@ impl<'brand, T: Default> GhostCell<'brand, T> {
     ///
     /// This operation requires a token to ensure proper mutation control.
     #[inline(always)]
-    pub fn take(&self, _token: &GhostToken<'brand>) -> T
-    where
-        T: Copy,
-    {
+    pub fn take(&self, _token: &GhostToken<'brand>) -> T {
         // SAFETY: GhostToken ensures exclusive access
         unsafe {
-            let old = (*self.value.get()).assume_init();
+            let old = ptr::read((*self.value.get()).as_ptr());
             (*self.value.get()).write(T::default());
             old
         }
@@ -168,7 +165,7 @@ impl<'brand, T: Clone> Clone for GhostCell<'brand, T> {
 }
 
 impl<'brand, T: Copy + PartialEq> PartialEq for GhostCell<'brand, T> {
-    fn eq(&self, other: &Self) -> bool {
+    fn eq(&self, _other: &Self) -> bool {
         // Same limitation as Clone - we need a token to compare
         panic!("GhostCell cannot be compared without a token - use GhostToken::new() to access values")
     }

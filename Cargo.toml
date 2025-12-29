@@ -15,7 +15,8 @@ anyhow = "1.0"
 crossbeam-utils = "0.8"
 rayon = { version = "1.8", optional = true }
 tracing = { version = "0.1", optional = true }
-serde = { version = "1.0", optional = true, features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 num-traits = "0.2"
 zerocopy = "0.7"
 
@@ -40,11 +41,18 @@ harness = false
 name = "dag_benchmark"
 harness = false
 
+[[bench]]
+name = "collection_performance"
+harness = false
+
+[[bin]]
+name = "analyze_performance"
+path = "analyze_performance.rs"
+
 [features]
 default = []
 parallel = ["rayon"]
 tracing = ["dep:tracing"]
-serde = ["dep:serde"]
 
 [profile.release]
 opt-level = 3

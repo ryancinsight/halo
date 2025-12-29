@@ -382,7 +382,7 @@ impl<'brand, T: Clone> Clone for GhostRefCell<'brand, T> {
 }
 
 impl<'brand, T: PartialEq> PartialEq for GhostRefCell<'brand, T> {
-    fn eq(&self, other: &Self) -> bool {
+    fn eq(&self, _other: &Self) -> bool {
         // Same limitation as Clone - we need a token to compare
         panic!("GhostRefCell cannot be compared without a token - use GhostToken::new() to access values")
     }

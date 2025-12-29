@@ -15,6 +15,40 @@ use core::mem::MaybeUninit;
 use std::collections::hash_map::RandomState;
 use crate::{GhostCell, GhostToken};
 
+/// Zero-cost iterator for BrandedHashMap values.
+/// Avoids closure allocation per element access.
+pub struct BrandedHashMapValues<'a, 'brand, K, V> {
+    buckets: &'a [MaybeUninit<Bucket<'brand, K, V>>],
+    index: usize,
+    token: &'a GhostToken<'brand>,
+}
+
+impl<'a, 'brand, K, V> Iterator for BrandedHashMapValues<'a, 'brand, K, V> {
+    type Item = &'a V;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.index < self.buckets.len() {
+            let bucket = unsafe { self.buckets.get_unchecked(self.index) };
+            let marker = unsafe { bucket.as_ptr().cast::<*const ()>().read() };
+
+            self.index += 1;
+
+            // Only return occupied buckets (marker = 1), skip empty (null) and tombstones (2)
+            if marker as usize == 1 {
+                let bucket = unsafe { bucket.assume_init_ref() };
+                return Some(bucket.value.borrow(self.token));
+            }
+        }
+        None
+    }
+
+    #[inline(always)]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, Some(self.buckets.len().saturating_sub(self.index)))
+    }
+}
+
 /// High-performance hash map with token-gated values.
 ///
 /// Memory layout optimized for cache performance and SIMD operations.
@@ -38,7 +72,7 @@ pub struct BrandedHashMap<'brand, K, V, S = RandomState> {
 /// - GhostCell value for safety
 #[repr(C)]
 struct Bucket<'brand, K, V> {
-    /// Null marker: null = empty bucket, non-null = occupied
+    /// Marker: null = empty bucket, 1 = occupied, 2 = tombstone (deleted)
     _marker: *const (),
     /// Key stored first for fast comparison operations
     key: K,
@@ -144,14 +178,15 @@ where
                 return (idx, false);
             }
 
-            // Bucket is occupied, safe to access all fields
+            // Bucket is occupied or tombstone, safe to access all fields
             let bucket = unsafe { self.buckets.get_unchecked(idx).assume_init_ref() };
-            // Check if this bucket contains our key
-            if bucket.key == *key {
+
+            // If it's not a tombstone, check if this bucket contains our key
+            if marker as usize == 1 && bucket.key == *key {
                 return (idx, true);
             }
 
-            // Linear probe to next bucket
+            // Linear probe to next bucket (continue past tombstones and non-matching keys)
             idx = (idx + 1) & (self.capacity - 1);
             probed += 1;
 
@@ -168,7 +203,7 @@ where
     /// Returns `true` if the map contains the specified key.
     ///
     /// This is an O(1) average case operation.
-    #[inline]
+    #[inline(always)]
     pub fn contains_key(&self, key: &K) -> bool {
         if self.capacity == 0 {
             return false;
@@ -193,7 +228,7 @@ where
     /// Returns None if the key is not present in the map.
     ///
     /// Time complexity: O(1) average case.
-    #[inline]
+    #[inline(always)]
     pub fn get<'a>(&'a self, token: &'a GhostToken<'brand>, key: &K) -> Option<&'a V> {
         if self.capacity == 0 {
             return None;
@@ -254,9 +289,9 @@ where
         if found {
             unsafe {
                 let bucket = self.buckets.get_unchecked_mut(idx).assume_init_mut();
-                bucket._marker = std::ptr::null(); // Mark as empty
+                bucket._marker = 2 as *const (); // Mark as tombstone (deleted)
                 self.len -= 1;
-                // Extract the value before marking as unoccupied
+                // Extract the value before marking as tombstone
                 let value = std::ptr::read(&bucket.value);
                 Some(value.into_inner())
             }
@@ -373,10 +408,22 @@ where
             // Key doesn't exist - insert new bucket
             unsafe {
                 let bucket_ptr = self.buckets.get_unchecked_mut(idx).as_mut_ptr();
+                // Check if this is a tombstone we can reuse
+                let current_marker = bucket_ptr.cast::<*const ()>().read();
+                let is_tombstone = current_marker as usize == 2;
+
                 // Initialize the marker first (it's safe to write to any MaybeUninit field)
                 bucket_ptr.cast::<*const ()>().write(1 as *const _);
                 // Now we can assume the bucket is initialized since we've set the marker
                 let bucket = self.buckets.get_unchecked_mut(idx).assume_init_mut();
+
+                // If this was a tombstone, we don't need to drop the old contents
+                if !is_tombstone {
+                    // Drop any existing contents (shouldn't happen in normal operation)
+                    std::ptr::drop_in_place(&mut bucket.key);
+                    std::ptr::drop_in_place(&mut bucket.value);
+                }
+
                 bucket.key = key;
                 bucket.value = GhostCell::new(value);
             }
@@ -449,18 +496,110 @@ where
     /// Iterates over all values in the map.
     ///
     /// Values are returned in arbitrary order.
-    pub fn values<'a>(&'a self, token: &'a GhostToken<'brand>) -> impl Iterator<Item = &'a V> {
-        self.buckets.iter().filter_map(move |bucket| {
-            unsafe {
-                let marker = bucket.as_ptr().cast::<*const ()>().read();
-                if !marker.is_null() {
-                    let bucket = bucket.assume_init_ref();
-                    Some(bucket.value.borrow(token))
-                } else {
-                    None
+    /// Zero-cost values iterator that avoids closure allocation per element.
+    pub fn values<'a>(&'a self, token: &'a GhostToken<'brand>) -> BrandedHashMapValues<'a, 'brand, K, V> {
+        BrandedHashMapValues {
+            buckets: &self.buckets,
+            index: 0,
+            token,
+        }
+    }
+
+    /// Zero-copy find operation - returns key-value pair without copying.
+    #[inline(always)]
+    pub fn find_ref<'a, F>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+        f: F,
+    ) -> Option<(&'a K, &'a V)>
+    where
+        F: Fn(&K, &V) -> bool,
+    {
+        for i in 0..self.buckets.len() {
+            let bucket = unsafe { self.buckets.get_unchecked(i) };
+            let marker = unsafe { bucket.as_ptr().cast::<*const ()>().read() };
+
+            if marker as usize == 1 {
+                let bucket = unsafe { bucket.assume_init_ref() };
+                let value_ref = bucket.value.borrow(token);
+                if f(&bucket.key, value_ref) {
+                    return Some((&bucket.key, value_ref));
                 }
             }
-        })
+        }
+        None
+    }
+
+    /// Zero-copy contains with predicate.
+    #[inline(always)]
+    pub fn contains_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    where
+        F: Fn(&K, &V) -> bool,
+    {
+        self.find_ref(token, f).is_some()
+    }
+
+    /// Zero-cost any/all operations with short-circuiting.
+    #[inline(always)]
+    pub fn any_ref<F>(
+        &self,
+        token: &GhostToken<'brand>,
+        f: F,
+    ) -> bool
+    where
+        F: Fn(&K, &V) -> bool,
+    {
+        self.find_ref(token, f).is_some()
+    }
+
+    #[inline(always)]
+    pub fn all_ref<F>(
+        &self,
+        token: &GhostToken<'brand>,
+        f: F,
+    ) -> bool
+    where
+        F: Fn(&K, &V) -> bool,
+    {
+        let mut count = 0;
+        for i in 0..self.buckets.len() {
+            let bucket = unsafe { self.buckets.get_unchecked(i) };
+            let marker = unsafe { bucket.as_ptr().cast::<*const ()>().read() };
+
+            if marker as usize == 1 {
+                count += 1;
+                let bucket = unsafe { bucket.assume_init_ref() };
+                let value_ref = bucket.value.borrow(token);
+                if !f(&bucket.key, value_ref) {
+                    return false;
+                }
+            }
+        }
+        count > 0 // Empty map returns false for all_ref
+    }
+
+    /// Zero-cost fold operation with iterator fusion.
+    pub fn fold_ref<B, F>(
+        &self,
+        token: &GhostToken<'brand>,
+        init: B,
+        mut f: F,
+    ) -> B
+    where
+        F: FnMut(B, &K, &V) -> B,
+    {
+        let mut acc = init;
+        for i in 0..self.buckets.len() {
+            let bucket = unsafe { self.buckets.get_unchecked(i) };
+            let marker = unsafe { bucket.as_ptr().cast::<*const ()>().read() };
+
+            if marker as usize == 1 {
+                let bucket = unsafe { bucket.assume_init_ref() };
+                let value_ref = bucket.value.borrow(token);
+                acc = f(acc, &bucket.key, value_ref);
+            }
+        }
+        acc
     }
 
     /// Clears the map, removing all key-value pairs.
@@ -483,6 +622,74 @@ where
             }
         }
         self.len = 0;
+    }
+}
+
+impl<'brand, K, V, S> crate::collections::BrandedCollection<'brand> for BrandedHashMap<'brand, K, V, S> {
+    #[inline(always)]
+    fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    #[inline(always)]
+    fn len(&self) -> usize {
+        self.len
+    }
+}
+
+impl<'brand, K, V, S> crate::collections::ZeroCopyMapOps<'brand, K, V> for BrandedHashMap<'brand, K, V, S>
+where
+    K: Eq + Hash,
+    S: BuildHasher,
+{
+    #[inline(always)]
+    fn find_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<(&'a K, &'a V)>
+    where
+        F: Fn(&K, &V) -> bool,
+    {
+        for i in 0..self.buckets.len() {
+            let bucket = unsafe { self.buckets.get_unchecked(i) };
+            let marker = unsafe { bucket.as_ptr().cast::<*const ()>().read() };
+
+            if marker as usize == 1 {
+                let bucket = unsafe { bucket.assume_init_ref() };
+                let value_ref = bucket.value.borrow(token);
+                if f(&bucket.key, value_ref) {
+                    return Some((&bucket.key, value_ref));
+                }
+            }
+        }
+        None
+    }
+
+    #[inline(always)]
+    fn any_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    where
+        F: Fn(&K, &V) -> bool,
+    {
+        self.find_ref(token, f).is_some()
+    }
+
+    #[inline(always)]
+    fn all_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    where
+        F: Fn(&K, &V) -> bool,
+    {
+        let mut count = 0;
+        for i in 0..self.buckets.len() {
+            let bucket = unsafe { self.buckets.get_unchecked(i) };
+            let marker = unsafe { bucket.as_ptr().cast::<*const ()>().read() };
+
+            if marker as usize == 1 {
+                count += 1;
+                let bucket = unsafe { bucket.assume_init_ref() };
+                let value_ref = bucket.value.borrow(token);
+                if !f(&bucket.key, value_ref) {
+                    return false;
+                }
+            }
+        }
+        count > 0 // Empty map returns false for all_ref
     }
 }
 
@@ -520,8 +727,88 @@ unsafe impl<'brand, K: Sync, V: Sync, S: Sync> Sync for BrandedHashMap<'brand, K
 
 // TODO: Implement conversion traits for the new HashMap implementation
 
-#[cfg(test)]
-mod tests {
+    /// Tests for zero-copy operations and advanced features.
+    #[cfg(test)]
+    mod zero_copy_tests {
+        use super::*;
+        use crate::GhostToken;
+
+        #[test]
+        fn test_zero_copy_map_operations() {
+            GhostToken::new(|token| {
+                let mut map = BrandedHashMap::new();
+                map.insert(&mut token, "key1", 1);
+                map.insert(&mut token, "key2", 2);
+                map.insert(&mut token, "key3", 3);
+
+                // Test find_ref
+                let found = map.find_ref(&token, |k, v| *k == "key2" && *v == 2);
+                assert_eq!(found, Some((&"key2", &2)));
+
+                let not_found = map.find_ref(&token, |k, _| *k == "nonexistent");
+                assert_eq!(not_found, None);
+
+                // Test any_ref
+                assert!(map.any_ref(&token, |_, v| *v > 2));
+                assert!(!map.any_ref(&token, |_, v| *v > 10));
+
+                // Test all_ref
+                assert!(map.all_ref(&token, |_, v| *v > 0));
+                assert!(!map.all_ref(&token, |_, v| *v > 1));
+            });
+        }
+
+        #[test]
+        fn test_zero_copy_map_empty() {
+            GhostToken::new(|token| {
+                let map: BrandedHashMap<&str, i32> = BrandedHashMap::new();
+
+                assert_eq!(map.find_ref(&token, |_, _| true), None);
+                assert!(!map.any_ref(&token, |_, _| true));
+                assert!(map.all_ref(&token, |_, _| false)); // vacuously true
+            });
+        }
+
+        #[test]
+        fn test_zero_copy_map_single_entry() {
+            GhostToken::new(|token| {
+                let mut map = BrandedHashMap::new();
+                map.insert(&mut token, "single", 42);
+
+                assert_eq!(map.find_ref(&token, |k, v| *k == "single" && *v == 42), Some((&"single", &42)));
+                assert!(map.any_ref(&token, |k, v| *k == "single" && *v == 42));
+                assert!(map.all_ref(&token, |k, v| *k == "single" && *v == 42));
+            });
+        }
+
+        #[test]
+        fn test_zero_copy_map_collision_handling() {
+            GhostToken::new(|token| {
+                let mut map = BrandedHashMap::new();
+
+                // Insert entries that might collide
+                map.insert(&mut token, "key1", 1);
+                map.insert(&mut token, "key2", 2);
+                map.insert(&mut token, "key3", 3);
+
+                // All should be findable despite potential collisions
+                assert!(map.find_ref(&token, |k, v| *k == "key1" && *v == 1).is_some());
+                assert!(map.find_ref(&token, |k, v| *k == "key2" && *v == 2).is_some());
+                assert!(map.find_ref(&token, |k, v| *k == "key3" && *v == 3).is_some());
+
+                // Test removal and tombstone handling
+                assert_eq!(map.remove("key2"), Some(2));
+                assert_eq!(map.find_ref(&token, |k, _| *k == "key2"), None);
+
+                // Other entries should still be accessible
+                assert!(map.find_ref(&token, |k, v| *k == "key1" && *v == 1).is_some());
+                assert!(map.find_ref(&token, |k, v| *k == "key3" && *v == 3).is_some());
+            });
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
     use super::*;
     use crate::GhostToken;
 

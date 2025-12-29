@@ -131,14 +131,17 @@ impl<'brand> GhostToken<'brand> {
     ///
     /// # Example
     /// ```rust
-    /// use halo::GhostToken;
+    /// use halo::{GhostToken, GhostCell};
     ///
     /// let result = GhostToken::new(|token| {
-    ///     token.exclusively(|exclusive_token| {
+    ///     let cell = GhostCell::new(42);
+    ///     token.exclusively(move |mut exclusive_token| {
     ///         // `exclusive_token` cannot be shared or leaked
-    ///         exclusive_token
+    ///         *cell.borrow_mut(&mut exclusive_token) = 100;
+    ///         *cell.borrow(&exclusive_token)
     ///     })
     /// });
+    /// assert_eq!(result, 100);
     /// ```
     #[inline(always)]
     pub fn exclusively<F, R>(self, f: F) -> R

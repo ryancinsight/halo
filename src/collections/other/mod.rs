@@ -5,6 +5,8 @@
 
 pub mod deque;
 pub mod arena;
+pub mod cow_strings;
 
 pub use deque::BrandedDeque;
 pub use arena::BrandedArena;
+pub use cow_strings::BrandedCowStrings;
