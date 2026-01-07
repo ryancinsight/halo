@@ -388,6 +388,48 @@ fn test_complex_data_structures() {
 // Property-based tests temporarily disabled - requires proptest feature
 // TODO: Re-enable when proptest is properly configured as a feature
 
+use proptest::prelude::*;
+
+proptest! {
+    #[test]
+    fn test_ghost_cell_properties(val: i32, new_val: i32) {
+        GhostToken::new(|mut token| {
+            let cell = GhostCell::new(val);
+
+            // Test basic read
+            prop_assert_eq!(*cell.borrow(&token), val);
+
+            // Test write
+            *cell.borrow_mut(&mut token) = new_val;
+            prop_assert_eq!(*cell.borrow(&token), new_val);
+            Ok(())
+        }).unwrap()
+    }
+
+    #[test]
+    fn test_ghost_cell_replace(val: i32, new_val: i32) {
+        GhostToken::new(|mut token| {
+            let cell = GhostCell::new(val);
+            let old = cell.replace(&mut token, new_val);
+
+            prop_assert_eq!(old, val);
+            prop_assert_eq!(*cell.borrow(&token), new_val);
+            Ok(())
+        }).unwrap()
+    }
+
+    #[test]
+    fn test_ghost_cell_map(val: i32) {
+        GhostToken::new(|token| {
+            let cell = GhostCell::new(val);
+            let mapped = cell.map(&token, |x| x.to_string());
+
+            prop_assert_eq!(mapped.borrow(&token), &val.to_string());
+            Ok(())
+        }).unwrap()
+    }
+}
+
 // ===== FORMAL VERIFICATION TESTS =====
 
 #[test]

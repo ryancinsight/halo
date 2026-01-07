@@ -27,6 +27,7 @@ use crate::GhostToken;
 
 /// A token-branded wrapper around `core::cell::UnsafeCell<T>`.
 #[repr(transparent)]
+#[derive(Debug)]
 pub struct GhostUnsafeCell<'brand, T: ?Sized>(PhantomData<&'brand mut ()>, UnsafeCell<T>);
 
 impl<'brand, T> GhostUnsafeCell<'brand, T> {
