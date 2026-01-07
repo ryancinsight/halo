@@ -399,24 +399,24 @@ fn test_collection_mathematical_properties() {
 
 #[test]
 fn test_raw_ghost_cell_operations() {
-    GhostToken::new(|token| {
+    GhostToken::new(|mut token| {
         let cell = RawGhostCell::new(42u32);
 
         // Test get
         assert_eq!(cell.get(&token), 42);
 
         // Test set
-        cell.set(&token, 100);
+        cell.set(&mut token, 100);
         assert_eq!(cell.get(&token), 100);
 
         // Test replace
-        let old = cell.replace(&token, 200);
+        let old = cell.replace(&mut token, 200);
         assert_eq!(old, 100);
         assert_eq!(cell.get(&token), 200);
 
         // Test swap
         let cell2 = RawGhostCell::new(300u32);
-        cell.swap(&token, &cell2);
+        cell.swap(&mut token, &cell2);
         assert_eq!(cell.get(&token), 300);
         assert_eq!(cell2.get(&token), 200);
     });
@@ -476,4 +476,3 @@ fn test_raw_ghost_ref_cell_runtime_borrow_checking() {
         // We can't easily test panics across token boundaries, so we'll skip this
     });
 }
-

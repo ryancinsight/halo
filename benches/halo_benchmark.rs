@@ -1163,23 +1163,23 @@ fn bench_raw_ghost_cell(c: &mut Criterion) {
     });
 
     c.bench_function("raw_ghost_cell_get_set", |b| {
-        GhostToken::new(|token| {
+        GhostToken::new(|mut token| {
             let cell = RawGhostCell::new(0usize);
             b.iter(|| {
                 for _ in 0..N {
                     let val = cell.get(&token);
-                    cell.set(&token, val + 1);
+                    cell.set(&mut token, val + 1);
                 }
             });
         });
     });
 
     c.bench_function("raw_ghost_cell_replace", |b| {
-        GhostToken::new(|token| {
+        GhostToken::new(|mut token| {
             let cell = RawGhostCell::new(0usize);
             b.iter(|| {
                 for i in 0..N {
-                    cell.replace(&token, i);
+                    cell.replace(&mut token, i);
                 }
             });
         });

@@ -8,6 +8,7 @@
 pub mod basic;
 pub mod compressed;
 pub mod specialized;
+pub(crate) mod access;
 
 // Re-export commonly used types from submodules
 pub use basic::{GhostAdjacencyGraph, GhostBipartiteGraph, GhostDag};

@@ -592,11 +592,11 @@ impl<'brand, T: Default, const CAPACITY: usize> Default for BrandedArray<'brand,
         fn test_zero_copy_iterator_operations() {
             GhostToken::new(|token| {
                 let mut vec = BrandedVec::new();
-                vec.push(&mut token, 1);
-                vec.push(&mut token, 2);
-                vec.push(&mut token, 3);
-                vec.push(&mut token, 4);
-                vec.push(&mut token, 5);
+                vec.push(1);
+                vec.push(2);
+                vec.push(3);
+                vec.push(4);
+                vec.push(5);
 
                 // Test find_ref
                 let found = vec.find_ref(&token, |&x| x == 3);
@@ -648,7 +648,7 @@ impl<'brand, T: Default, const CAPACITY: usize> Default for BrandedArray<'brand,
         fn test_zero_copy_single_element() {
             GhostToken::new(|token| {
                 let mut vec = BrandedVec::new();
-                vec.push(&mut token, 42);
+                vec.push(42);
 
                 assert_eq!(vec.find_ref(&token, |&x| x == 42), Some(&42));
                 assert!(vec.any_ref(&token, |&x| x == 42));
@@ -664,7 +664,7 @@ impl<'brand, T: Default, const CAPACITY: usize> Default for BrandedArray<'brand,
             GhostToken::new(|token| {
                 let mut vec = BrandedVec::new();
                 for i in 0..10 {
-                    vec.push(&mut token, i);
+                    vec.push(i);
                 }
 
                 // Test that operations can be chained efficiently (iterator fusion)
@@ -673,7 +673,7 @@ impl<'brand, T: Default, const CAPACITY: usize> Default for BrandedArray<'brand,
                     .map(|&x| x * 2) // double them
                     .collect();
 
-                assert_eq!(result, vec![0, 8, 16]); // 0*2, 2*2, 4*2
+                assert_eq!(result, vec![0, 4, 8, 12, 16]); // 0*2, 2*2, 4*2, 6*2, 8*2
 
                 // Test zero-copy filter followed by count
                 let even_count = vec.iter(&token)

@@ -11,45 +11,10 @@
 
 use crate::concurrency::worklist::{GhostChaseLevDeque, GhostTreiberStack};
 
-/// Macro for mathematical assertions in debug builds.
-///
-/// This provides compile-time verification of mathematical properties
-/// and runtime checking in debug builds.
-macro_rules! math_assert {
-    ($condition:expr, $message:expr) => {
-        debug_assert!($condition, "Mathematical invariant violated: {}", $message);
-    };
-    ($condition:expr) => {
-        debug_assert!($condition, "Mathematical invariant violated");
-    };
-}
+pub mod math_proofs;
+mod math_assert;
 
-/// Compile-time mathematical proofs for DAG properties.
-///
-/// These functions provide formal verification of graph theory properties.
-pub mod math_proofs {
-    /// Proves that a valid topological ordering implies acyclicity.
-    ///
-    /// **Theorem**: If a finite directed graph has a topological ordering,
-    /// then it is a DAG (contains no cycles).
-    ///
-    /// **Proof**: By contradiction. Suppose G has a cycle C. In any topological
-    /// ordering, all nodes in C must appear before their successors. But since
-    /// C is a cycle, this creates a contradiction.
-    pub const fn topological_order_implies_acyclic(order_len: usize, node_count: usize) -> bool {
-        order_len == node_count
-    }
-
-    /// Verifies that the longest path in a DAG is well-defined.
-    ///
-    /// **Theorem**: In a DAG, the longest path between any two nodes is unique
-    /// and can be computed via dynamic programming.
-    pub const fn longest_path_well_defined(node_count: usize, _edge_count: usize) -> bool {
-        // For the DP to be well-defined, we need topological order
-        // This is a necessary but not sufficient condition
-        node_count > 0
-    }
-}
+use math_assert::math_assert_msg;
 
     /// A DAG whose visited bitmap is branded.
     ///
@@ -97,20 +62,24 @@ impl<'brand, const EDGE_CHUNK: usize> GhostDag<'brand, EDGE_CHUNK> {
         let _m = self.edge_count();
 
         // Check node count consistency
-        math_assert!(self.graph.node_count() == self.transpose.node_count(),
-                    "CSR and CSC node counts must match");
+        math_assert_msg(
+            self.graph.node_count() == self.transpose.node_count(),
+            "CSR and CSC node counts must match",
+        );
 
         // Check edge count consistency
-        math_assert!(self.graph.edge_count() == self.transpose.edge_count(),
-                    "CSR and CSC edge counts must match");
+        math_assert_msg(
+            self.graph.edge_count() == self.transpose.edge_count(),
+            "CSR and CSC edge counts must match",
+        );
 
         // Check that all edges are within bounds
         for u in 0..n {
             for v in self.graph.neighbors(u) {
-                math_assert!(v < n, "Edge target out of bounds");
+                math_assert_msg(v < n, "Edge target out of bounds");
             }
             for v in self.transpose.in_neighbors(u) {
-                math_assert!(v < n, "Transpose edge target out of bounds");
+                math_assert_msg(v < n, "Transpose edge target out of bounds");
             }
         }
 
@@ -118,8 +87,10 @@ impl<'brand, const EDGE_CHUNK: usize> GhostDag<'brand, EDGE_CHUNK> {
         for u in 0..n {
             let out_degree = self.graph.degree(u);
             let in_degree = self.transpose.in_degree(u);
-            math_assert!(out_degree == in_degree,
-                        "Out-degree and in-degree must match for transpose consistency");
+            math_assert_msg(
+                out_degree == in_degree,
+                "Out-degree and in-degree must match for transpose consistency",
+            );
         }
 
         true

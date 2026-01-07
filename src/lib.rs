@@ -110,7 +110,14 @@ pub mod graph;
 pub mod token;
 
 pub use cell::{GhostCell, GhostLazyCell, GhostLazyLock, GhostOnceCell, GhostUnsafeCell, RawGhostCell, GhostRefCell};
-pub use collections::{BrandedVec, BrandedVecDeque, BrandedHashMap, BrandedHashSet, BrandedArena};
+pub use collections::{
+    BrandedVec,
+    BrandedVecDeque,
+    BrandedHashMap,
+    BrandedHashSet,
+    BrandedArena,
+    BrandedCowStrings,
+};
 pub use graph::{GhostAdjacencyGraph, GhostBipartiteGraph, GhostCscGraph, GhostCsrGraph, GhostDag};
 pub use token::GhostToken;
 

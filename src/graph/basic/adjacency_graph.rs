@@ -11,9 +11,9 @@
 use core::sync::atomic::Ordering;
 
 use crate::{
-    concurrency::atomic::GhostAtomicBool,
     concurrency::worklist::{GhostChaseLevDeque, GhostTreiberStack},
     collections::vec::BrandedVec,
+    graph::access::visited::VisitedFlags,
     GhostToken,
 };
 
@@ -33,7 +33,7 @@ use crate::{
 /// | `in_degree` | \(O(n + m)\) | Scans all adjacency lists |
 pub struct GhostAdjacencyGraph<'brand> {
     adjacency: BrandedVec<'brand, Vec<usize>>,
-    visited: Vec<GhostAtomicBool<'brand>>,
+    visited: VisitedFlags<'brand>,
 }
 
 impl<'brand> GhostAdjacencyGraph<'brand> {
@@ -43,9 +43,7 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
         for _ in 0..vertex_count {
             adjacency.push(Vec::new());
         }
-        let visited = (0..vertex_count)
-            .map(|_| GhostAtomicBool::new(false))
-            .collect();
+        let visited = VisitedFlags::new(vertex_count);
 
         Self { adjacency, visited }
     }
@@ -65,9 +63,7 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
         for list in adjacency_lists {
             adjacency.push(list);
         }
-        let visited = (0..vertex_count)
-            .map(|_| GhostAtomicBool::new(false))
-            .collect();
+        let visited = VisitedFlags::new(vertex_count);
 
         Self { adjacency, visited }
     }
@@ -78,7 +74,7 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
     pub fn add_vertex(&mut self) -> usize {
         let idx = self.adjacency.len();
         self.adjacency.push(Vec::new());
-        self.visited.push(GhostAtomicBool::new(false));
+        self.visited.push();
         idx
     }
 
@@ -197,9 +193,7 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
 
     /// Clears all visited flags.
     pub fn reset_visited(&self) {
-        for f in &self.visited {
-            f.store(false, Ordering::Relaxed);
-        }
+        self.visited.clear(Ordering::Relaxed);
     }
 
     /// Concurrent DFS traversal.
@@ -212,15 +206,14 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
         assert!(start < self.adjacency.len(), "start vertex {start} out of bounds");
 
         self.reset_visited();
-        self.visited[start].store(true, Ordering::Relaxed);
+        self.visited.mark(start, Ordering::Relaxed);
         stack.push(start);
 
         let mut count = 1;
 
         while let Some(vertex) = stack.pop() {
             for neighbor in self.out_neighbors(token, vertex) {
-                if !self.visited[neighbor].load(Ordering::Relaxed) {
-                    self.visited[neighbor].store(true, Ordering::Relaxed);
+                if self.visited.try_visit(neighbor, Ordering::Relaxed) {
                     stack.push(neighbor);
                     count += 1;
                 }
@@ -240,15 +233,14 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
         assert!(start < self.adjacency.len(), "start vertex {start} out of bounds");
 
         self.reset_visited();
-        self.visited[start].store(true, Ordering::Relaxed);
+        self.visited.mark(start, Ordering::Relaxed);
         assert!(deque.push_bottom(start), "deque capacity too small");
 
         let mut count = 1;
 
         while let Some(vertex) = deque.steal() {
             for neighbor in self.out_neighbors(token, vertex) {
-                if !self.visited[neighbor].load(Ordering::Relaxed) {
-                    self.visited[neighbor].store(true, Ordering::Relaxed);
+                if self.visited.try_visit(neighbor, Ordering::Relaxed) {
                     assert!(deque.push_bottom(neighbor), "deque capacity too small");
                     count += 1;
                 }
@@ -309,20 +301,19 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
         self.reset_visited();
         let mut order = Vec::with_capacity(n);
         for start in 0..n {
-            if self.visited[start].load(Ordering::Relaxed) {
+            if self.visited.is_visited(start, Ordering::Relaxed) {
                 continue;
             }
             // stack of (node, neighbor_iterator)
             let mut stack = Vec::new();
-            self.visited[start].store(true, Ordering::Relaxed);
+            self.visited.mark(start, Ordering::Relaxed);
             stack.push((start, self.out_neighbors(token, start)));
 
             while let Some((u, mut it)) = stack.pop() {
                 if let Some(v) = it.next() {
                     // Push back the node and its updated iterator.
                     stack.push((u, it));
-                    if !self.visited[v].load(Ordering::Relaxed) {
-                        self.visited[v].store(true, Ordering::Relaxed);
+                    if self.visited.try_visit(v, Ordering::Relaxed) {
                         stack.push((v, self.out_neighbors(token, v)));
                     }
                 } else {

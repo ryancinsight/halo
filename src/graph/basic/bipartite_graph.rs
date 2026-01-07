@@ -15,8 +15,8 @@ use core::sync::atomic::Ordering;
 
 use crate::{
     collections::ChunkedVec,
-    concurrency::atomic::GhostAtomicBool,
     concurrency::worklist::GhostChaseLevDeque,
+    graph::access::visited::VisitedSet,
 };
 
 /// A bipartite graph whose visited bitmaps are branded.
@@ -41,8 +41,8 @@ pub struct GhostBipartiteGraph<'brand, const EDGE_CHUNK: usize> {
     // CSC: right vertices -> left vertices (transpose for efficient reverse lookup)
     right_to_left_offsets: Vec<usize>,
     right_to_left_edges: ChunkedVec<usize, EDGE_CHUNK>,
-    visited_left: Vec<GhostAtomicBool<'brand>>,
-    visited_right: Vec<GhostAtomicBool<'brand>>,
+    visited_left: VisitedSet<'brand>,
+    visited_right: VisitedSet<'brand>,
 }
 
 impl<'brand, const EDGE_CHUNK: usize> GhostBipartiteGraph<'brand, EDGE_CHUNK> {
@@ -110,8 +110,8 @@ impl<'brand, const EDGE_CHUNK: usize> GhostBipartiteGraph<'brand, EDGE_CHUNK> {
             right_edges.push(left);
         }
 
-        let visited_left = (0..left_count).map(|_| GhostAtomicBool::new(false)).collect();
-        let visited_right = (0..right_count).map(|_| GhostAtomicBool::new(false)).collect();
+        let visited_left = VisitedSet::new(left_count);
+        let visited_right = VisitedSet::new(right_count);
 
         Self {
             left_count,
@@ -147,12 +147,9 @@ impl<'brand, const EDGE_CHUNK: usize> GhostBipartiteGraph<'brand, EDGE_CHUNK> {
 
     /// Clears all visited flags.
     pub fn reset_visited(&self) {
-        for f in &self.visited_left {
-            f.store(false, Ordering::Relaxed);
-        }
-        for f in &self.visited_right {
-            f.store(false, Ordering::Relaxed);
-        }
+        let _ = Ordering::Relaxed;
+        self.visited_left.clear();
+        self.visited_right.clear();
     }
 
     /// Returns the right neighbors of a left vertex.
@@ -299,7 +296,7 @@ impl<'brand, const EDGE_CHUNK: usize> GhostBipartiteGraph<'brand, EDGE_CHUNK> {
         assert!(start_left < self.left_count, "left vertex {start_left} out of bounds");
 
         self.reset_visited();
-        self.visited_left[start_left].store(true, Ordering::Relaxed);
+        debug_assert!(self.visited_left.try_visit(start_left, Ordering::Relaxed));
         assert!(deque.push_bottom(start_left), "deque capacity too small");
 
         let mut count = 1;
@@ -308,8 +305,7 @@ impl<'brand, const EDGE_CHUNK: usize> GhostBipartiteGraph<'brand, EDGE_CHUNK> {
             if vertex < self.left_count {
                 // Left vertex - visit right neighbors
                 for right in self.left_neighbors(vertex) {
-                    if !self.visited_right[right].load(Ordering::Relaxed) {
-                        self.visited_right[right].store(true, Ordering::Relaxed);
+                    if self.visited_right.try_visit(right, Ordering::Relaxed) {
                         assert!(
                             deque.push_bottom(self.left_count + right),
                             "deque capacity too small"
@@ -321,8 +317,7 @@ impl<'brand, const EDGE_CHUNK: usize> GhostBipartiteGraph<'brand, EDGE_CHUNK> {
                 // Right vertex - visit left neighbors
                 let right = vertex - self.left_count;
                 for left in self.right_neighbors(right) {
-                    if !self.visited_left[left].load(Ordering::Relaxed) {
-                        self.visited_left[left].store(true, Ordering::Relaxed);
+                    if self.visited_left.try_visit(left, Ordering::Relaxed) {
                         assert!(deque.push_bottom(left), "deque capacity too small");
                         count += 1;
                     }
@@ -338,7 +333,7 @@ impl<'brand, const EDGE_CHUNK: usize> GhostBipartiteGraph<'brand, EDGE_CHUNK> {
         assert!(start_right < self.right_count, "right vertex {start_right} out of bounds");
 
         self.reset_visited();
-        self.visited_right[start_right].store(true, Ordering::Relaxed);
+        debug_assert!(self.visited_right.try_visit(start_right, Ordering::Relaxed));
         assert!(
             deque.push_bottom(self.left_count + start_right),
             "deque capacity too small"
@@ -350,8 +345,7 @@ impl<'brand, const EDGE_CHUNK: usize> GhostBipartiteGraph<'brand, EDGE_CHUNK> {
             if vertex < self.left_count {
                 // Left vertex - visit right neighbors
                 for right in self.left_neighbors(vertex) {
-                    if !self.visited_right[right].load(Ordering::Relaxed) {
-                        self.visited_right[right].store(true, Ordering::Relaxed);
+                    if self.visited_right.try_visit(right, Ordering::Relaxed) {
                         assert!(
                             deque.push_bottom(self.left_count + right),
                             "deque capacity too small"
@@ -363,8 +357,7 @@ impl<'brand, const EDGE_CHUNK: usize> GhostBipartiteGraph<'brand, EDGE_CHUNK> {
                 // Right vertex - visit left neighbors
                 let right = vertex - self.left_count;
                 for left in self.right_neighbors(right) {
-                    if !self.visited_left[left].load(Ordering::Relaxed) {
-                        self.visited_left[left].store(true, Ordering::Relaxed);
+                    if self.visited_left.try_visit(left, Ordering::Relaxed) {
                         assert!(deque.push_bottom(left), "deque capacity too small");
                         count += 1;
                     }

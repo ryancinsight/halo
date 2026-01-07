@@ -11,6 +11,7 @@ use core::{
 };
 
 use crate::{GhostToken, GhostUnsafeCell};
+use crate::cell::raw::access::ghost_unsafe_cell as guc;
 use inner::{Inner, State};
 
 /// A token-gated one-shot lazy value.
@@ -96,7 +97,7 @@ impl<'brand, T, F> Drop for GhostLazyLock<'brand, T, F> {
     fn drop(&mut self) {
         // SAFETY: in drop, we have exclusive access to `self`.
         unsafe {
-            let inner = &mut *self.inner.as_mut_ptr_unchecked();
+            let inner = &mut *guc::as_mut_ptr_unchecked(&self.inner);
             match inner.state {
                 State::Uninit => ManuallyDrop::drop(&mut inner.slot.init),
                 State::Init => ManuallyDrop::drop(&mut inner.slot.value),

@@ -11,6 +11,7 @@ use core::{
 };
 
 use crate::{GhostToken, GhostUnsafeCell};
+use crate::cell::raw::access::ghost_unsafe_cell as guc;
 use inner::Inner;
 
 /// A token-gated recomputable lazy cell.
@@ -100,7 +101,7 @@ impl<'brand, T, F> Drop for GhostLazyCell<'brand, T, F> {
     fn drop(&mut self) {
         // SAFETY: in drop, we have exclusive access to `self`.
         unsafe {
-            let inner = &mut *self.inner.as_mut_ptr_unchecked();
+            let inner = &mut *guc::as_mut_ptr_unchecked(&self.inner);
             if inner.is_init {
                 ptr::drop_in_place(inner.value.as_mut_ptr());
             }

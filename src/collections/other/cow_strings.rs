@@ -236,7 +236,7 @@ mod tests {
             let filtered: Vec<_> = strings.filter_ref(&token, |cow| cow.len() > 4)
                 .map(|cow| cow.as_ref())
                 .collect();
-            assert_eq!(filtered, vec!["static", "another_static"]);
+            assert_eq!(filtered, vec!["static", "owned", "another_static"]);
 
             // Test get_by_value
             let found_idx = strings.get_by_value(&token, "owned");

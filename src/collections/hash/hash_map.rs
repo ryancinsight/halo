@@ -561,13 +561,11 @@ where
     where
         F: Fn(&K, &V) -> bool,
     {
-        let mut count = 0;
         for i in 0..self.buckets.len() {
             let bucket = unsafe { self.buckets.get_unchecked(i) };
             let marker = unsafe { bucket.as_ptr().cast::<*const ()>().read() };
 
             if marker as usize == 1 {
-                count += 1;
                 let bucket = unsafe { bucket.assume_init_ref() };
                 let value_ref = bucket.value.borrow(token);
                 if !f(&bucket.key, value_ref) {
@@ -575,7 +573,9 @@ where
                 }
             }
         }
-        count > 0 // Empty map returns false for all_ref
+        // Mathematical convention: `∀` over an empty set is vacuously true.
+        // This also matches `BrandedVec::all_ref` semantics used elsewhere in the crate.
+        true
     }
 
     /// Zero-cost fold operation with iterator fusion.
@@ -737,9 +737,9 @@ unsafe impl<'brand, K: Sync, V: Sync, S: Sync> Sync for BrandedHashMap<'brand, K
         fn test_zero_copy_map_operations() {
             GhostToken::new(|token| {
                 let mut map = BrandedHashMap::new();
-                map.insert(&mut token, "key1", 1);
-                map.insert(&mut token, "key2", 2);
-                map.insert(&mut token, "key3", 3);
+                map.insert("key1", 1);
+                map.insert("key2", 2);
+                map.insert("key3", 3);
 
                 // Test find_ref
                 let found = map.find_ref(&token, |k, v| *k == "key2" && *v == 2);
@@ -773,7 +773,7 @@ unsafe impl<'brand, K: Sync, V: Sync, S: Sync> Sync for BrandedHashMap<'brand, K
         fn test_zero_copy_map_single_entry() {
             GhostToken::new(|token| {
                 let mut map = BrandedHashMap::new();
-                map.insert(&mut token, "single", 42);
+                map.insert("single", 42);
 
                 assert_eq!(map.find_ref(&token, |k, v| *k == "single" && *v == 42), Some((&"single", &42)));
                 assert!(map.any_ref(&token, |k, v| *k == "single" && *v == 42));
@@ -787,9 +787,9 @@ unsafe impl<'brand, K: Sync, V: Sync, S: Sync> Sync for BrandedHashMap<'brand, K
                 let mut map = BrandedHashMap::new();
 
                 // Insert entries that might collide
-                map.insert(&mut token, "key1", 1);
-                map.insert(&mut token, "key2", 2);
-                map.insert(&mut token, "key3", 3);
+                map.insert("key1", 1);
+                map.insert("key2", 2);
+                map.insert("key3", 3);
 
                 // All should be findable despite potential collisions
                 assert!(map.find_ref(&token, |k, v| *k == "key1" && *v == 1).is_some());
@@ -797,7 +797,7 @@ unsafe impl<'brand, K: Sync, V: Sync, S: Sync> Sync for BrandedHashMap<'brand, K
                 assert!(map.find_ref(&token, |k, v| *k == "key3" && *v == 3).is_some());
 
                 // Test removal and tombstone handling
-                assert_eq!(map.remove("key2"), Some(2));
+                assert_eq!(map.remove(&"key2"), Some(2));
                 assert_eq!(map.find_ref(&token, |k, _| *k == "key2"), None);
 
                 // Other entries should still be accessible

@@ -12,7 +12,7 @@ pub mod other;
 // Re-export commonly used types from submodules
 pub use vec::{BrandedVec, BrandedVecDeque, BrandedChunkedVec, ChunkedVec};
 pub use hash::{BrandedHashMap, BrandedHashSet};
-pub use other::{BrandedDeque, BrandedArena};
+pub use other::{BrandedDeque, BrandedArena, BrandedCowStrings};
 
 // Re-export for trait definitions
 pub use crate::GhostToken;

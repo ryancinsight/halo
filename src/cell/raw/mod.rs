@@ -5,6 +5,7 @@
 //! by their core functionality in the `cells` submodule.
 
 pub mod cells;
+pub(crate) mod access;
 
 pub use cells::{GhostUnsafeCell, GhostCell, GhostRefCell};
 
