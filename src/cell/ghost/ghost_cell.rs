@@ -9,6 +9,7 @@
 use crate::cell::raw::GhostUnsafeCell;
 
 /// A branded cell that can only be accessed using a token of the same brand.
+#[derive(Debug)]
 pub struct GhostCell<'brand, T> {
     pub(super) inner: GhostUnsafeCell<'brand, T>,
 }
@@ -43,4 +44,14 @@ impl<'brand, T> From<T> for GhostCell<'brand, T> {
 unsafe impl<'brand, T: Send> Send for GhostCell<'brand, T> {}
 unsafe impl<'brand, T: Sync> Sync for GhostCell<'brand, T> {}
 
+#[cfg(feature = "proptest")]
+impl<'brand, T: proptest::arbitrary::Arbitrary> proptest::arbitrary::Arbitrary for GhostCell<'brand, T> {
+    type Parameters = T::Parameters;
+    type Strategy = proptest::strategy::Map<T::Strategy, fn(T) -> Self>;
+
+    fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
+        use proptest::strategy::Strategy;
+        T::arbitrary_with(args).prop_map(GhostCell::new)
+    }
+}
 
