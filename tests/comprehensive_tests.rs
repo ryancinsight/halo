@@ -496,8 +496,48 @@ fn arena_key_invariants() {
     });
 }
 
-// Deque test temporarily disabled due to naming conflict resolution
-// TODO: Re-enable when module structure is clarified
+#[test]
+fn branded_deque_comprehensive_test() {
+    // Test BrandedDeque (the ring buffer implementation)
+    // Note: BrandedDeque is not exported in the root halo prelude, so we import it fully qualified
+    // to avoid conflict with potential other Deque names.
+    use halo::collections::BrandedDeque;
+
+    GhostToken::new(|mut token| {
+        let mut deque: BrandedDeque<'_, i32, 16> = BrandedDeque::new();
+
+        assert!(deque.is_empty());
+
+        // Test mixed front/back operations
+        deque.push_back(1).unwrap();
+        deque.push_front(2).unwrap();
+        deque.push_back(3).unwrap();
+
+        // Structure should be: [2, 1, 3]
+        assert_eq!(*deque.front(&token).unwrap(), 2);
+        assert_eq!(*deque.back(&token).unwrap(), 3);
+        assert_eq!(deque.len(), 3);
+
+        // Test random access
+        assert_eq!(*deque.get(&token, 0).unwrap(), 2);
+        assert_eq!(*deque.get(&token, 1).unwrap(), 1);
+        assert_eq!(*deque.get(&token, 2).unwrap(), 3);
+
+        // Test mutation
+        if let Some(val) = deque.get_mut(&mut token, 1) {
+            *val = 10;
+        }
+        // Structure: [2, 10, 3]
+        assert_eq!(*deque.get(&token, 1).unwrap(), 10);
+
+        // Test removal
+        assert_eq!(deque.pop_front().map(|c| c.into_inner()), Some(2));
+        assert_eq!(deque.pop_back().map(|c| c.into_inner()), Some(3));
+        assert_eq!(deque.len(), 1);
+        assert_eq!(deque.pop_front().map(|c| c.into_inner()), Some(10));
+        assert!(deque.is_empty());
+    });
+}
 
 // ===== RUSTBELT SAFETY VALIDATION TESTS =====
 
