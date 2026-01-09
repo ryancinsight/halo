@@ -49,6 +49,71 @@ impl<'a, 'brand, K, V> Iterator for BrandedHashMapValues<'a, 'brand, K, V> {
     }
 }
 
+/// Consuming iterator for BrandedHashMap.
+pub struct IntoIter<'brand, K, V> {
+    buckets: Box<[MaybeUninit<Bucket<'brand, K, V>>]>,
+    index: usize,
+    len: usize,
+}
+
+impl<'brand, K, V> Iterator for IntoIter<'brand, K, V> {
+    type Item = (K, V);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.len == 0 {
+            return None;
+        }
+
+        while self.index < self.buckets.len() {
+            unsafe {
+                let bucket_ptr = self.buckets.get_unchecked_mut(self.index);
+                // Access marker directly via raw pointer to avoid layout assumptions
+                let marker = (*bucket_ptr.as_ptr())._marker;
+                self.index += 1;
+
+                if marker as usize == 1 {
+                    // Occupied
+                    let bucket = bucket_ptr.assume_init_read();
+                    self.len -= 1;
+                    return Some((bucket.key, bucket.value.into_inner()));
+                }
+            }
+        }
+        None
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.len, Some(self.len))
+    }
+}
+
+impl<'brand, K, V> ExactSizeIterator for IntoIter<'brand, K, V> {
+    fn len(&self) -> usize {
+        self.len
+    }
+}
+
+impl<'brand, K, V> Drop for IntoIter<'brand, K, V> {
+    fn drop(&mut self) {
+        // Drop remaining elements
+        if self.len > 0 {
+            while self.index < self.buckets.len() {
+                unsafe {
+                    let bucket_ptr = self.buckets.get_unchecked_mut(self.index);
+                    let marker = (*bucket_ptr.as_ptr())._marker;
+                    if marker as usize == 1 {
+                        // Drop bucket contents
+                        // We read it to move it into a temporary that gets dropped
+                        let _ = bucket_ptr.assume_init_read();
+                    }
+                    self.index += 1;
+                }
+            }
+        }
+        // Box is dropped here, deallocating memory.
+    }
+}
+
 /// High-performance hash map with token-gated values.
 ///
 /// Memory layout optimized for cache performance and SIMD operations.
@@ -725,7 +790,58 @@ impl<'brand, K, V, S> Drop for BrandedHashMap<'brand, K, V, S> {
 unsafe impl<'brand, K: Send, V: Send, S: Send> Send for BrandedHashMap<'brand, K, V, S> {}
 unsafe impl<'brand, K: Sync, V: Sync, S: Sync> Sync for BrandedHashMap<'brand, K, V, S> {}
 
-// TODO: Implement conversion traits for the new HashMap implementation
+impl<'brand, K, V, S> IntoIterator for BrandedHashMap<'brand, K, V, S> {
+    type Item = (K, V);
+    type IntoIter = IntoIter<'brand, K, V>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        // We move the buckets out and forget self so Drop is not called on the empty shell
+        // (or rather, we ensure we don't drop the elements twice)
+        let buckets = unsafe { std::ptr::read(&self.buckets) };
+        let len = self.len;
+
+        // Ensure other fields like hash_builder are properly dropped if they implement Drop
+        let _ = unsafe { std::ptr::read(&self.hash_builder) };
+
+        std::mem::forget(self);
+
+        IntoIter {
+            buckets,
+            index: 0,
+            len,
+        }
+    }
+}
+
+impl<'brand, K, V, S> FromIterator<(K, V)> for BrandedHashMap<'brand, K, V, S>
+where
+    K: Eq + Hash,
+    S: BuildHasher + Default,
+{
+    fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
+        let iter = iter.into_iter();
+        let (lower, _) = iter.size_hint();
+        let mut map = Self::with_capacity_and_hasher(lower, S::default());
+        map.extend(iter);
+        map
+    }
+}
+
+impl<'brand, K, V, S> Extend<(K, V)> for BrandedHashMap<'brand, K, V, S>
+where
+    K: Eq + Hash,
+    S: BuildHasher,
+{
+    fn extend<T: IntoIterator<Item = (K, V)>>(&mut self, iter: T) {
+        let iter = iter.into_iter();
+        let (lower, _) = iter.size_hint();
+        self.reserve(lower);
+
+        for (k, v) in iter {
+            self.insert(k, v);
+        }
+    }
+}
 
     /// Tests for zero-copy operations and advanced features.
     #[cfg(test)]
