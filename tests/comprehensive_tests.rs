@@ -385,14 +385,22 @@ fn test_complex_data_structures() {
     });
 }
 
-// Property-based tests temporarily disabled - requires proptest feature
-// TODO: Re-enable when proptest is properly configured as a feature
-
+// Property-based tests
 use proptest::prelude::*;
+use proptest::test_runner::{TestCaseResult, TestRunner};
 
-proptest! {
-    #[test]
-    fn test_ghost_cell_properties(val: i32, new_val: i32) {
+fn run_proptest<S, F>(strategy: S, test: F)
+where
+    S: Strategy,
+    F: Fn(S::Value) -> TestCaseResult,
+{
+    let mut runner = TestRunner::default();
+    runner.run(&strategy, test).unwrap();
+}
+
+#[test]
+fn test_ghost_cell_properties() {
+    run_proptest((any::<i32>(), any::<i32>()), |(val, new_val)| {
         GhostToken::new(|mut token| {
             let cell = GhostCell::new(val);
 
@@ -403,11 +411,13 @@ proptest! {
             *cell.borrow_mut(&mut token) = new_val;
             prop_assert_eq!(*cell.borrow(&token), new_val);
             Ok(())
-        }).unwrap()
-    }
+        })
+    });
+}
 
-    #[test]
-    fn test_ghost_cell_replace(val: i32, new_val: i32) {
+#[test]
+fn test_ghost_cell_replace() {
+    run_proptest((any::<i32>(), any::<i32>()), |(val, new_val)| {
         GhostToken::new(|mut token| {
             let cell = GhostCell::new(val);
             let old = cell.replace(&mut token, new_val);
@@ -415,19 +425,21 @@ proptest! {
             prop_assert_eq!(old, val);
             prop_assert_eq!(*cell.borrow(&token), new_val);
             Ok(())
-        }).unwrap()
-    }
+        })
+    });
+}
 
-    #[test]
-    fn test_ghost_cell_map(val: i32) {
+#[test]
+fn test_ghost_cell_map() {
+    run_proptest(any::<i32>(), |val| {
         GhostToken::new(|token| {
             let cell = GhostCell::new(val);
             let mapped = cell.map(&token, |x| x.to_string());
 
             prop_assert_eq!(mapped.borrow(&token), &val.to_string());
             Ok(())
-        }).unwrap()
-    }
+        })
+    });
 }
 
 // ===== FORMAL VERIFICATION TESTS =====
