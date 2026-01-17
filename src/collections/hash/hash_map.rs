@@ -316,7 +316,7 @@ where
     ///
     /// Time complexity: O(1) average case.
     #[inline]
-    pub fn get_mut<'a>(&'a mut self, token: &'a mut GhostToken<'brand>, key: &K) -> Option<&'a mut V> {
+    pub fn get_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>, key: &K) -> Option<&'a mut V> {
         if self.capacity == 0 {
             return None;
         }
@@ -324,7 +324,7 @@ where
         let (idx, found) = self.find_bucket(key);
         if found {
             unsafe {
-                let bucket = self.buckets.get_unchecked_mut(idx).assume_init_mut();
+                let bucket = self.buckets.get_unchecked(idx).assume_init_ref();
                 Some(bucket.value.borrow_mut(token))
             }
         } else {
@@ -977,6 +977,24 @@ where
             assert_eq!(removed, Some(3));
             assert_eq!(map.len(), 0);
             assert!(map.is_empty());
+        });
+    }
+
+    #[test]
+    fn branded_hash_map_interior_mutability() {
+        GhostToken::new(|mut token| {
+            let mut map = BrandedHashMap::new();
+            map.insert("a", 1);
+
+            // Shared borrow of map
+            let map_ref = &map;
+
+            // Mutable borrow of value via token
+            if let Some(val) = map_ref.get_mut(&mut token, &"a") {
+                *val += 100;
+            }
+
+            assert_eq!(*map.get(&token, &"a").unwrap(), 101);
         });
     }
 }
