@@ -102,7 +102,9 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
     }
 
     /// Pushes an element to the front of the list.
-    pub fn push_front(&mut self, token: &mut GhostToken<'brand>, value: T) {
+    ///
+    /// Returns the index of the newly created node.
+    pub fn push_front(&mut self, token: &mut GhostToken<'brand>, value: T) -> usize {
         let new_idx = self.alloc(token, value);
         let old_head = self.head;
 
@@ -120,10 +122,13 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
 
         self.head = Some(new_idx);
         self.len += 1;
+        new_idx
     }
 
     /// Pushes an element to the back of the list.
-    pub fn push_back(&mut self, token: &mut GhostToken<'brand>, value: T) {
+    ///
+    /// Returns the index of the newly created node.
+    pub fn push_back(&mut self, token: &mut GhostToken<'brand>, value: T) -> usize {
         let new_idx = self.alloc(token, value);
         let old_tail = self.tail;
 
@@ -141,6 +146,87 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
 
         self.tail = Some(new_idx);
         self.len += 1;
+        new_idx
+    }
+
+    /// Returns a reference to the element at the given index.
+    ///
+    /// Returns `None` if the index is invalid or the slot is free.
+    pub fn get<'a>(&'a self, token: &'a GhostToken<'brand>, idx: usize) -> Option<&'a T> {
+        match self.storage.get(token, idx) {
+            Some(Slot::Occupied(node)) => Some(&node.value),
+            _ => None,
+        }
+    }
+
+    /// Returns a mutable reference to the element at the given index.
+    ///
+    /// Returns `None` if the index is invalid or the slot is free.
+    pub fn get_mut<'a>(
+        &'a self,
+        token: &'a mut GhostToken<'brand>,
+        idx: usize,
+    ) -> Option<&'a mut T> {
+        match self.storage.get_mut(token, idx) {
+            Some(Slot::Occupied(node)) => Some(&mut node.value),
+            _ => None,
+        }
+    }
+
+    /// Moves the node at `idx` to the front of the list.
+    ///
+    /// # Panics
+    /// Panics if `idx` does not point to a valid occupied node.
+    pub fn move_to_front(&mut self, token: &mut GhostToken<'brand>, idx: usize) {
+        if self.head == Some(idx) {
+            return;
+        }
+
+        // Detach from current position
+        let (prev, next) = {
+            let node = match self.storage.borrow_mut(token, idx) {
+                Slot::Occupied(node) => node,
+                _ => panic!("Node not found at index {}", idx),
+            };
+            (node.prev, node.next)
+        };
+
+        // Update neighbors
+        if let Some(p) = prev {
+            if let Slot::Occupied(node) = self.storage.borrow_mut(token, p) {
+                node.next = next;
+            }
+        } else {
+            // idx was head (handled by early return, but for completeness)
+            self.head = next;
+        }
+
+        if let Some(n) = next {
+            if let Slot::Occupied(node) = self.storage.borrow_mut(token, n) {
+                node.prev = prev;
+            }
+        } else {
+            // idx was tail
+            self.tail = prev;
+        }
+
+        // Attach to front
+        let old_head = self.head;
+        if let Some(h) = old_head {
+            if let Slot::Occupied(node) = self.storage.borrow_mut(token, h) {
+                node.prev = Some(idx);
+            }
+        } else {
+            // List was empty (impossible if idx was in it) or became empty
+            self.tail = Some(idx);
+        }
+
+        if let Slot::Occupied(node) = self.storage.borrow_mut(token, idx) {
+            node.prev = None;
+            node.next = old_head;
+        }
+
+        self.head = Some(idx);
     }
 
     /// Pops an element from the front of the list.

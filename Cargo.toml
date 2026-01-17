@@ -46,6 +46,14 @@ harness = false
 name = "collection_performance"
 harness = false
 
+[[bench]]
+name = "binary_heap_benchmark"
+harness = false
+
+[[bench]]
+name = "lru_cache_benchmark"
+harness = false
+
 [[bin]]
 name = "analyze_performance"
 path = "analyze_performance.rs"
