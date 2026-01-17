@@ -156,6 +156,11 @@ impl<'brand, T> BrandedVec<'brand, T> {
         self.inner.swap_remove(index)
     }
 
+    /// Swaps two elements in the vector.
+    pub fn swap(&mut self, a: usize, b: usize) {
+        self.inner.swap(a, b);
+    }
+
     /// Retains only the elements specified by the predicate.
     pub fn retain<F>(&mut self, token: &mut GhostToken<'brand>, mut f: F)
     where

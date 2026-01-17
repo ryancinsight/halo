@@ -102,7 +102,7 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
     }
 
     /// Pushes an element to the front of the list.
-    pub fn push_front(&mut self, token: &mut GhostToken<'brand>, value: T) {
+    pub fn push_front(&mut self, token: &mut GhostToken<'brand>, value: T) -> usize {
         let new_idx = self.alloc(token, value);
         let old_head = self.head;
 
@@ -120,10 +120,11 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
 
         self.head = Some(new_idx);
         self.len += 1;
+        new_idx
     }
 
     /// Pushes an element to the back of the list.
-    pub fn push_back(&mut self, token: &mut GhostToken<'brand>, value: T) {
+    pub fn push_back(&mut self, token: &mut GhostToken<'brand>, value: T) -> usize {
         let new_idx = self.alloc(token, value);
         let old_tail = self.tail;
 
@@ -141,6 +142,7 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
 
         self.tail = Some(new_idx);
         self.len += 1;
+        new_idx
     }
 
     /// Pops an element from the front of the list.
@@ -219,6 +221,134 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
         match self.storage.borrow(token, tail_idx) {
             Slot::Occupied(node) => Some(&node.value),
             _ => None,
+        }
+    }
+
+    /// Returns a reference to the element at the given index.
+    pub fn get<'a>(&'a self, token: &'a GhostToken<'brand>, index: usize) -> Option<&'a T> {
+        match self.storage.borrow(token, index) {
+            Slot::Occupied(node) => Some(&node.value),
+            _ => None,
+        }
+    }
+
+    /// Returns a mutable reference to the element at the given index.
+    pub fn get_mut<'a>(&'a mut self, token: &'a mut GhostToken<'brand>, index: usize) -> Option<&'a mut T> {
+        match self.storage.borrow_mut(token, index) {
+            Slot::Occupied(node) => Some(&mut node.value),
+            _ => None,
+        }
+    }
+
+    /// Moves the node at `index` to the front of the list.
+    ///
+    /// # Panics
+    /// Panics if `index` is not a valid node index.
+    pub fn move_to_front(&mut self, token: &mut GhostToken<'brand>, index: usize) {
+        if self.head == Some(index) {
+            return;
+        }
+
+        // Verify index is valid and get neighbors
+        let (prev_idx, next_idx) = if let Slot::Occupied(node) = self.storage.borrow(token, index) {
+            (node.prev, node.next)
+        } else {
+             panic!("Invalid index");
+        };
+
+        // Detach from current position
+        if let Some(prev) = prev_idx {
+            if let Slot::Occupied(node) = self.storage.borrow_mut(token, prev) {
+                node.next = next_idx;
+            }
+        } else {
+            // If prev is None, we are at head. But we checked head == Some(index) above.
+            // This case should be unreachable if invariants hold, unless the list is corrupted.
+            // Or maybe head is somehow not index but prev is None? That implies head IS index.
+            // So we can assume unreachable! or just ignore.
+        }
+
+        if let Some(next) = next_idx {
+            if let Slot::Occupied(node) = self.storage.borrow_mut(token, next) {
+                node.prev = prev_idx;
+            }
+        } else {
+             self.tail = prev_idx;
+        }
+
+        // Attach to front
+        let old_head = self.head;
+        if let Some(head_idx) = old_head {
+             if let Slot::Occupied(node) = self.storage.borrow_mut(token, head_idx) {
+                 node.prev = Some(index);
+             }
+        }
+
+        if let Slot::Occupied(node) = self.storage.borrow_mut(token, index) {
+            node.prev = None;
+            node.next = old_head;
+        }
+
+        self.head = Some(index);
+        // If list was empty before (it wasn't, we had `index`), or had 1 element...
+        if self.tail.is_none() {
+            // Should not happen if we are moving an existing element
+             self.tail = Some(index);
+        } else if self.tail == Some(index) && next_idx.is_none() {
+             // We were tail, and now we are head.
+             // If we were the ONLY element, head==tail==index, caught by early return.
+             // If we were tail of >1 list, we detached. new tail is prev_idx.
+             // We are now head.
+        }
+    }
+
+    /// Moves the node at `index` to the back of the list.
+    ///
+    /// # Panics
+    /// Panics if `index` is not a valid node index.
+    pub fn move_to_back(&mut self, token: &mut GhostToken<'brand>, index: usize) {
+        if self.tail == Some(index) {
+            return;
+        }
+
+        // Verify index is valid and get neighbors
+        let (prev_idx, next_idx) = if let Slot::Occupied(node) = self.storage.borrow(token, index) {
+            (node.prev, node.next)
+        } else {
+             panic!("Invalid index");
+        };
+
+        // Detach from current position
+        if let Some(prev) = prev_idx {
+            if let Slot::Occupied(node) = self.storage.borrow_mut(token, prev) {
+                node.next = next_idx;
+            }
+        } else {
+            self.head = next_idx;
+        }
+
+        if let Some(next) = next_idx {
+            if let Slot::Occupied(node) = self.storage.borrow_mut(token, next) {
+                node.prev = prev_idx;
+            }
+        }
+
+        // Attach to back
+        let old_tail = self.tail;
+        if let Some(tail_idx) = old_tail {
+             if let Slot::Occupied(node) = self.storage.borrow_mut(token, tail_idx) {
+                 node.next = Some(index);
+             }
+        }
+
+        if let Slot::Occupied(node) = self.storage.borrow_mut(token, index) {
+            node.next = None;
+            node.prev = old_tail;
+        }
+
+        self.tail = Some(index);
+        if self.head.is_none() {
+            self.head = Some(index);
         }
     }
 
@@ -312,7 +442,7 @@ impl<'a, 'brand, T> CursorMut<'a, 'brand, T> {
     }
 
     /// Inserts a new element after the current element.
-    pub fn insert_after(&mut self, token: &mut GhostToken<'brand>, value: T) {
+    pub fn insert_after(&mut self, token: &mut GhostToken<'brand>, value: T) -> usize {
         if let Some(curr_idx) = self.current {
             let new_idx = self.list.alloc(token, value);
 
@@ -344,14 +474,37 @@ impl<'a, 'brand, T> CursorMut<'a, 'brand, T> {
             }
 
             self.list.len += 1;
+            new_idx
         } else if self.list.is_empty() {
-            self.list.push_back(token, value);
+            let new_idx = self.list.push_back(token, value);
             self.current = self.list.head;
+            new_idx
+        } else {
+             // If cursor is detached but list is not empty (e.g. at end), push back?
+             // Usually insert_after on None cursor implies push_front/back depending on convention.
+             // Here if current is None, we assume it's "before head" or "after tail"?
+             // The implementation says:
+             // if list is empty, push_back.
+             // If not empty, what?
+             // It seems original implementation handled list empty.
+             // We can just return push_back result.
+             // But wait, if cursor is None, we can't insert "after" it.
+             // I'll stick to original logic: if empty, push back.
+             // If not empty and current is None, it probably does nothing or panics?
+             // Original: "else if self.list.is_empty() { ... }"
+             // So if not empty and None, it does nothing?
+             // I should probably return Option<usize> or just usize (and panic/return 0 if nothing happened).
+             // But alloc returns usize.
+             // If nothing happens, I can't return a valid index.
+             // I'll change logic to return Option<usize> for inserts on cursor?
+             // But the request was to return usize.
+             // Let's assume valid state.
+             panic!("Cannot insert after None cursor on non-empty list");
         }
     }
 
     /// Inserts a new element before the current element.
-    pub fn insert_before(&mut self, token: &mut GhostToken<'brand>, value: T) {
+    pub fn insert_before(&mut self, token: &mut GhostToken<'brand>, value: T) -> usize {
          if let Some(curr_idx) = self.current {
             let new_idx = self.list.alloc(token, value);
 
@@ -384,9 +537,13 @@ impl<'a, 'brand, T> CursorMut<'a, 'brand, T> {
 
             self.list.len += 1;
             self.index += 1;
+            new_idx
         } else if self.list.is_empty() {
-            self.list.push_front(token, value);
+            let new_idx = self.list.push_front(token, value);
             self.current = self.list.head;
+            new_idx
+        } else {
+            panic!("Cannot insert before None cursor on non-empty list");
         }
     }
 
@@ -455,17 +612,44 @@ mod tests {
         GhostToken::new(|mut token| {
             let mut list = BrandedDoublyLinkedList::new();
 
-            list.push_back(&mut token, 1);
-            list.push_back(&mut token, 2);
-            list.push_front(&mut token, 0);
+            let idx1 = list.push_back(&mut token, 1);
+            let idx2 = list.push_back(&mut token, 2);
+            let idx0 = list.push_front(&mut token, 0);
 
             assert_eq!(list.len(), 3);
+            assert_eq!(idx1, 0); // First alloc
+            assert_eq!(idx2, 1); // Second alloc
+            assert_eq!(idx0, 2); // Third alloc
 
             assert_eq!(list.pop_front(&mut token), Some(0));
             assert_eq!(list.pop_back(&mut token), Some(2));
             assert_eq!(list.pop_back(&mut token), Some(1));
             assert_eq!(list.pop_back(&mut token), None);
             assert!(list.is_empty());
+        });
+    }
+
+    #[test]
+    fn test_move_to_front() {
+        GhostToken::new(|mut token| {
+            let mut list = BrandedDoublyLinkedList::new();
+            let idx1 = list.push_back(&mut token, 1); // Head
+            let idx2 = list.push_back(&mut token, 2);
+            let idx3 = list.push_back(&mut token, 3); // Tail
+
+            // List: 1, 2, 3
+            list.move_to_front(&mut token, idx2);
+            // List: 2, 1, 3
+            assert_eq!(list.front(&token), Some(&2));
+            assert_eq!(list.back(&token), Some(&3));
+
+            list.move_to_front(&mut token, idx3);
+            // List: 3, 2, 1
+            assert_eq!(list.front(&token), Some(&3));
+            assert_eq!(list.back(&token), Some(&1));
+
+            list.move_to_front(&mut token, idx3); // Already front
+            assert_eq!(list.front(&token), Some(&3));
         });
     }
 
