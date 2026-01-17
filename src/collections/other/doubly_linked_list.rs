@@ -6,7 +6,30 @@
 
 use crate::GhostToken;
 use crate::collections::vec::BrandedVec;
+use crate::collections::ZeroCopyOps;
 use core::fmt;
+
+/// Zero-cost iterator for BrandedDoublyLinkedList.
+pub struct BrandedDoublyLinkedListIter<'a, 'brand, T> {
+    list: &'a BrandedDoublyLinkedList<'brand, T>,
+    current: Option<usize>,
+    token: &'a GhostToken<'brand>,
+}
+
+impl<'a, 'brand, T> Iterator for BrandedDoublyLinkedListIter<'a, 'brand, T> {
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let idx = self.current?;
+        match self.list.storage.borrow(self.token, idx) {
+            Slot::Occupied(node) => {
+                self.current = node.next;
+                Some(&node.value)
+            }
+            _ => None, // Should not happen for valid list
+        }
+    }
+}
 
 /// A node in the doubly linked list.
 #[derive(Debug, Clone)]
@@ -240,6 +263,15 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
         }
     }
 
+    /// Iterates over the list elements.
+    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> BrandedDoublyLinkedListIter<'a, 'brand, T> {
+        BrandedDoublyLinkedListIter {
+            list: self,
+            current: self.head,
+            token,
+        }
+    }
+
     /// Moves the node at `index` to the front of the list.
     ///
     /// # Panics
@@ -377,6 +409,29 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
 impl<'brand, T> Default for BrandedDoublyLinkedList<'brand, T> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl<'brand, T> ZeroCopyOps<'brand, T> for BrandedDoublyLinkedList<'brand, T> {
+    fn find_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<&'a T>
+    where
+        F: Fn(&T) -> bool,
+    {
+        self.iter(token).find(|&item| f(item))
+    }
+
+    fn any_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    where
+        F: Fn(&T) -> bool,
+    {
+        self.iter(token).any(|item| f(item))
+    }
+
+    fn all_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    where
+        F: Fn(&T) -> bool,
+    {
+        self.iter(token).all(|item| f(item))
     }
 }
 
@@ -707,6 +762,25 @@ mod tests {
 
             assert_eq!(list.pop_front(&mut token), Some(2));
             assert_eq!(list.pop_front(&mut token), Some(3));
+        });
+    }
+
+    #[test]
+    fn test_iter_and_zero_copy() {
+        GhostToken::new(|mut token| {
+            let mut list = BrandedDoublyLinkedList::new();
+            list.push_back(&mut token, 1);
+            list.push_back(&mut token, 2);
+            list.push_back(&mut token, 3);
+
+            // Test iter
+            let collected: Vec<i32> = list.iter(&token).copied().collect();
+            assert_eq!(collected, vec![1, 2, 3]);
+
+            // Test zero copy ops
+            assert_eq!(list.find_ref(&token, |&x| x == 2), Some(&2));
+            assert!(list.any_ref(&token, |&x| x == 3));
+            assert!(list.all_ref(&token, |&x| x > 0));
         });
     }
 }

@@ -4,6 +4,7 @@
 //! It supports standard max-heap operations with token-gated access.
 
 use crate::GhostToken;
+use crate::collections::{ZeroCopyOps, vec::vec::BrandedVecIter};
 use crate::collections::vec::BrandedVec;
 use core::cmp::Ord;
 use core::fmt;
@@ -119,6 +120,36 @@ impl<'brand, T: Ord> BrandedBinaryHeap<'brand, T> {
     }
 }
 
+impl<'brand, T> BrandedBinaryHeap<'brand, T> {
+    /// Iterates over all elements in the heap in arbitrary order.
+    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> BrandedVecIter<'a, 'brand, T> {
+        self.data.iter(token)
+    }
+}
+
+impl<'brand, T> ZeroCopyOps<'brand, T> for BrandedBinaryHeap<'brand, T> {
+    fn find_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<&'a T>
+    where
+        F: Fn(&T) -> bool,
+    {
+        self.data.find_ref(token, f)
+    }
+
+    fn any_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    where
+        F: Fn(&T) -> bool,
+    {
+        self.data.any_ref(token, f)
+    }
+
+    fn all_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    where
+        F: Fn(&T) -> bool,
+    {
+        self.data.all_ref(token, f)
+    }
+}
+
 impl<'brand, T: Ord> Default for BrandedBinaryHeap<'brand, T> {
     fn default() -> Self {
         Self::new()
@@ -176,6 +207,25 @@ mod tests {
             expected.reverse();
 
             assert_eq!(result, expected);
+        });
+    }
+
+    #[test]
+    fn test_iter_and_zero_copy() {
+        GhostToken::new(|mut token| {
+            let mut heap = BrandedBinaryHeap::new();
+            heap.push(&mut token, 1);
+            heap.push(&mut token, 3);
+            heap.push(&mut token, 2);
+
+            // Test iter (order is arbitrary but all elements should be present)
+            let count = heap.iter(&token).count();
+            assert_eq!(count, 3);
+
+            // Test zero copy ops
+            assert_eq!(heap.find_ref(&token, |&x| x == 2), Some(&2));
+            assert!(heap.any_ref(&token, |&x| x == 3));
+            assert!(heap.all_ref(&token, |&x| x > 0));
         });
     }
 }

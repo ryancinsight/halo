@@ -9,6 +9,41 @@
 
 use std::collections::VecDeque;
 use crate::{GhostCell, GhostToken};
+use crate::collections::ZeroCopyOps;
+
+/// Zero-cost iterator for BrandedVecDeque.
+pub struct BrandedVecDequeIter<'a, 'brand, T> {
+    iter: std::collections::vec_deque::Iter<'a, GhostCell<'brand, T>>,
+    token: &'a GhostToken<'brand>,
+}
+
+impl<'a, 'brand, T> Iterator for BrandedVecDequeIter<'a, 'brand, T> {
+    type Item = &'a T;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|cell| cell.borrow(self.token))
+    }
+
+    #[inline(always)]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.iter.size_hint()
+    }
+
+    #[inline(always)]
+    fn count(self) -> usize {
+        self.iter.count()
+    }
+}
+
+impl<'a, 'brand, T> DoubleEndedIterator for BrandedVecDequeIter<'a, 'brand, T> {
+    #[inline(always)]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.iter.next_back().map(|cell| cell.borrow(self.token))
+    }
+}
+
+impl<'a, 'brand, T> ExactSizeIterator for BrandedVecDequeIter<'a, 'brand, T> {}
 
 /// A double-ended queue of token-gated elements.
 #[repr(transparent)]
@@ -76,8 +111,11 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
 
 
     /// Iterates over the elements.
-    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> impl Iterator<Item = &'a T> + 'a {
-        self.inner.iter().map(move |c| c.borrow(token))
+    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> BrandedVecDequeIter<'a, 'brand, T> {
+        BrandedVecDequeIter {
+            iter: self.inner.iter(),
+            token,
+        }
     }
 
     /// Exclusive iteration via callback.
@@ -136,6 +174,32 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
     }
 }
 
+impl<'brand, T> ZeroCopyOps<'brand, T> for BrandedVecDeque<'brand, T> {
+    #[inline(always)]
+    fn find_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<&'a T>
+    where
+        F: Fn(&T) -> bool,
+    {
+        self.iter(token).find(|&item| f(item))
+    }
+
+    #[inline(always)]
+    fn any_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    where
+        F: Fn(&T) -> bool,
+    {
+        self.iter(token).any(|item| f(item))
+    }
+
+    #[inline(always)]
+    fn all_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    where
+        F: Fn(&T) -> bool,
+    {
+        self.iter(token).all(|item| f(item))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -153,6 +217,29 @@ mod tests {
 
             *dq.get_mut(&mut token, 0).unwrap() += 5;
             assert_eq!(*dq.get(&token, 0).unwrap(), 25);
+        });
+    }
+
+    #[test]
+    fn test_iter_and_zero_copy() {
+        GhostToken::new(|mut token| {
+            let mut dq = BrandedVecDeque::new();
+            dq.push_back(1);
+            dq.push_back(2);
+            dq.push_back(3);
+
+            // Test iter
+            let collected: Vec<i32> = dq.iter(&token).copied().collect();
+            assert_eq!(collected, vec![1, 2, 3]);
+
+            // Test iter rev
+            let collected_rev: Vec<i32> = dq.iter(&token).rev().copied().collect();
+            assert_eq!(collected_rev, vec![3, 2, 1]);
+
+            // Test zero copy ops
+            assert_eq!(dq.find_ref(&token, |&x| x == 2), Some(&2));
+            assert!(dq.any_ref(&token, |&x| x == 3));
+            assert!(dq.all_ref(&token, |&x| x > 0));
         });
     }
 }
