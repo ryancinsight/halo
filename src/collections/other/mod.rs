@@ -8,9 +8,11 @@ pub mod arena;
 pub mod cow_strings;
 pub mod doubly_linked_list;
 pub mod binary_heap;
+pub mod lru_cache;
 
 pub use deque::BrandedDeque;
 pub use arena::BrandedArena;
 pub use cow_strings::BrandedCowStrings;
 pub use doubly_linked_list::BrandedDoublyLinkedList;
 pub use binary_heap::BrandedBinaryHeap;
+pub use lru_cache::BrandedLruCache;

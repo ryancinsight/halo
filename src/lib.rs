@@ -119,6 +119,7 @@ pub use collections::{
     BrandedCowStrings,
     BrandedDoublyLinkedList,
     BrandedBinaryHeap,
+    BrandedLruCache,
 };
 pub use graph::{GhostAdjacencyGraph, GhostBipartiteGraph, GhostCscGraph, GhostCsrGraph, GhostDag};
 pub use token::GhostToken;

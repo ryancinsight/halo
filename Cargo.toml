@@ -50,6 +50,10 @@ harness = false
 name = "binary_heap_benchmark"
 harness = false
 
+[[bench]]
+name = "lru_cache_benchmark"
+harness = false
+
 [[bin]]
 name = "analyze_performance"
 path = "analyze_performance.rs"
