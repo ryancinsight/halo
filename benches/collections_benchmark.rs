@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use halo::collections::{BrandedChunkedVec, BrandedVec, BrandedVecDeque, BrandedHashMap, BrandedHashSet, BrandedArena};
+use halo::collections::{BrandedChunkedVec, BrandedVec, BrandedVecDeque, BrandedHashMap, BrandedHashSet, BrandedArena, BrandedBTreeMap};
 use halo::GhostToken;
 
 fn bench_branded_chunked_vec_32(c: &mut Criterion) {
@@ -463,6 +463,88 @@ fn bench_branded_arena_operations(c: &mut Criterion) {
     });
 }
 
+fn bench_branded_btree_map_operations(c: &mut Criterion) {
+    let mut group = c.benchmark_group("branded_btree_map_operations");
+
+    group.bench_function("branded_btree_map_insert_1000", |b| {
+        GhostToken::new(|token| {
+            b.iter(|| {
+                let mut map = BrandedBTreeMap::new();
+                for i in 0..1000 {
+                    map.insert(i, i * 10);
+                }
+                black_box(&map);
+            });
+        });
+    });
+
+    group.bench_function("std_btree_map_insert_1000", |b| {
+        b.iter(|| {
+            let mut map = std::collections::BTreeMap::new();
+            for i in 0..1000 {
+                map.insert(i, i * 10);
+            }
+            black_box(&map);
+        });
+    });
+
+    group.bench_function("branded_btree_map_get_1000", |b| {
+        GhostToken::new(|token| {
+            let mut map = BrandedBTreeMap::new();
+            for i in 0..1000 {
+                map.insert(i, i * 10);
+            }
+            b.iter(|| {
+                for i in 0..1000 {
+                    black_box(map.get(&token, &i));
+                }
+            });
+        });
+    });
+
+    group.bench_function("std_btree_map_get_1000", |b| {
+        let mut map = std::collections::BTreeMap::new();
+        for i in 0..1000 {
+            map.insert(i, i * 10);
+        }
+        b.iter(|| {
+            for i in 0..1000 {
+                black_box(map.get(&i));
+            }
+        });
+    });
+
+    group.finish();
+}
+
+fn bench_branded_hash_map_vs_std(c: &mut Criterion) {
+    let mut group = c.benchmark_group("hash_map_comparison");
+
+    group.bench_function("branded_hash_map_insert_1000", |b| {
+        GhostToken::new(|token| {
+            b.iter(|| {
+                let mut map = BrandedHashMap::new();
+                for i in 0..1000 {
+                    map.insert(i, i);
+                }
+                black_box(&map);
+            });
+        });
+    });
+
+    group.bench_function("std_hash_map_insert_1000", |b| {
+        b.iter(|| {
+            let mut map = std::collections::HashMap::new();
+            for i in 0..1000 {
+                map.insert(i, i);
+            }
+            black_box(&map);
+        });
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_branded_chunked_vec_32,
@@ -477,6 +559,8 @@ criterion_group!(
     bench_comprehensive_stdlib_comparison,
     bench_edge_case_performance,
     bench_branded_hash_set_operations,
-    bench_branded_arena_operations
+    bench_branded_arena_operations,
+    bench_branded_btree_map_operations,
+    bench_branded_hash_map_vs_std
 );
 criterion_main!(benches);
