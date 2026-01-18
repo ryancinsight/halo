@@ -105,3 +105,6 @@ harness = false
 [[bench]]
 name = "trie_benchmark"
 harness = false
+[[bench]]
+name = "active_map_benchmark"
+harness = false

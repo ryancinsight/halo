@@ -496,6 +496,21 @@ where
         })
     }
 
+    /// Applies `f` to all entries in the map, allowing mutation of values.
+    pub fn for_each_mut<F>(&self, token: &mut GhostToken<'brand>, mut f: F)
+    where
+        F: FnMut(&K, &mut V),
+    {
+        for i in 0..self.capacity {
+            if self.ctrl[i] & 0x80 == 0 {
+                unsafe {
+                    let k = self.keys.get_unchecked(i).assume_init_ref();
+                    let v = self.values.get_unchecked(i).assume_init_ref().borrow_mut(token);
+                    f(k, v);
+                }
+            }
+        }
+    }
 }
 
 impl<'brand, K, V, S> Drop for BrandedHashMap<'brand, K, V, S> {
