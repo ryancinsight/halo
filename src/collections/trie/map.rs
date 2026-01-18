@@ -147,7 +147,7 @@ impl<'brand, K, V> BrandedRadixTrieMap<'brand, K, V> {
     where F: FnMut(&[u8], &V)
     {
         if let Some(root) = self.root {
-            let mut key_buf = Vec::new();
+            let mut key_buf: Vec<u8> = Vec::new();
             let mut wrapper = |k: &[u8], v: &V| { f(k, v); true };
             self.traverse_dfs(token, root, &mut key_buf, &mut wrapper);
         }
@@ -475,12 +475,11 @@ where K: AsRef<[u8]>,
          None
     }
 
-    fn any_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    fn any_ref<F>(&self, _token: &GhostToken<'brand>, _f: F) -> bool
     where
         F: Fn(&K, &V) -> bool
     {
-        if let Some(root) = self.root {
-             let mut key_buf = Vec::new();
+        if let Some(_root) = self.root {
              // Best effort: traverse but we can't invoke f because we can't construct &K
              // So we return false.
              // Ideally we should panic or documentation should say "Not supported for Trie".

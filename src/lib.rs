@@ -121,6 +121,10 @@ pub use collections::{
     BrandedString,
     BrandedDoublyLinkedList,
     BrandedIntervalMap,
+    ActivateVec,
+    ActiveVec,
+    BrandedSlice,
+    BrandedSliceMut,
 };
 pub use graph::{GhostAdjacencyGraph, GhostBipartiteGraph, GhostCscGraph, GhostCsrGraph, GhostDag};
 pub use token::GhostToken;
