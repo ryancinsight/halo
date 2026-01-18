@@ -1,5 +1,8 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use halo::collections::{BrandedChunkedVec, BrandedVec, BrandedVecDeque, BrandedHashMap, BrandedHashSet, BrandedArena, BrandedBTreeMap};
+use halo::collections::{
+    BrandedArena, BrandedBTreeMap, BrandedChunkedVec, BrandedCowStrings, BrandedHashMap,
+    BrandedHashSet, BrandedString, BrandedVec, BrandedVecDeque,
+};
 use halo::GhostToken;
 
 fn bench_branded_chunked_vec_32(c: &mut Criterion) {
@@ -545,6 +548,37 @@ fn bench_branded_hash_map_vs_std(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_branded_cow_strings_operations(c: &mut Criterion) {
+    c.bench_function("branded_cow_strings_insert_lookup", |b| {
+        GhostToken::new(|token| {
+            b.iter(|| {
+                let mut strings = BrandedCowStrings::new();
+                for i in 0..500 {
+                    let s = format!("string_{}", i);
+                    strings.insert_owned(&token, s);
+                }
+                for i in 0..500 {
+                    let s = format!("string_{}", i);
+                    black_box(strings.get_by_value(&token, &s));
+                }
+            });
+        });
+    });
+}
+
+fn bench_branded_string_operations(c: &mut Criterion) {
+    c.bench_function("branded_string_push", |b| {
+        // No token needed for structural operations
+        b.iter(|| {
+            let mut s = BrandedString::new();
+            for _ in 0..100 {
+                s.push_str("hello");
+            }
+            black_box(s.len());
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_branded_chunked_vec_32,
@@ -561,6 +595,8 @@ criterion_group!(
     bench_branded_hash_set_operations,
     bench_branded_arena_operations,
     bench_branded_btree_map_operations,
-    bench_branded_hash_map_vs_std
+    bench_branded_hash_map_vs_std,
+    bench_branded_cow_strings_operations,
+    bench_branded_string_operations
 );
 criterion_main!(benches);

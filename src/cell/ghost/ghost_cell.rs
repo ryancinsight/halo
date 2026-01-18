@@ -26,6 +26,14 @@ impl<'brand, T> GhostCell<'brand, T> {
     pub fn into_inner(self) -> T {
         self.inner.into_inner()
     }
+
+    /// Returns a mutable reference to the underlying data.
+    ///
+    /// This call borrows `GhostCell` mutably (at compile-time) which guarantees
+    /// that we possess the only reference.
+    pub fn get_mut(&mut self) -> &mut T {
+        self.inner.get_mut_exclusive()
+    }
 }
 
 impl<'brand, T: Default> Default for GhostCell<'brand, T> {

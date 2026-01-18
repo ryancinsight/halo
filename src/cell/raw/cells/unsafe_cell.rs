@@ -57,6 +57,16 @@ impl<'brand, T: ?Sized> GhostUnsafeCell<'brand, T> {
         unsafe { &mut *self.raw().get() }
     }
 
+    /// Returns an exclusive reference to the contained value without a token.
+    ///
+    /// # Safety
+    /// Safe because `&mut self` guarantees exclusive access to the cell, so no other
+    /// references (token-gated or otherwise) can exist.
+    #[inline(always)]
+    pub fn get_mut_exclusive(&mut self) -> &mut T {
+        self.1.get_mut()
+    }
+
     /// Returns a raw const pointer to the contained value.
     #[inline(always)]
     pub fn as_ptr(&self, _token: &GhostToken<'brand>) -> *const T {

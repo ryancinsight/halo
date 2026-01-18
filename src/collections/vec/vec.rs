@@ -74,7 +74,7 @@ impl<'a, 'brand, T> DoubleEndedIterator for BrandedVecIter<'a, 'brand, T> {
 
 /// A vector of token-gated elements.
 pub struct BrandedVec<'brand, T> {
-    inner: Vec<GhostCell<'brand, T>>,
+    pub(crate) inner: Vec<GhostCell<'brand, T>>,
 }
 
 /// A branded array with compile-time size guarantees.
@@ -159,6 +159,14 @@ impl<'brand, T> BrandedVec<'brand, T> {
     /// Swaps two elements in the vector.
     pub fn swap(&mut self, a: usize, b: usize) {
         self.inner.swap(a, b);
+    }
+
+    /// Clears the vector, removing all values.
+    ///
+    /// Note that this method has no effect on the allocated capacity
+    /// of the vector.
+    pub fn clear(&mut self) {
+        self.inner.clear();
     }
 
     /// Retains only the elements specified by the predicate.
