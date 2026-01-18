@@ -22,56 +22,6 @@ pub struct Assert<const COND: bool>;
 pub trait IsTrue {}
 impl IsTrue for Assert<true> {}
 
-/// Zero-cost iterator for BrandedVec that avoids closures per element access.
-/// This iterator directly borrows from GhostCells without allocation or indirection.
-pub struct BrandedVecIter<'a, 'brand, T> {
-    iter: slice::Iter<'a, GhostCell<'brand, T>>,
-    token: &'a GhostToken<'brand>,
-}
-
-impl<'a, 'brand, T> Iterator for BrandedVecIter<'a, 'brand, T> {
-    type Item = &'a T;
-
-    #[inline(always)]
-    fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next().map(|cell| cell.borrow(self.token))
-    }
-
-    #[inline(always)]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.iter.size_hint()
-    }
-
-    #[inline(always)]
-    fn count(self) -> usize {
-        self.iter.count()
-    }
-
-    #[inline(always)]
-    fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        self.iter.nth(n).map(|cell| cell.borrow(self.token))
-    }
-
-    #[inline(always)]
-    fn last(self) -> Option<Self::Item> {
-        self.iter.last().map(|cell| cell.borrow(self.token))
-    }
-}
-
-impl<'a, 'brand, T> ExactSizeIterator for BrandedVecIter<'a, 'brand, T> {}
-
-impl<'a, 'brand, T> DoubleEndedIterator for BrandedVecIter<'a, 'brand, T> {
-    #[inline(always)]
-    fn next_back(&mut self) -> Option<Self::Item> {
-        self.iter.next_back().map(|cell| cell.borrow(self.token))
-    }
-
-    #[inline(always)]
-    fn nth_back(&mut self, n: usize) -> Option<Self::Item> {
-        self.iter.nth_back(n).map(|cell| cell.borrow(self.token))
-    }
-}
-
 /// A vector of token-gated elements.
 pub struct BrandedVec<'brand, T> {
     pub(crate) inner: Vec<GhostCell<'brand, T>>,
@@ -295,14 +245,13 @@ impl<'brand, T> BrandedVec<'brand, T> {
     ///
     /// This iterator is zero-cost: no allocations, no closures per element.
     /// Returns direct references to elements without indirection.
+    ///
+    /// Optimized to use slice iterator, bypassing per-element `GhostCell` borrowing overhead.
     pub fn iter<'a>(
         &'a self,
         token: &'a GhostToken<'brand>,
-    ) -> BrandedVecIter<'a, 'brand, T> {
-        BrandedVecIter {
-            iter: self.inner.iter(),
-            token,
-        }
+    ) -> slice::Iter<'a, T> {
+        self.as_slice(token).iter()
     }
 
     /// Applies `f` to each element by exclusive reference.

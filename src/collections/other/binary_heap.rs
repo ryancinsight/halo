@@ -4,7 +4,7 @@
 //! It supports standard max-heap operations with token-gated access.
 
 use crate::GhostToken;
-use crate::collections::{ZeroCopyOps, vec::vec::BrandedVecIter};
+use crate::collections::ZeroCopyOps;
 use crate::collections::vec::BrandedVec;
 use core::cmp::Ord;
 use core::fmt;
@@ -122,7 +122,7 @@ impl<'brand, T: Ord> BrandedBinaryHeap<'brand, T> {
 
 impl<'brand, T> BrandedBinaryHeap<'brand, T> {
     /// Iterates over all elements in the heap in arbitrary order.
-    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> BrandedVecIter<'a, 'brand, T> {
+    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> core::slice::Iter<'a, T> {
         self.data.iter(token)
     }
 }

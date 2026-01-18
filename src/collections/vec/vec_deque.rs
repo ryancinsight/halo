@@ -11,40 +11,6 @@ use std::collections::VecDeque;
 use crate::{GhostCell, GhostToken};
 use crate::collections::ZeroCopyOps;
 
-/// Zero-cost iterator for BrandedVecDeque.
-pub struct BrandedVecDequeIter<'a, 'brand, T> {
-    iter: std::collections::vec_deque::Iter<'a, GhostCell<'brand, T>>,
-    token: &'a GhostToken<'brand>,
-}
-
-impl<'a, 'brand, T> Iterator for BrandedVecDequeIter<'a, 'brand, T> {
-    type Item = &'a T;
-
-    #[inline(always)]
-    fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next().map(|cell| cell.borrow(self.token))
-    }
-
-    #[inline(always)]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.iter.size_hint()
-    }
-
-    #[inline(always)]
-    fn count(self) -> usize {
-        self.iter.count()
-    }
-}
-
-impl<'a, 'brand, T> DoubleEndedIterator for BrandedVecDequeIter<'a, 'brand, T> {
-    #[inline(always)]
-    fn next_back(&mut self) -> Option<Self::Item> {
-        self.iter.next_back().map(|cell| cell.borrow(self.token))
-    }
-}
-
-impl<'a, 'brand, T> ExactSizeIterator for BrandedVecDequeIter<'a, 'brand, T> {}
-
 /// A double-ended queue of token-gated elements.
 #[repr(transparent)]
 pub struct BrandedVecDeque<'brand, T> {
@@ -111,11 +77,12 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
 
 
     /// Iterates over the elements.
-    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> BrandedVecDequeIter<'a, 'brand, T> {
-        BrandedVecDequeIter {
-            iter: self.inner.iter(),
-            token,
-        }
+    pub fn iter<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+    ) -> std::iter::Chain<std::slice::Iter<'a, T>, std::slice::Iter<'a, T>> {
+        let (s1, s2) = self.as_slices(token);
+        s1.iter().chain(s2.iter())
     }
 
     /// Exclusive iteration via callback.

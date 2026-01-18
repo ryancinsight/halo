@@ -174,6 +174,15 @@ impl<'brand, T> BrandedPool<'brand, T> {
         &self.state.borrow(token).storage
     }
 
+    /// Returns a slice of the underlying storage.
+    ///
+    /// This provides the fastest possible iteration speed by bypassing
+    /// the `GhostCell` borrowing mechanism entirely for the loop duration.
+    #[inline]
+    pub fn as_slice<'a>(&'a self, token: &'a GhostToken<'brand>) -> &'a [PoolSlot<T>] {
+        self.state.borrow(token).storage.as_slice(token)
+    }
+
     /// Returns the raw capacity of the underlying storage.
     /// Used for iterating in Drop.
     #[inline]
