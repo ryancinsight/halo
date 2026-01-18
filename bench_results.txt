@@ -1,0 +1,698 @@
+warning: unused import: `std::marker::PhantomData`
+  --> src/collections/hash/hash_map.rs:23:5
+   |
+23 | use std::marker::PhantomData;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `std::cmp::Ordering`
+ --> src/collections/btree/btree_map.rs:9:5
+  |
+9 | use std::cmp::Ordering;
+  |     ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `GhostCell`
+ --> src/collections/btree/btree_set.rs:5:13
+  |
+5 | use crate::{GhostCell, GhostToken};
+  |             ^^^^^^^^^
+
+warning: unused import: `GhostCell`
+  --> src/collections/other/cow_strings.rs:53:25
+   |
+53 | use crate::{GhostToken, GhostCell};
+   |                         ^^^^^^^^^
+
+warning: unused import: `GhostCell`
+  --> src/collections/other/skip_list.rs:15:13
+   |
+15 | use crate::{GhostCell, GhostToken, BrandedVec};
+   |             ^^^^^^^^^
+
+warning: unused import: `GhostCell`
+  --> src/collections/other/slot_map.rs:12:13
+   |
+12 | use crate::{GhostCell, GhostToken, BrandedVec};
+   |             ^^^^^^^^^
+
+warning: unused import: `math_assert::math_assert_msg`
+  --> src/graph/basic/dag.rs:17:5
+   |
+17 | use math_assert::math_assert_msg;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `collections::ChunkedVec`
+  --> src/graph/compressed/compressed_graph/mod.rs:19:5
+   |
+19 |     collections::ChunkedVec,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `core::sync::atomic::Ordering`
+  --> src/graph/compressed/csc_graph/mod.rs:11:5
+   |
+11 | use core::sync::atomic::Ordering;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `GhostChaseLevDeque` and `GhostTreiberStack`
+  --> src/graph/compressed/csc_graph/mod.rs:15:29
+   |
+15 |     concurrency::worklist::{GhostChaseLevDeque, GhostTreiberStack},
+   |                             ^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `GhostChaseLevDeque`, `GhostTreiberStack`, and `concurrency::atomic::GhostAtomicBitset`
+  --> src/graph/compressed/csr_graph/mod.rs:15:5
+   |
+15 |     concurrency::atomic::GhostAtomicBitset,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+16 |     concurrency::worklist::{GhostChaseLevDeque, GhostTreiberStack},
+   |                             ^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^
+
+warning: unnecessary `unsafe` block
+   --> src/collections/other/skip_list.rs:388:9
+    |
+388 |         unsafe {
+    |         ^^^^^^ unnecessary `unsafe` block
+    |
+    = note: `#[warn(unused_unsafe)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+   --> src/concurrency/atomic/usize.rs:105:9
+    |
+105 |         mut f: F,
+    |         ----^
+    |         |
+    |         help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+  --> src/graph/compressed/ecc_graph/storage.rs:53:13
+   |
+53 |         let mut weights = Vec::new();
+   |             ----^^^^^^^
+   |             |
+   |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+  --> src/graph/compressed/ecc_graph/storage.rs:54:13
+   |
+54 |         let mut has_weights = false;
+   |             ----^^^^^^^^^^^
+   |             |
+   |             help: remove this `mut`
+
+warning: type `NodeRepresentation` is more private than the item `GhostAmtGraph::nodes`
+  --> src/graph/specialized/amt_graph/mod.rs:26:5
+   |
+26 |     pub(super) nodes: Vec<representation::NodeRepresentation>,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `GhostAmtGraph::nodes` is reachable at visibility `pub(in crate::graph::specialized)`
+   |
+note: but type `NodeRepresentation` is only usable at visibility `pub(in crate::graph::specialized::amt_graph)`
+  --> src/graph/specialized/amt_graph/representation.rs:9:1
+   |
+ 9 | pub(super) enum NodeRepresentation {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: `#[warn(private_interfaces)]` on by default
+
+warning: constant `MIN_LEN` is never used
+  --> src/collections/btree/btree_map.rs:15:7
+   |
+15 | const MIN_LEN: usize = B - 1;
+   |       ^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `free` is never used
+   --> src/collections/other/doubly_linked_list.rs:125:8
+    |
+ 66 | impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
+    | -------------------------------------------------- method in this implementation
+...
+125 |     fn free(&mut self, token: &mut GhostToken<'brand>, idx: usize) {
+    |        ^^^^
+
+warning: field `level` is never read
+  --> src/collections/other/skip_list.rs:82:5
+   |
+78 | struct NodeData<K, V> {
+   |        -------- field in this struct
+...
+82 |     level: u8,
+   |     ^^^^^
+
+warning: function `math_assert_msg` is never used
+ --> src/graph/basic/dag/math_assert.rs:8:15
+  |
+8 | pub(crate) fn math_assert_msg(condition: bool, message: &str) {
+  |               ^^^^^^^^^^^^^^^
+
+warning: function `bfs` is never used
+ --> src/graph/compressed/compressed_graph/traversal.rs:8:8
+  |
+8 | pub fn bfs<'brand, const EDGE_CHUNK: usize>(
+  |        ^^^
+
+warning: function `compression_stats` is never used
+  --> src/graph/compressed/compressed_graph/traversal.rs:38:8
+   |
+38 | pub fn compression_stats<'brand, const EDGE_CHUNK: usize>(
+   |        ^^^^^^^^^^^^^^^^^
+
+warning: struct `CompressionStats` is never constructed
+  --> src/graph/compressed/compressed_graph/traversal.rs:58:12
+   |
+58 | pub struct CompressionStats {
+   |            ^^^^^^^^^^^^^^^^
+
+warning: methods `compression_ratio` and `memory_savings_percent` are never used
+  --> src/graph/compressed/compressed_graph/traversal.rs:72:12
+   |
+69 | impl CompressionStats {
+   | --------------------- methods in this implementation
+...
+72 |     pub fn compression_ratio(&self) -> f64 {
+   |            ^^^^^^^^^^^^^^^^^
+...
+82 |     pub fn memory_savings_percent(&self) -> f64 {
+   |            ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `len` is never used
+  --> src/graph/specialized/lel_graph/edges.rs:47:12
+   |
+10 | impl DeltaEncodedEdges {
+   | ---------------------- method in this implementation
+...
+47 |     pub fn len(&self) -> usize {
+   |            ^^^
+
+warning: method `len` is never used
+  --> src/graph/access/visited.rs:28:19
+   |
+19 | impl<'brand> VisitedSet<'brand> {
+   | ------------------------------- method in this implementation
+...
+28 |     pub(crate) fn len(&self) -> usize {
+   |                   ^^^
+
+warning: method `len` is never used
+  --> src/graph/access/visited.rs:71:19
+   |
+64 | impl<'brand> VisitedFlags<'brand> {
+   | --------------------------------- method in this implementation
+...
+71 |     pub(crate) fn len(&self) -> usize {
+   |                   ^^^
+
+warning: missing documentation for a module
+   --> src/lib.rs:106:1
+    |
+106 | pub mod alloc;
+    | ^^^^^^^^^^^^^
+    |
+note: the lint level is defined here
+   --> src/lib.rs:102:9
+    |
+102 | #![warn(missing_docs, clippy::all, clippy::pedantic)]
+    |         ^^^^^^^^^^^^
+
+warning: missing documentation for a module
+ --> src/alloc/mod.rs:1:1
+  |
+1 | pub mod allocator;
+  | ^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a module
+ --> src/alloc/mod.rs:3:1
+  |
+3 | pub mod bump;
+  | ^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/alloc/arena.rs:178:5
+    |
+178 |     pub fn index(self) -> usize {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a module
+  --> src/collections/mod.rs:11:1
+   |
+11 | pub mod btree;
+   | ^^^^^^^^^^^^^
+
+warning: missing documentation for a trait
+  --> src/collections/vec/vec.rs:22:1
+   |
+22 | pub trait IsTrue {}
+   | ^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/vec/vec.rs:366:5
+    |
+366 | /     pub fn all_ref<F>(
+367 | |         &self,
+368 | |         token: &GhostToken<'brand>,
+369 | |         f: F,
+370 | |     ) -> bool
+371 | |     where
+372 | |         F: Fn(&T) -> bool,
+    | |__________________________^
+
+warning: missing documentation for an enum
+   --> src/collections/vec/small_vec.rs:254:1
+    |
+254 | pub enum BrandedSmallVecIntoIter<'brand, T, const N: usize> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a variant
+   --> src/collections/vec/small_vec.rs:255:5
+    |
+255 |     Inline {
+    |     ^^^^^^
+
+warning: missing documentation for a struct field
+   --> src/collections/vec/small_vec.rs:256:9
+    |
+256 |         data: [MaybeUninit<GhostCell<'brand, T>>; N],
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a struct field
+   --> src/collections/vec/small_vec.rs:257:9
+    |
+257 |         index: usize,
+    |         ^^^^^^^^^^^^
+
+warning: missing documentation for a struct field
+   --> src/collections/vec/small_vec.rs:258:9
+    |
+258 |         len: usize,
+    |         ^^^^^^^^^^
+
+warning: missing documentation for a variant
+   --> src/collections/vec/small_vec.rs:260:5
+    |
+260 |     Heap(<BrandedVec<'brand, T> as IntoIterator>::IntoIter),
+    |     ^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/hash_map.rs:145:5
+    |
+145 |     pub fn len(&self) -> usize {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/hash_map.rs:150:5
+    |
+150 |     pub fn is_empty(&self) -> bool {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/hash_map.rs:155:5
+    |
+155 |     pub fn capacity(&self) -> usize {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/hash_map.rs:268:5
+    |
+268 |     pub fn get<'a>(&'a self, token: &'a GhostToken<'brand>, key: &K) -> Option<&'a V> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/hash_map.rs:282:5
+    |
+282 |     pub fn get_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>, key: &K) -> Option<&'a mut V> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/hash_map.rs:296:5
+    |
+296 |     pub fn contains_key(&self, key: &K) -> bool {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/hash_map.rs:302:5
+    |
+302 |     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/hash_map.rs:343:5
+    |
+343 |     pub fn remove(&mut self, key: &K) -> Option<V> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/hash_map.rs:442:5
+    |
+442 |     pub fn clear(&mut self) {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/hash_map.rs:464:5
+    |
+464 |     pub fn reserve(&mut self, additional: usize) {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/hash_map.rs:476:5
+    |
+476 |     pub fn keys(&self) -> impl Iterator<Item = &K> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/hash_map.rs:487:5
+    |
+487 |     pub fn values<'a>(&'a self, token: &'a GhostToken<'brand>) -> impl Iterator<Item = &'a V> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a struct
+   --> src/collections/hash/hash_map.rs:578:1
+    |
+578 | pub struct IntoIter<'brand, K, V> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for an associated function
+  --> src/collections/hash/index_map.rs:76:5
+   |
+76 |     pub fn with_capacity_and_hasher(capacity: usize, hash_builder: S) -> Self {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/index_map.rs:113:5
+    |
+113 |     pub fn len(&self) -> usize {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/index_map.rs:118:5
+    |
+118 |     pub fn is_empty(&self) -> bool {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/index_map.rs:123:5
+    |
+123 |     pub fn capacity(&self) -> usize {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a struct
+   --> src/collections/btree/btree_map.rs:485:1
+    |
+485 | pub struct Iter<'a, 'brand, K, V> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a struct
+   --> src/collections/btree/btree_map.rs:556:1
+    |
+556 | pub struct IntoIter<'brand, K, V> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/other/skip_list.rs:230:5
+    |
+230 | /     pub fn get_mut<'a, Q: ?Sized>(&'a self, token: &'a mut GhostToken<'brand>, key: &Q) -> Option<&'a mut V>
+231 | |     where
+232 | |         K: Borrow<Q>,
+233 | |         Q: Ord,
+    | |_______________^
+
+warning: missing documentation for a struct
+   --> src/collections/other/skip_list.rs:604:1
+    |
+604 | pub struct Iter<'a, 'brand, K, V> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a struct
+   --> src/collections/other/skip_list.rs:636:1
+    |
+636 | pub struct IterMut<'a, 'brand, K, V> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/other/skip_list.rs:674:5
+    |
+674 |     pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> Iter<'a, 'brand, K, V> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/other/skip_list.rs:683:5
+    |
+683 |     pub fn iter_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>) -> IterMut<'a, 'brand, K, V> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a struct
+   --> src/collections/other/slot_map.rs:232:1
+    |
+232 | pub struct Iter<'a, 'brand, T> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/other/slot_map.rs:266:5
+    |
+266 |     pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> Iter<'a, 'brand, T> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a struct field
+  --> src/collections/other/interval_map.rs:19:5
+   |
+19 |     pub start: K,
+   |     ^^^^^^^^^^^^
+
+warning: missing documentation for a struct field
+  --> src/collections/other/interval_map.rs:20:5
+   |
+20 |     pub end: K,
+   |     ^^^^^^^^^^
+
+warning: missing documentation for a struct field
+  --> src/collections/other/interval_map.rs:21:5
+   |
+21 |     pub value: V,
+   |     ^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/graph/basic/dag.rs:756:5
+    |
+756 |     pub fn edge_count(&self) -> usize {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/graph/basic/dag.rs:761:5
+    |
+761 |     pub fn neighbors(&self, node: usize) -> impl Iterator<Item = usize> + '_ {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/graph/basic/dag.rs:766:5
+    |
+766 |     pub fn degree(&self, node: usize) -> usize {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for an associated function
+  --> src/graph/compressed/compressed_graph/iter.rs:12:5
+   |
+12 |     pub fn new(edges: &'a [usize], start: usize, end: usize) -> Self {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for an associated function
+  --> src/graph/compressed/ecc_graph/storage.rs:16:5
+   |
+16 |     pub fn new(source: usize, target: usize) -> Self {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for an associated function
+  --> src/graph/compressed/ecc_graph/storage.rs:25:5
+   |
+25 |     pub fn with_weight(source: usize, target: usize, weight: i32) -> Self {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a variant
+ --> src/graph/specialized/amt_graph/iter.rs:3:5
+  |
+3 |     Sparse(std::slice::Iter<'a, usize>),
+  |     ^^^^^^
+
+warning: missing documentation for a variant
+ --> src/graph/specialized/amt_graph/iter.rs:4:5
+  |
+4 |     Dense { bitset: &'a [u64], index: usize, len: usize },
+  |     ^^^^^
+
+warning: missing documentation for a struct field
+ --> src/graph/specialized/amt_graph/iter.rs:4:13
+  |
+4 |     Dense { bitset: &'a [u64], index: usize, len: usize },
+  |             ^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a struct field
+ --> src/graph/specialized/amt_graph/iter.rs:4:32
+  |
+4 |     Dense { bitset: &'a [u64], index: usize, len: usize },
+  |                                ^^^^^^^^^^^^
+
+warning: missing documentation for a struct field
+ --> src/graph/specialized/amt_graph/iter.rs:4:46
+  |
+4 |     Dense { bitset: &'a [u64], index: usize, len: usize },
+  |                                              ^^^^^^^^^^
+
+warning: missing documentation for a variant
+ --> src/graph/specialized/amt_graph/iter.rs:5:5
+  |
+5 |     Sorted(std::slice::Iter<'a, usize>),
+  |     ^^^^^^
+
+warning: missing documentation for a method
+  --> src/graph/specialized/lel_graph/mod.rs:59:5
+   |
+59 |     pub fn node_count(&self) -> usize {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+  --> src/graph/specialized/lel_graph/mod.rs:64:5
+   |
+64 |     pub fn edge_count(&self) -> usize {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+  --> src/graph/specialized/lel_graph/mod.rs:69:5
+   |
+69 |     pub fn degree(&self, node: usize) -> usize {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+  --> src/graph/specialized/lel_graph/mod.rs:75:5
+   |
+75 |     pub fn neighbors(&self, node: usize) -> LelNeighborIter<'_> {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+  --> src/graph/specialized/lel_graph/mod.rs:81:5
+   |
+81 |     pub fn has_edge(&self, from: usize, to: usize) -> bool {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+  --> src/graph/specialized/lel_graph/mod.rs:89:5
+   |
+89 |     pub fn clear_visited(&self) {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+  --> src/graph/specialized/lel_graph/mod.rs:94:5
+   |
+94 |     pub fn try_visit(&self, node: usize) -> bool {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/graph/specialized/lel_graph/mod.rs:100:5
+    |
+100 |     pub fn bfs(&self, start: usize) -> Vec<usize> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/graph/specialized/lel_graph/mod.rs:124:5
+    |
+124 |     pub fn compression_stats(&self) -> LelCompressionStats {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a struct field
+   --> src/graph/specialized/lel_graph/mod.rs:142:5
+    |
+142 |     pub original_size: usize,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a struct field
+   --> src/graph/specialized/lel_graph/mod.rs:143:5
+    |
+143 |     pub compressed_size: usize,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a struct field
+   --> src/graph/specialized/lel_graph/mod.rs:144:5
+    |
+144 |     pub node_count: usize,
+    |     ^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a struct field
+   --> src/graph/specialized/lel_graph/mod.rs:145:5
+    |
+145 |     pub edge_count: usize,
+    |     ^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/graph/specialized/lel_graph/mod.rs:150:5
+    |
+150 |     pub fn compression_ratio(&self) -> f64 {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/graph/specialized/lel_graph/mod.rs:159:5
+    |
+159 |     pub fn memory_savings_percent(&self) -> f64 {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `halo` (lib) generated 96 warnings (run `cargo fix --lib -p halo` to apply 14 suggestions)
+warning: `halo` (lib) generated 96 warnings (96 duplicates)
+   Compiling halo v0.1.0 (/app)
+    Finished `bench` profile [optimized + debuginfo] target(s) in 57.92s
+     Running benches/interval_map_benchmark.rs (target/release/deps/interval_map_benchmark-6d112e4ba782e3d1)
+Gnuplot not found, using plotters backend
+Benchmarking interval_map/branded_interval_map_insert_1000
+Benchmarking interval_map/branded_interval_map_insert_1000: Warming up for 3.0000 s
+Benchmarking interval_map/branded_interval_map_insert_1000: Collecting 100 samples in estimated 5.0466 s (303k iterations)
+Benchmarking interval_map/branded_interval_map_insert_1000: Analyzing
+interval_map/branded_interval_map_insert_1000
+                        time:   [16.376 µs 16.446 µs 16.537 µs]
+Found 5 outliers among 100 measurements (5.00%)
+  2 (2.00%) high mild
+  3 (3.00%) high severe
+Benchmarking interval_map/btreemap_insert_1000_naive
+Benchmarking interval_map/btreemap_insert_1000_naive: Warming up for 3.0000 s
+Benchmarking interval_map/btreemap_insert_1000_naive: Collecting 100 samples in estimated 5.1414 s (56k iterations)
+Benchmarking interval_map/btreemap_insert_1000_naive: Analyzing
+interval_map/btreemap_insert_1000_naive
+                        time:   [91.578 µs 91.743 µs 91.938 µs]
+Found 4 outliers among 100 measurements (4.00%)
+  3 (3.00%) high mild
+  1 (1.00%) high severe
+Benchmarking interval_map/branded_interval_map_get
+Benchmarking interval_map/branded_interval_map_get: Warming up for 3.0000 s
+Benchmarking interval_map/branded_interval_map_get: Collecting 100 samples in estimated 5.0265 s (202k iterations)
+Benchmarking interval_map/branded_interval_map_get: Analyzing
+interval_map/branded_interval_map_get
+                        time:   [24.541 µs 24.571 µs 24.603 µs]
+Found 7 outliers among 100 measurements (7.00%)
+  1 (1.00%) low mild
+  3 (3.00%) high mild
+  3 (3.00%) high severe
+Benchmarking interval_map/btreemap_get
+Benchmarking interval_map/btreemap_get: Warming up for 3.0000 s
+Benchmarking interval_map/btreemap_get: Collecting 100 samples in estimated 5.1681 s (96k iterations)
+Benchmarking interval_map/btreemap_get: Analyzing
+interval_map/btreemap_get
+                        time:   [54.434 µs 54.674 µs 54.939 µs]
+Found 8 outliers among 100 measurements (8.00%)
+  1 (1.00%) high mild
+  7 (7.00%) high severe
+Benchmarking interval_map/branded_interval_map_iter
+Benchmarking interval_map/branded_interval_map_iter: Warming up for 3.0000 s
+Benchmarking interval_map/branded_interval_map_iter: Collecting 100 samples in estimated 5.0009 s (12M iterations)
+Benchmarking interval_map/branded_interval_map_iter: Analyzing
+interval_map/branded_interval_map_iter
+                        time:   [425.51 ns 427.15 ns 428.96 ns]
+Found 11 outliers among 100 measurements (11.00%)
+  3 (3.00%) low severe
+  4 (4.00%) low mild
+  2 (2.00%) high mild
+  2 (2.00%) high severe
+Benchmarking interval_map/btreemap_iter
+Benchmarking interval_map/btreemap_iter: Warming up for 3.0000 s
+Benchmarking interval_map/btreemap_iter: Collecting 100 samples in estimated 5.0131 s (1.5M iterations)
+Benchmarking interval_map/btreemap_iter: Analyzing
+interval_map/btreemap_iter
+                        time:   [3.1283 µs 3.2267 µs 3.3235 µs]
+Found 10 outliers among 100 measurements (10.00%)
+  5 (5.00%) low mild
+  5 (5.00%) high mild

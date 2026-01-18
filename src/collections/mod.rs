@@ -18,7 +18,7 @@ pub use hash::{BrandedHashMap, BrandedHashSet, BrandedIndexMap};
 pub use btree::{BrandedBTreeMap, BrandedBTreeSet};
 pub use other::{
     BrandedBinaryHeap, BrandedCowStrings, BrandedDeque, BrandedDoublyLinkedList,
-    BrandedLruCache, BrandedSkipList, BrandedSlotMap, SlotKey,
+    BrandedLruCache, BrandedSkipList, BrandedSlotMap, SlotKey, BrandedIntervalMap,
 };
 
 pub use crate::alloc::BrandedArena;
