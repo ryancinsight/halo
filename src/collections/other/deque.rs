@@ -18,6 +18,38 @@
 
 use core::mem::MaybeUninit;
 use crate::{GhostCell, GhostToken};
+use crate::collections::ZeroCopyOps;
+
+/// Zero-cost iterator for BrandedDeque.
+pub struct BrandedDequeIter<'a, 'brand, T, const CAPACITY: usize> {
+    deque: &'a BrandedDeque<'brand, T, CAPACITY>,
+    index: usize,
+    token: &'a GhostToken<'brand>,
+}
+
+impl<'a, 'brand, T, const CAPACITY: usize> Iterator for BrandedDequeIter<'a, 'brand, T, CAPACITY> {
+    type Item = &'a T;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= self.deque.len {
+            return None;
+        }
+        let actual_idx = (self.deque.head + self.index) % CAPACITY;
+        self.index += 1;
+        unsafe {
+            Some(self.deque.buffer.get_unchecked(actual_idx).borrow(self.token))
+        }
+    }
+
+    #[inline(always)]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.deque.len - self.index;
+        (remaining, Some(remaining))
+    }
+}
+
+impl<'a, 'brand, T, const CAPACITY: usize> ExactSizeIterator for BrandedDequeIter<'a, 'brand, T, CAPACITY> {}
 
 /// A ring buffer implementation optimized for token-gated access patterns.
 #[repr(C)]
@@ -193,6 +225,16 @@ impl<'brand, T, const CAPACITY: usize> BrandedDeque<'brand, T, CAPACITY> {
         }
     }
 
+    /// Iterates over the elements.
+    #[inline]
+    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> BrandedDequeIter<'a, 'brand, T, CAPACITY> {
+        BrandedDequeIter {
+            deque: self,
+            index: 0,
+            token,
+        }
+    }
+
     /// Applies a function to all elements in the deque.
     ///
     /// This provides maximum efficiency for bulk operations by avoiding
@@ -248,6 +290,32 @@ impl<'brand, T, const CAPACITY: usize> Default for BrandedDeque<'brand, T, CAPAC
 impl<'brand, T, const CAPACITY: usize> Drop for BrandedDeque<'brand, T, CAPACITY> {
     fn drop(&mut self) {
         self.clear();
+    }
+}
+
+impl<'brand, T, const CAPACITY: usize> ZeroCopyOps<'brand, T> for BrandedDeque<'brand, T, CAPACITY> {
+    #[inline(always)]
+    fn find_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<&'a T>
+    where
+        F: Fn(&T) -> bool,
+    {
+        self.iter(token).find(|&item| f(item))
+    }
+
+    #[inline(always)]
+    fn any_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    where
+        F: Fn(&T) -> bool,
+    {
+        self.iter(token).any(|item| f(item))
+    }
+
+    #[inline(always)]
+    fn all_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    where
+        F: Fn(&T) -> bool,
+    {
+        self.iter(token).all(|item| f(item))
     }
 }
 
@@ -343,6 +411,25 @@ mod tests {
             assert_eq!(*deque.get(&token, 1).unwrap(), 4);
             assert_eq!(*deque.get(&token, 2).unwrap(), 5);
             assert_eq!(*deque.get(&token, 3).unwrap(), 6);
+        });
+    }
+
+    #[test]
+    fn test_iter_and_zero_copy() {
+        GhostToken::new(|mut token| {
+            let mut deque: BrandedDeque<'_, u32, 4> = BrandedDeque::new();
+            deque.push_back(1).unwrap();
+            deque.push_back(2).unwrap();
+            deque.push_back(3).unwrap();
+
+            // Test iter
+            let collected: Vec<u32> = deque.iter(&token).copied().collect();
+            assert_eq!(collected, vec![1, 2, 3]);
+
+            // Test zero copy ops
+            assert_eq!(deque.find_ref(&token, |&x| x == 2), Some(&2));
+            assert!(deque.any_ref(&token, |&x| x == 3));
+            assert!(deque.all_ref(&token, |&x| x > 0));
         });
     }
 }

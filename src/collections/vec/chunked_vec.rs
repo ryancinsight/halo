@@ -21,7 +21,34 @@
 
 use core::mem::MaybeUninit;
 use crate::{GhostCell, GhostToken};
+use crate::collections::ZeroCopyOps;
 
+
+/// Zero-cost iterator for BrandedChunkedVec.
+pub struct BrandedChunkedVecIter<'a, 'brand, T, const CHUNK: usize> {
+    current_node: Option<&'a ChunkNode<'brand, T, CHUNK>>,
+    chunk_index: usize,
+    token: &'a GhostToken<'brand>,
+}
+
+impl<'a, 'brand, T, const CHUNK: usize> Iterator for BrandedChunkedVecIter<'a, 'brand, T, CHUNK> {
+    type Item = &'a T;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let node = self.current_node?;
+            if self.chunk_index < node.chunk.len() {
+                let elem = unsafe { node.chunk.get_unchecked(self.chunk_index) };
+                self.chunk_index += 1;
+                return Some(elem.borrow(self.token));
+            } else {
+                self.current_node = node.next.as_deref();
+                self.chunk_index = 0;
+            }
+        }
+    }
+}
 
 /// A cache-aligned chunk of branded elements stored contiguously.
 ///
@@ -218,6 +245,16 @@ impl<'brand, T, const CHUNK: usize> BrandedChunkedVec<'brand, T, CHUNK> {
         }
     }
 
+    /// Iterates over the elements.
+    #[inline]
+    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> BrandedChunkedVecIter<'a, 'brand, T, CHUNK> {
+        BrandedChunkedVecIter {
+            current_node: self.head.as_deref(),
+            chunk_index: 0,
+            token,
+        }
+    }
+
     /// Bulk operation: applies a function to all elements in a chunk.
     ///
     /// This is much more efficient than individual element access for operations
@@ -379,6 +416,32 @@ impl<'brand, T, const CHUNK: usize> Drop for BrandedChunkedVec<'brand, T, CHUNK>
     }
 }
 
+impl<'brand, T, const CHUNK: usize> ZeroCopyOps<'brand, T> for BrandedChunkedVec<'brand, T, CHUNK> {
+    #[inline(always)]
+    fn find_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<&'a T>
+    where
+        F: Fn(&T) -> bool,
+    {
+        self.iter(token).find(|&item| f(item))
+    }
+
+    #[inline(always)]
+    fn any_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    where
+        F: Fn(&T) -> bool,
+    {
+        self.iter(token).any(|item| f(item))
+    }
+
+    #[inline(always)]
+    fn all_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    where
+        F: Fn(&T) -> bool,
+    {
+        self.iter(token).all(|item| f(item))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -443,6 +506,25 @@ mod tests {
             vec.for_each_mut_in_chunk(0, &mut token, |x| *x *= 10);
             assert_eq!(*vec.get(&token, 0).unwrap(), 10);
             assert_eq!(*vec.get(&token, 1).unwrap(), 20);
+        });
+    }
+
+    #[test]
+    fn test_iter_and_zero_copy() {
+        GhostToken::new(|mut token| {
+            let mut vec = BrandedChunkedVec::<_, 2>::new();
+            vec.push(1);
+            vec.push(2);
+            vec.push(3);
+
+            // Test iter
+            let collected: Vec<i32> = vec.iter(&token).copied().collect();
+            assert_eq!(collected, vec![1, 2, 3]);
+
+            // Test zero copy ops
+            assert_eq!(vec.find_ref(&token, |&x| x == 2), Some(&2));
+            assert!(vec.any_ref(&token, |&x| x == 3));
+            assert!(vec.all_ref(&token, |&x| x > 0));
         });
     }
 }
