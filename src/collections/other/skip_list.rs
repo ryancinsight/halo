@@ -4,6 +4,11 @@
 //! one for node data and one for the forward pointers (links). This ensures compact
 //! memory layout and cache efficiency, avoiding per-node allocations and `Box` overhead.
 //!
+//! Optimization details:
+//! - Uses `u32` for indices to reduce memory footprint (4 bytes vs 8/16 bytes).
+//! - Uses `u32::MAX` as sentinel for null, avoiding `Option` overhead.
+//! - Uses probability p=0.25 (fanout 4) for better cache locality (shorter towers).
+//!
 //! Access is controlled via `GhostToken` to ensure safety while allowing interior mutability.
 
 use crate::{GhostCell, GhostToken, BrandedVec};
@@ -12,6 +17,7 @@ use std::cmp::Ordering;
 use crate::collections::{BrandedCollection, ZeroCopyMapOps};
 
 const MAX_LEVEL: usize = 16;
+const NONE: u32 = u32::MAX;
 
 /// Simple Xorshift RNG for level generation.
 struct XorShift64 {
@@ -36,15 +42,15 @@ impl XorShift64 {
 struct NodeData<K, V> {
     key: K,
     val: V,
-    link_offset: usize,
-    level: usize,
+    link_offset: u32,
+    level: u8, // Level fits in u8
 }
 
 /// A SkipList map with token-gated values.
 pub struct BrandedSkipList<'brand, K, V> {
     nodes: BrandedVec<'brand, NodeData<K, V>>,
-    links: BrandedVec<'brand, Option<usize>>, // Stores indices into `nodes`
-    head_links: [Option<usize>; MAX_LEVEL],
+    links: BrandedVec<'brand, u32>, // Stores indices into `nodes`, NONE for null
+    head_links: [u32; MAX_LEVEL],
     len: usize,
     max_level: usize, // Current max level in the list (1-based, or 0 if empty)
     rng: XorShift64,
@@ -56,7 +62,7 @@ impl<'brand, K, V> BrandedSkipList<'brand, K, V> {
         Self {
             nodes: BrandedVec::new(),
             links: BrandedVec::new(),
-            head_links: [None; MAX_LEVEL],
+            head_links: [NONE; MAX_LEVEL],
             len: 0,
             max_level: 0,
             rng: XorShift64::new(0x1234_5678),
@@ -68,7 +74,7 @@ impl<'brand, K, V> BrandedSkipList<'brand, K, V> {
         Self {
             nodes: BrandedVec::new(),
             links: BrandedVec::new(),
-            head_links: [None; MAX_LEVEL],
+            head_links: [NONE; MAX_LEVEL],
             len: 0,
             max_level: 0,
             rng: XorShift64::new(seed),
@@ -77,7 +83,9 @@ impl<'brand, K, V> BrandedSkipList<'brand, K, V> {
 
     fn random_level(&mut self) -> usize {
         let mut level = 1;
-        while level < MAX_LEVEL && (self.rng.next() % 2) == 0 {
+        // p = 0.25 (1/4). next % 4 == 0.
+        // This increases average fanout to 4, reducing average tower height.
+        while level < MAX_LEVEL && (self.rng.next() & 0x3) == 0 {
             level += 1;
         }
         level
@@ -106,7 +114,7 @@ where
         K: Borrow<Q>,
         Q: Ord,
     {
-        let mut curr: Option<usize> = None; // None represents head
+        let mut curr: u32 = NONE; // NONE represents head
         let mut level = self.max_level.saturating_sub(1);
 
         if self.max_level == 0 {
@@ -115,27 +123,22 @@ where
 
         loop {
             // Determine next pointer index
-            // SAFETY:
-            // - `curr` comes from valid internal links.
-            // - `offset` calculation is bounded by `node.level` which matches link allocation.
-            let next_idx_opt = if let Some(c_idx) = curr {
+            let next_idx = if curr != NONE {
                 unsafe {
-                    let node = self.nodes.get_unchecked(token, c_idx);
-                    // Assumption: node.level > level, so offset is valid
-                    let offset = node.link_offset + level;
+                    let node = self.nodes.get_unchecked(token, curr as usize);
+                    let offset = node.link_offset as usize + level;
                     *self.links.get_unchecked(token, offset)
                 }
             } else {
                 self.head_links[level]
             };
 
-            if let Some(next_idx) = next_idx_opt {
-                // SAFETY: `next_idx` comes from valid links.
+            if next_idx != NONE {
                 unsafe {
-                    let next_node = self.nodes.get_unchecked(token, next_idx);
+                    let next_node = self.nodes.get_unchecked(token, next_idx as usize);
                     match next_node.key.borrow().cmp(key) {
                         Ordering::Less => {
-                            curr = Some(next_idx);
+                            curr = next_idx;
                             continue; // Keep moving forward at same level
                         }
                         Ordering::Equal => {
@@ -164,22 +167,19 @@ where
         Q: Ord,
     {
          let idx = self.find_index(&*token, key)?;
-         // SAFETY: idx found by find_index is valid.
          unsafe {
-             let node = self.nodes.get_unchecked_mut(token, idx);
+             let node = self.nodes.get_unchecked_mut(token, idx as usize);
              Some(&mut node.val)
          }
     }
 
     /// Helper to find index of a key.
-    ///
-    /// Optimized with `unsafe`.
-    fn find_index<Q: ?Sized>(&self, token: &GhostToken<'brand>, key: &Q) -> Option<usize>
+    fn find_index<Q: ?Sized>(&self, token: &GhostToken<'brand>, key: &Q) -> Option<u32>
     where
         K: Borrow<Q>,
         Q: Ord,
     {
-        let mut curr: Option<usize> = None;
+        let mut curr: u32 = NONE;
         let mut level = self.max_level.saturating_sub(1);
 
         if self.max_level == 0 {
@@ -187,15 +187,14 @@ where
         }
 
         loop {
-            let next_idx_opt = self.get_next_unchecked(token, curr, level);
+            let next_idx = self.get_next_unchecked(token, curr, level);
 
-            if let Some(next_idx) = next_idx_opt {
-                // SAFETY: next_idx valid
+            if next_idx != NONE {
                 unsafe {
-                    let next_node = self.nodes.get_unchecked(token, next_idx);
+                    let next_node = self.nodes.get_unchecked(token, next_idx as usize);
                     match next_node.key.borrow().cmp(key) {
                         Ordering::Less => {
-                            curr = Some(next_idx);
+                            curr = next_idx;
                             continue;
                         }
                         Ordering::Equal => return Some(next_idx),
@@ -213,12 +212,11 @@ where
     }
 
     // Unsafe version for hot paths
-    fn get_next_unchecked(&self, token: &GhostToken<'brand>, curr: Option<usize>, level: usize) -> Option<usize> {
-        if let Some(c_idx) = curr {
-            // SAFETY: Caller guarantees curr and level are valid
+    fn get_next_unchecked(&self, token: &GhostToken<'brand>, curr: u32, level: usize) -> u32 {
+        if curr != NONE {
             unsafe {
-                let node = self.nodes.get_unchecked(token, c_idx);
-                let offset = node.link_offset + level;
+                let node = self.nodes.get_unchecked(token, curr as usize);
+                let offset = node.link_offset as usize + level;
                 *self.links.get_unchecked(token, offset)
             }
         } else {
@@ -229,33 +227,28 @@ where
     /// Inserts a key-value pair into the map.
     pub fn insert(&mut self, token: &mut GhostToken<'brand>, key: K, value: V) -> Option<V> {
         // First check if key exists to update it
-        // We use shared token access for find to avoid exclusive borrow issues until we need to mutate
         if let Some(idx) = self.find_index(&*token, &key) {
-             // SAFETY: idx is valid
              unsafe {
-                 let node = self.nodes.get_unchecked_mut(token, idx);
+                 let node = self.nodes.get_unchecked_mut(token, idx as usize);
                  let old = std::mem::replace(&mut node.val, value);
                  return Some(old);
              }
         }
 
         // Need to insert.
-        // Find predecessors.
-        let mut update = [None; MAX_LEVEL];
-        let mut curr: Option<usize> = None;
+        let mut update = [NONE; MAX_LEVEL];
+        let mut curr: u32 = NONE;
         let mut level = self.max_level.saturating_sub(1);
 
-        // If list is not empty, traverse
         if self.max_level > 0 {
             loop {
-                // Use unsafe unchecked for performance
-                let next_idx_opt = self.get_next_unchecked(token, curr, level);
+                let next_idx = self.get_next_unchecked(token, curr, level);
 
-                if let Some(next_idx) = next_idx_opt {
+                if next_idx != NONE {
                     unsafe {
-                        let next_node = self.nodes.get_unchecked(token, next_idx);
+                        let next_node = self.nodes.get_unchecked(token, next_idx as usize);
                         if next_node.key < key {
-                            curr = Some(next_idx);
+                            curr = next_idx;
                             continue;
                         }
                     }
@@ -272,18 +265,23 @@ where
         let new_level = self.random_level();
         if new_level > self.max_level {
             for i in self.max_level..new_level {
-                update[i] = None; // Head
+                update[i] = NONE; // Head
             }
             self.max_level = new_level;
         }
 
+        // Check overflow
+        if self.nodes.len() >= (u32::MAX - 1) as usize {
+            panic!("BrandedSkipList capacity exceeded u32 limits");
+        }
+
         // Create new node
-        let link_offset = self.links.len();
-        let node_idx = self.nodes.len();
+        let link_offset = self.links.len() as u32;
+        let node_idx = self.nodes.len() as u32;
 
         // Push links (placeholders initially)
         for _ in 0..new_level {
-            self.links.push(None);
+            self.links.push(NONE);
         }
 
         // Push node
@@ -291,35 +289,32 @@ where
             key,
             val: value,
             link_offset,
-            level: new_level,
+            level: new_level as u8,
         });
 
         // Update pointers
         for i in 0..new_level {
             let pred_idx = update[i];
 
-            // new_node.next[i] = pred.next[i]
-            let old_next = if let Some(p_idx) = pred_idx {
+            let old_next = if pred_idx != NONE {
                 // Safe here because we are modifying, not in hot loop
-                let pred_node = self.nodes.get(token, p_idx).unwrap();
-                *self.links.get(token, pred_node.link_offset + i).unwrap()
+                let pred_node = self.nodes.get(token, pred_idx as usize).unwrap();
+                *self.links.get(token, pred_node.link_offset as usize + i).unwrap()
             } else {
                 self.head_links[i]
             };
 
             // Update new node link
-            // We just pushed these, so they are valid.
             unsafe {
-                 *self.links.get_unchecked_mut(token, link_offset + i) = old_next;
+                 *self.links.get_unchecked_mut(token, (link_offset as usize) + i) = old_next;
             }
 
             // pred.next[i] = new_node
-            if let Some(p_idx) = pred_idx {
-                let pred_node = self.nodes.get(token, p_idx).unwrap();
-                // Safe or unsafe? Safe is fine here, insertion is dominated by traversal/allocation.
-                *self.links.get_mut(token, pred_node.link_offset + i).unwrap() = Some(node_idx);
+            if pred_idx != NONE {
+                let pred_node = self.nodes.get(token, pred_idx as usize).unwrap();
+                *self.links.get_mut(token, pred_node.link_offset as usize + i).unwrap() = node_idx;
             } else {
-                self.head_links[i] = Some(node_idx);
+                self.head_links[i] = node_idx;
             }
         }
 
@@ -352,16 +347,14 @@ impl<'brand, K, V> ZeroCopyMapOps<'brand, K, V> for BrandedSkipList<'brand, K, V
     where
         F: Fn(&K, &V) -> bool,
     {
-        // Iterating efficiently involves just walking level 0
         let mut curr = self.head_links[0];
-        while let Some(idx) = curr {
+        while curr != NONE {
             unsafe {
-                let node = self.nodes.get_unchecked(token, idx);
+                let node = self.nodes.get_unchecked(token, curr as usize);
                 if f(&node.key, &node.val) {
                     return Some((&node.key, &node.val));
                 }
-                // Move next at level 0
-                let offset = node.link_offset; // level 0 is at offset
+                let offset = node.link_offset as usize;
                 curr = *self.links.get_unchecked(token, offset);
             }
         }
@@ -380,13 +373,13 @@ impl<'brand, K, V> ZeroCopyMapOps<'brand, K, V> for BrandedSkipList<'brand, K, V
         F: Fn(&K, &V) -> bool,
     {
          let mut curr = self.head_links[0];
-        while let Some(idx) = curr {
+        while curr != NONE {
             unsafe {
-                let node = self.nodes.get_unchecked(token, idx);
+                let node = self.nodes.get_unchecked(token, curr as usize);
                 if !f(&node.key, &node.val) {
                     return false;
                 }
-                let offset = node.link_offset;
+                let offset = node.link_offset as usize;
                 curr = *self.links.get_unchecked(token, offset);
             }
         }
@@ -398,19 +391,22 @@ impl<'brand, K, V> ZeroCopyMapOps<'brand, K, V> for BrandedSkipList<'brand, K, V
 pub struct Iter<'a, 'brand, K, V> {
     list: &'a BrandedSkipList<'brand, K, V>,
     token: &'a GhostToken<'brand>,
-    curr: Option<usize>,
+    curr: u32,
 }
 
 impl<'a, 'brand, K, V> Iterator for Iter<'a, 'brand, K, V> {
     type Item = (&'a K, &'a V);
 
     fn next(&mut self) -> Option<Self::Item> {
-        let idx = self.curr?;
+        if self.curr == NONE {
+            return None;
+        }
+
         unsafe {
-            let node = self.list.nodes.get_unchecked(self.token, idx);
+            let node = self.list.nodes.get_unchecked(self.token, self.curr as usize);
 
             // Advance
-            let offset = node.link_offset;
+            let offset = node.link_offset as usize;
             self.curr = *self.list.links.get_unchecked(self.token, offset);
 
             Some((&node.key, &node.val))
@@ -422,54 +418,28 @@ impl<'a, 'brand, K, V> Iterator for Iter<'a, 'brand, K, V> {
 pub struct IterMut<'a, 'brand, K, V> {
     list: &'a BrandedSkipList<'brand, K, V>,
     token: &'a mut GhostToken<'brand>,
-    curr: Option<usize>,
+    curr: u32,
 }
 
 impl<'a, 'brand, K, V> Iterator for IterMut<'a, 'brand, K, V> {
     type Item = (&'a K, &'a mut V);
 
     fn next(&mut self) -> Option<Self::Item> {
-        let idx = self.curr?;
+        if self.curr == NONE {
+            return None;
+        }
 
-        // We need to return mutable reference.
-        // But we also need to advance self.curr using the list.
-        // We can't hold mutable borrow of list and read from it?
-        // Wait, iter_mut usually consumes the token or uses a split borrow.
-        // Here we have `&'a mut GhostToken`.
-        // To be safe and satisfy borrow checker, we need to leverage unsafe to extend lifetime
-        // OR rely on the fact that we are yielding disjoint mutable references (which is true for different nodes).
-        // Since `BrandedVec` doesn't support random access mutable iterators easily without consuming token,
-        // we have to be careful.
-
-        // However, standard pattern is `nodes.get_mut`. But we iterate sequentially.
-        // We can get the node.
-
-        // This is tricky safely.
-        // We can read `next` BEFORE borrowing `curr` mutably?
-        // Yes.
+        let idx = self.curr;
 
         unsafe {
-             // 1. Get next pointer using SHARED access (we have exclusive token, but can downgrade)
-             let node_shared = self.list.nodes.get_unchecked(&*self.token, idx);
-             let offset = node_shared.link_offset;
+             let node_shared = self.list.nodes.get_unchecked(&*self.token, idx as usize);
+             let offset = node_shared.link_offset as usize;
              let next_curr = *self.list.links.get_unchecked(&*self.token, offset);
 
-             // 2. Get MUTABLE reference to current
-             // We must ensure we don't alias.
-             // Since we advance `curr` and never look back, and SkipList is acyclic,
-             // we won't visit the same node twice.
-             // We can use `get_unchecked_mut`.
-             // But the lifetime of returned `&mut V` must be 'a.
-             // `get_unchecked_mut` takes `&'b mut Token` and returns `&'b mut T`.
-             // We need to transmute the lifetime to 'a.
-             // This is sound because each node is unique.
+             let node_mut = self.list.nodes.get_unchecked_mut(self.token, idx as usize);
 
-             let node_mut = self.list.nodes.get_unchecked_mut(self.token, idx);
-
-             // Update state
              self.curr = next_curr;
 
-             // Extend lifetime of return value to 'a
              let key_ptr = &node_mut.key as *const K;
              let val_ptr = &mut node_mut.val as *mut V;
 
@@ -477,7 +447,6 @@ impl<'a, 'brand, K, V> Iterator for IterMut<'a, 'brand, K, V> {
         }
     }
 }
-
 
 impl<'brand, K, V> BrandedSkipList<'brand, K, V> {
     pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> Iter<'a, 'brand, K, V> {
@@ -494,6 +463,12 @@ impl<'brand, K, V> BrandedSkipList<'brand, K, V> {
             curr: self.head_links[0],
             token,
         }
+    }
+}
+
+impl<'brand, K, V> Default for BrandedSkipList<'brand, K, V> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
