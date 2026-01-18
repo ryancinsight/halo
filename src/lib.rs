@@ -103,19 +103,20 @@
 #![allow(clippy::module_name_repetitions)]
 #![allow(clippy::must_use_candidate)]
 
+pub mod alloc;
 pub mod cell;
 pub mod collections;
 pub mod concurrency;
 pub mod graph;
 pub mod token;
 
+pub use alloc::BrandedArena;
 pub use cell::{GhostCell, GhostLazyCell, GhostLazyLock, GhostOnceCell, GhostUnsafeCell, RawGhostCell, GhostRefCell};
 pub use collections::{
     BrandedVec,
     BrandedVecDeque,
     BrandedHashMap,
     BrandedHashSet,
-    BrandedArena,
     BrandedCowStrings,
     BrandedString,
     BrandedDoublyLinkedList,

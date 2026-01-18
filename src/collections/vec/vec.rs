@@ -292,11 +292,9 @@ impl<'brand, T> BrandedVec<'brand, T> {
     /// each `&mut T` is scoped to one callback invocation, which preserves the
     /// token linearity invariant without requiring an `Iterator<Item = &mut T>`.
     pub fn for_each_mut(&self, token: &mut GhostToken<'brand>, mut f: impl FnMut(&mut T)) {
-        for cell in &self.inner {
-            // Each borrow is scoped to this loop iteration.
-            let x = cell.borrow_mut(token);
-            f(x);
-        }
+        self.inner.iter().for_each(|cell| {
+            f(cell.borrow_mut(token));
+        });
     }
 
     /// Zero-copy filter with fused iterator operations.
@@ -517,9 +515,7 @@ impl<'brand, T, const CAPACITY: usize> BrandedArray<'brand, T, CAPACITY> {
         T: Default,
     {
         let mut array = Self::new();
-        for item in iter {
-            array.push(item);
-        }
+        iter.into_iter().for_each(|item| array.push(item));
         array
     }
 
@@ -678,10 +674,9 @@ impl<'brand, T, const CAPACITY: usize> BrandedArray<'brand, T, CAPACITY> {
     /// This is the canonical safe pattern for *sequential* exclusive iteration:
     /// each `&mut T` is scoped to one callback invocation, preserving token linearity.
     pub fn for_each_mut(&self, token: &mut GhostToken<'brand>, mut f: impl FnMut(&mut T)) {
-        for i in 0..self.len {
-            let x = self.inner[i].borrow_mut(token);
-            f(x);
-        }
+        self.inner[..self.len].iter().for_each(|cell| {
+            f(cell.borrow_mut(token));
+        });
     }
 
     /// Returns the underlying array as a slice of cells.

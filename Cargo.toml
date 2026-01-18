@@ -93,3 +93,7 @@ harness = false
 [[bench]]
 name = "index_map_benchmark"
 harness = false
+
+[[bench]]
+name = "alloc_benchmark"
+harness = false
