@@ -101,3 +101,7 @@ harness = false
 [[bench]]
 name = "interval_map_benchmark"
 harness = false
+
+[[bench]]
+name = "trie_benchmark"
+harness = false
