@@ -17,9 +17,11 @@ pub use vec::{BrandedVec, BrandedVecDeque, BrandedChunkedVec, ChunkedVec, Brande
 pub use hash::{BrandedHashMap, BrandedHashSet, BrandedIndexMap};
 pub use btree::{BrandedBTreeMap, BrandedBTreeSet};
 pub use other::{
-    BrandedArena, BrandedBinaryHeap, BrandedCowStrings, BrandedDeque, BrandedDoublyLinkedList,
+    BrandedBinaryHeap, BrandedCowStrings, BrandedDeque, BrandedDoublyLinkedList,
     BrandedLruCache, BrandedSkipList, BrandedSlotMap, SlotKey,
 };
+
+pub use crate::alloc::BrandedArena;
 pub use string::BrandedString;
 
 // Re-export for trait definitions
