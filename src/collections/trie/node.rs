@@ -1,6 +1,14 @@
 use std::vec::Vec;
 use std::boxed::Box;
 
+/// A slot in the Trie arena.
+/// Can be either an occupied node or a pointer to the next free slot.
+#[derive(Debug, Clone)]
+pub enum NodeSlot<V> {
+    Occupied(Node<V>),
+    Free(usize),
+}
+
 /// A node in the Radix Trie.
 ///
 /// Each node contains:

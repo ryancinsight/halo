@@ -1,6 +1,7 @@
 use std::vec::Vec;
 use crate::GhostToken;
 use super::map::BrandedRadixTrieMap;
+use super::node::NodeSlot;
 
 /// Iterator over key-value pairs of `BrandedRadixTrieMap`.
 /// Yields `(Vec<u8>, &V)`.
@@ -19,9 +20,11 @@ impl<'a, 'brand, K, V> Iter<'a, 'brand, K, V> {
         let mut key_buf = Vec::new();
 
         if let Some(root_idx) = map.root {
-             if let Some(node) = map.nodes.get(token, root_idx) {
-                 key_buf.extend_from_slice(&node.prefix);
-                 stack.push((root_idx, 0));
+             if let Some(slot) = map.nodes.get(token, root_idx) {
+                 if let NodeSlot::Occupied(node) = slot {
+                     key_buf.extend_from_slice(&node.prefix);
+                     stack.push((root_idx, 0));
+                 }
              }
         }
 
@@ -46,7 +49,8 @@ impl<'a, 'brand, K, V> Iterator for Iter<'a, 'brand, K, V> {
             let last_idx = self.stack.len() - 1;
             let (node_idx, action) = self.stack[last_idx];
 
-            let node = self.map.nodes.get(self.token, node_idx).expect("Corrupted");
+            let slot = self.map.nodes.get(self.token, node_idx).expect("Corrupted");
+            let node = if let NodeSlot::Occupied(n) = slot { n } else { panic!("Iterating free slot") };
 
             if action == 0 {
                 // Try to yield value
@@ -66,10 +70,13 @@ impl<'a, 'brand, K, V> Iterator for Iter<'a, 'brand, K, V> {
                 // Advance parent so next time we visit next child
                 self.stack[last_idx].1 += 1;
 
-                let child_node = self.map.nodes.get(self.token, next_node_idx).expect("Corrupted");
-                self.key_buf.extend_from_slice(&child_node.prefix);
-
-                self.stack.push((next_node_idx, 0));
+                let child_slot = self.map.nodes.get(self.token, next_node_idx).expect("Corrupted");
+                if let NodeSlot::Occupied(child_node) = child_slot {
+                    self.key_buf.extend_from_slice(&child_node.prefix);
+                    self.stack.push((next_node_idx, 0));
+                } else {
+                    panic!("Child is free slot");
+                }
                 continue;
             } else {
                 // Done with this node
