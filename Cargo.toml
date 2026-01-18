@@ -85,3 +85,7 @@ debug = true
 [[bench]]
 name = "skip_list_benchmark"
 harness = false
+
+[[bench]]
+name = "slot_map_benchmark"
+harness = false

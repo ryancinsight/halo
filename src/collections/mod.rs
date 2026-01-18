@@ -18,7 +18,7 @@ pub use hash::{BrandedHashMap, BrandedHashSet};
 pub use btree::{BrandedBTreeMap, BrandedBTreeSet};
 pub use other::{
     BrandedArena, BrandedBinaryHeap, BrandedCowStrings, BrandedDeque, BrandedDoublyLinkedList,
-    BrandedLruCache, BrandedSkipList,
+    BrandedLruCache, BrandedSkipList, BrandedSlotMap, SlotKey,
 };
 pub use string::BrandedString;
 

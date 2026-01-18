@@ -10,6 +10,7 @@ pub mod doubly_linked_list;
 pub mod binary_heap;
 pub mod lru_cache;
 pub mod skip_list;
+pub mod slot_map;
 
 pub use deque::BrandedDeque;
 pub use arena::BrandedArena;
@@ -18,3 +19,4 @@ pub use doubly_linked_list::BrandedDoublyLinkedList;
 pub use binary_heap::BrandedBinaryHeap;
 pub use lru_cache::BrandedLruCache;
 pub use skip_list::BrandedSkipList;
+pub use slot_map::{BrandedSlotMap, SlotKey};
