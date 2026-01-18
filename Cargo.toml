@@ -58,6 +58,10 @@ harness = false
 name = "iterators_benchmark"
 harness = false
 
+[[bench]]
+name = "linked_list_benchmark"
+harness = false
+
 [[bin]]
 name = "analyze_performance"
 path = "analyze_performance.rs"

@@ -21,7 +21,8 @@ impl<'a, 'brand, T> Iterator for BrandedDoublyLinkedListIter<'a, 'brand, T> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let idx = self.current?;
-        match self.list.storage.borrow(self.token, idx) {
+        // SAFETY: Internal indices are guaranteed to be valid.
+        match unsafe { self.list.storage.get_unchecked(self.token, idx) } {
             Slot::Occupied(node) => {
                 self.current = node.next;
                 Some(&node.value)
@@ -171,7 +172,8 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
     /// Pops an element from the front of the list.
     pub fn pop_front(&mut self, token: &mut GhostToken<'brand>) -> Option<T> {
         let head_idx = self.head?;
-        let head_slot = self.storage.borrow_mut(token, head_idx);
+        // SAFETY: head index is managed internally and valid.
+        let head_slot = unsafe { self.storage.get_unchecked_mut(token, head_idx) };
 
         // Extract value and replace with Free marker placeholder
         // (We will fix the Free marker's next pointer in free())
@@ -203,7 +205,8 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
     /// Pops an element from the back of the list.
     pub fn pop_back(&mut self, token: &mut GhostToken<'brand>) -> Option<T> {
         let tail_idx = self.tail?;
-        let tail_slot = self.storage.borrow_mut(token, tail_idx);
+        // SAFETY: tail index is managed internally and valid.
+        let tail_slot = unsafe { self.storage.get_unchecked_mut(token, tail_idx) };
 
         let node = match std::mem::replace(tail_slot, Slot::Free(None)) {
              Slot::Occupied(node) => node,
@@ -232,7 +235,8 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
     /// Returns a reference to the front element.
     pub fn front<'a>(&'a self, token: &'a GhostToken<'brand>) -> Option<&'a T> {
         let head_idx = self.head?;
-        match self.storage.borrow(token, head_idx) {
+        // SAFETY: head index is managed internally and valid.
+        match unsafe { self.storage.get_unchecked(token, head_idx) } {
             Slot::Occupied(node) => Some(&node.value),
             _ => None,
         }
@@ -241,7 +245,8 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
     /// Returns a reference to the back element.
     pub fn back<'a>(&'a self, token: &'a GhostToken<'brand>) -> Option<&'a T> {
         let tail_idx = self.tail?;
-        match self.storage.borrow(token, tail_idx) {
+        // SAFETY: tail index is managed internally and valid.
+        match unsafe { self.storage.get_unchecked(token, tail_idx) } {
             Slot::Occupied(node) => Some(&node.value),
             _ => None,
         }
@@ -451,7 +456,8 @@ impl<'a, 'brand, T> CursorMut<'a, 'brand, T> {
     /// Returns a reference to the current element.
     pub fn current<'b>(&'b self, token: &'b GhostToken<'brand>) -> Option<&'b T> {
         let idx = self.current?;
-        match self.list.storage.borrow(token, idx) {
+        // SAFETY: cursor index is managed internally and valid.
+        match unsafe { self.list.storage.get_unchecked(token, idx) } {
             Slot::Occupied(node) => Some(&node.value),
             _ => None,
         }
@@ -460,7 +466,8 @@ impl<'a, 'brand, T> CursorMut<'a, 'brand, T> {
     /// Returns a mutable reference to the current element.
     pub fn current_mut<'b>(&'b mut self, token: &'b mut GhostToken<'brand>) -> Option<&'b mut T> {
         let idx = self.current?;
-        match self.list.storage.borrow_mut(token, idx) {
+        // SAFETY: cursor index is managed internally and valid.
+        match unsafe { self.list.storage.get_unchecked_mut(token, idx) } {
             Slot::Occupied(node) => Some(&mut node.value),
             _ => None,
         }
@@ -469,7 +476,8 @@ impl<'a, 'brand, T> CursorMut<'a, 'brand, T> {
     /// Moves the cursor to the next element.
     pub fn move_next(&mut self, token: &GhostToken<'brand>) {
         if let Some(curr_idx) = self.current {
-            if let Slot::Occupied(node) = self.list.storage.borrow(token, curr_idx) {
+            // SAFETY: cursor index is valid.
+            if let Slot::Occupied(node) = unsafe { self.list.storage.get_unchecked(token, curr_idx) } {
                 self.current = node.next;
                 if self.current.is_some() {
                     self.index += 1;
@@ -484,7 +492,8 @@ impl<'a, 'brand, T> CursorMut<'a, 'brand, T> {
     /// Moves the cursor to the previous element.
     pub fn move_prev(&mut self, token: &GhostToken<'brand>) {
         if let Some(curr_idx) = self.current {
-            if let Slot::Occupied(node) = self.list.storage.borrow(token, curr_idx) {
+            // SAFETY: cursor index is valid.
+            if let Slot::Occupied(node) = unsafe { self.list.storage.get_unchecked(token, curr_idx) } {
                 self.current = node.prev;
                 if self.current.is_some() {
                     self.index -= 1;
