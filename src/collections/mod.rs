@@ -9,6 +9,7 @@
 pub mod vec;
 pub mod hash;
 pub mod btree;
+pub mod trie;
 pub mod other;
 pub mod string;
 
@@ -16,6 +17,7 @@ pub mod string;
 pub use vec::{BrandedVec, BrandedVecDeque, BrandedChunkedVec, ChunkedVec, BrandedSmallVec};
 pub use hash::{BrandedHashMap, BrandedHashSet, BrandedIndexMap};
 pub use btree::{BrandedBTreeMap, BrandedBTreeSet};
+pub use trie::{BrandedRadixTrieMap, BrandedRadixTrieSet};
 pub use other::{
     BrandedBinaryHeap, BrandedCowStrings, BrandedDeque, BrandedDoublyLinkedList,
     BrandedLruCache, BrandedSkipList, BrandedSlotMap, SlotKey, BrandedIntervalMap,
