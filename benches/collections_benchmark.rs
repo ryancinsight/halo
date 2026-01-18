@@ -568,14 +568,13 @@ fn bench_branded_cow_strings_operations(c: &mut Criterion) {
 
 fn bench_branded_string_operations(c: &mut Criterion) {
     c.bench_function("branded_string_push", |b| {
-        GhostToken::new(|mut token| {
-            b.iter(|| {
-                let s = BrandedString::new();
-                for _ in 0..100 {
-                    s.push_str(&mut token, "hello");
-                }
-                black_box(s.len(&token));
-            });
+        // No token needed for structural operations
+        b.iter(|| {
+            let mut s = BrandedString::new();
+            for _ in 0..100 {
+                s.push_str("hello");
+            }
+            black_box(s.len());
         });
     });
 }
