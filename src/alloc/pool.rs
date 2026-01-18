@@ -206,6 +206,13 @@ impl<'brand, T> BrandedPool<'brand, T> {
     pub fn as_slice<'a>(&'a self, token: &'a GhostToken<'brand>) -> &'a [PoolSlot<T>] {
         self.state.borrow(token).storage.as_slice(token)
     }
+
+    /// Returns a mutable slice of the underlying storage.
+    #[inline]
+    pub fn as_mut_slice<'a>(&'a self, token: &'a mut GhostToken<'brand>) -> &'a mut [PoolSlot<T>] {
+        let state = self.state.borrow_mut(token);
+        state.storage.as_mut_slice_exclusive()
+    }
 }
 
 impl<'brand, T> Default for BrandedPool<'brand, T> {

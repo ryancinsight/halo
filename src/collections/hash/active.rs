@@ -85,15 +85,16 @@ where
     }
 
     /// Iterates over entries mutably.
-    ///
-    /// This uses `for_each_mut` under the hood because returning a mutable iterator
-    /// is not safely expressible with `GhostCell` without unsafe workarounds or
-    /// restrictive lifetimes that `Iterator` trait doesn't support easily (streaming iterator).
     pub fn for_each_mut<F>(&mut self, f: F)
     where
         F: FnMut(&K, &mut V),
     {
         self.map.for_each_mut(self.token, f)
+    }
+
+    /// Returns a mutable iterator over the map entries.
+    pub fn iter_mut(&mut self) -> super::hash_map::IterMut<'_, 'brand, K, V> {
+        self.map.iter_mut(self.token)
     }
 }
 

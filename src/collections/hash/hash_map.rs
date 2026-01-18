@@ -511,7 +511,74 @@ where
             }
         }
     }
+
+    /// Returns a mutable iterator over the map entries.
+    pub fn iter_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>) -> IterMut<'a, 'brand, K, V> {
+        IterMut {
+            ctrl: &self.ctrl,
+            keys: &self.keys,
+            values: &self.values,
+            token,
+            index: 0,
+            items_left: self.len,
+        }
+    }
 }
+
+/// Mutable iterator over the map entries.
+pub struct IterMut<'a, 'brand, K, V> {
+    ctrl: &'a [u8],
+    keys: &'a [MaybeUninit<K>],
+    values: &'a [MaybeUninit<GhostCell<'brand, V>>],
+    token: &'a mut GhostToken<'brand>,
+    index: usize,
+    items_left: usize,
+}
+
+impl<'a, 'brand, K, V> Iterator for IterMut<'a, 'brand, K, V> {
+    type Item = (&'a K, &'a mut V);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.items_left > 0 && self.index < self.ctrl.len() {
+            let i = self.index;
+            self.index += 1;
+            // Ignore padding bytes (ctrl is capacity + 8)
+            // But iteration check loop logic:
+            // We only iterate up to capacity (which is keys.len and values.len).
+            // But ctrl has extra bytes.
+            // BrandedHashMap::values uses `self.ctrl[0..self.capacity]`.
+
+            // We should bounds check against values.len() or keys.len().
+            if i >= self.keys.len() {
+                return None;
+            }
+
+            if self.ctrl[i] & 0x80 == 0 {
+                self.items_left -= 1;
+                unsafe {
+                    let k = self.keys.get_unchecked(i).assume_init_ref();
+                    let cell = self.values.get_unchecked(i).assume_init_ref();
+
+                    // SAFETY:
+                    // 1. We hold &'a mut GhostToken.
+                    // 2. We yield unique elements because 'i' increments.
+                    // 3. We use as_mut_ptr to get *mut V, then lift to &'a mut V.
+                    //    This extends lifetime from self.token reborrow to 'a.
+                    let ptr = cell.as_mut_ptr(self.token);
+                    return Some((k, &mut *ptr));
+                }
+            }
+        }
+        None
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.items_left, Some(self.items_left))
+    }
+}
+
+impl<'a, 'brand, K, V> ExactSizeIterator for IterMut<'a, 'brand, K, V> {}
+impl<'a, 'brand, K, V> std::iter::FusedIterator for IterMut<'a, 'brand, K, V> {}
 
 impl<'brand, K, V, S> Drop for BrandedHashMap<'brand, K, V, S> {
     fn drop(&mut self) {
