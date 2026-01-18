@@ -1,65 +1,58 @@
 //! `BrandedDoublyLinkedList` — a token-gated doubly linked list.
 //!
-//! This implementation uses a `BrandedVec` as the backing storage (arena) for nodes,
+//! This implementation uses a `BrandedPool` as the backing storage for nodes,
 //! allowing safe index-based pointers with the `GhostCell` pattern.
 //! It supports O(1) insertion and removal at arbitrary positions via Cursors.
-//!
-//! # Optimization
-//! This implementation uses a Structure-of-Arrays (SoA) layout:
-//! - `links`: Stores structure (prev/next pointers). Optimizes cache usage for structural operations.
-//! - `values`: Stores element data. Only accessed when needed.
 
 use crate::GhostToken;
-use crate::collections::vec::BrandedVec;
+use crate::alloc::BrandedPool;
 use crate::collections::ZeroCopyOps;
+use crate::alloc::pool::PoolSlot;
 use core::fmt;
-use core::mem::MaybeUninit;
+use core::marker::PhantomData;
+
+/// Internal node structure.
+struct ListNode<T> {
+    prev: Option<usize>,
+    next: Option<usize>,
+    value: T,
+}
 
 /// Zero-cost iterator for BrandedDoublyLinkedList.
 pub struct BrandedDoublyLinkedListIter<'a, 'brand, T> {
-    list: &'a BrandedDoublyLinkedList<'brand, T>,
+    storage: &'a [PoolSlot<ListNode<T>>],
     current: Option<usize>,
-    token: &'a GhostToken<'brand>,
+    _marker: PhantomData<fn(&'brand ()) -> &'brand ()>,
 }
 
 impl<'a, 'brand, T> Iterator for BrandedDoublyLinkedListIter<'a, 'brand, T> {
     type Item = &'a T;
 
+    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let idx = self.current?;
         // SAFETY: Internal indices are guaranteed to be valid and synchronized.
-        match unsafe { self.list.links.get_unchecked(self.token, idx) } {
-            LinkSlot::Occupied { next, .. } => {
-                self.current = *next;
-                // SAFETY: If link slot is occupied, value slot is initialized.
-                unsafe {
-                    let cell = self.list.values.get_unchecked(self.token, idx);
-                    Some(cell.assume_init_ref())
+        // We use get_unchecked because the list structure invariants guarantee valid indices.
+        if let Some(slot) = self.storage.get(idx) {
+            match slot {
+                PoolSlot::Occupied(node) => {
+                    self.current = node.next;
+                    Some(&node.value)
                 }
+                PoolSlot::Free(_) => None, // Should not happen
             }
-            LinkSlot::Free(_) => None, // Should not happen for valid list traversal
+        } else {
+            None
         }
     }
 }
 
-/// A slot in the links vector.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LinkSlot {
-    Occupied { prev: Option<usize>, next: Option<usize> },
-    Free(Option<usize>), // Next free slot index
-}
-
 /// A doubly linked list with token-gated access.
 pub struct BrandedDoublyLinkedList<'brand, T> {
-    /// Structure storage: small footprint for cache efficiency during traversal/reordering.
-    links: BrandedVec<'brand, LinkSlot>,
-    /// Value storage: only accessed when reading/writing values.
-    /// Uses MaybeUninit because free slots contain uninitialized data.
-    values: BrandedVec<'brand, MaybeUninit<T>>,
-
+    /// Pool storage for nodes.
+    pool: BrandedPool<'brand, ListNode<T>>,
     head: Option<usize>,
     tail: Option<usize>,
-    free_head: Option<usize>,
     len: usize,
 }
 
@@ -67,11 +60,9 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
     /// Creates a new empty doubly linked list.
     pub fn new() -> Self {
         Self {
-            links: BrandedVec::new(),
-            values: BrandedVec::new(),
+            pool: BrandedPool::new(),
             head: None,
             tail: None,
-            free_head: None,
             len: 0,
         }
     }
@@ -91,63 +82,23 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
         while self.pop_front(token).is_some() {}
     }
 
-    /// Allocates a new node slot, potentially reusing a free one.
-    fn alloc(&mut self, token: &mut GhostToken<'brand>, value: T) -> usize {
-        if let Some(free_idx) = self.free_head {
-            // Reuse free slot
-            let slot = self.links.borrow_mut(token, free_idx);
-            let next_free = match slot {
-                LinkSlot::Free(next) => *next,
-                _ => panic!("Corrupted free list"),
-            };
-            *slot = LinkSlot::Occupied { prev: None, next: None };
-
-            // Initialize value
-            // SAFETY: Slot was free, so value was uninitialized. We write a valid value.
-            let val_slot = self.values.borrow_mut(token, free_idx);
-            *val_slot = MaybeUninit::new(value);
-
-            self.free_head = next_free;
-            free_idx
-        } else {
-            // Push new slot
-            let idx = self.links.len();
-            self.links.push(LinkSlot::Occupied { prev: None, next: None });
-            self.values.push(MaybeUninit::new(value));
-            idx
-        }
-    }
-
-    /// Frees a node slot.
-    ///
-    /// This puts the slot onto the free list and drops the value.
-    /// Caller must update links pointing to this node before freeing.
-    fn free(&mut self, token: &mut GhostToken<'brand>, idx: usize) {
-        let slot = self.links.borrow_mut(token, idx);
-        *slot = LinkSlot::Free(self.free_head);
-
-        // Drop the value
-        let val_slot = self.values.borrow_mut(token, idx);
-        unsafe { val_slot.assume_init_drop() };
-
-        self.free_head = Some(idx);
-    }
-
     /// Pushes an element to the front of the list.
     pub fn push_front(&mut self, token: &mut GhostToken<'brand>, value: T) -> usize {
-        let new_idx = self.alloc(token, value);
+        let node = ListNode {
+            prev: None,
+            next: self.head,
+            value,
+        };
+
+        let new_idx = self.pool.alloc(token, node);
         let old_head = self.head;
 
         if let Some(head_idx) = old_head {
-            if let LinkSlot::Occupied { prev, .. } = self.links.borrow_mut(token, head_idx) {
-                *prev = Some(new_idx);
-            }
+             if let Some(node) = self.pool.get_mut(token, head_idx) {
+                 node.prev = Some(new_idx);
+             }
         } else {
             self.tail = Some(new_idx);
-        }
-
-        if let LinkSlot::Occupied { next, .. } = self.links.borrow_mut(token, new_idx) {
-            *next = old_head;
         }
 
         self.head = Some(new_idx);
@@ -157,19 +108,21 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
 
     /// Pushes an element to the back of the list.
     pub fn push_back(&mut self, token: &mut GhostToken<'brand>, value: T) -> usize {
-        let new_idx = self.alloc(token, value);
+        let node = ListNode {
+            prev: self.tail,
+            next: None,
+            value,
+        };
+
+        let new_idx = self.pool.alloc(token, node);
         let old_tail = self.tail;
 
         if let Some(tail_idx) = old_tail {
-            if let LinkSlot::Occupied { next, .. } = self.links.borrow_mut(token, tail_idx) {
-                *next = Some(new_idx);
+            if let Some(node) = self.pool.get_mut(token, tail_idx) {
+                node.next = Some(new_idx);
             }
         } else {
             self.head = Some(new_idx);
-        }
-
-        if let LinkSlot::Occupied { prev, .. } = self.links.borrow_mut(token, new_idx) {
-            *prev = old_tail;
         }
 
         self.tail = Some(new_idx);
@@ -181,32 +134,13 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
     pub fn pop_front(&mut self, token: &mut GhostToken<'brand>) -> Option<T> {
         let head_idx = self.head?;
 
-        // Read links
-        let (next_idx, _) = match self.links.borrow(token, head_idx) {
-            LinkSlot::Occupied { next, prev } => (*next, *prev),
-            _ => panic!("Corrupted list: head points to free slot"),
-        };
-
-        // Extract value before freeing
-        // SAFETY: We checked it's Occupied.
-        let value = unsafe {
-            let val_slot = self.values.borrow(token, head_idx);
-            val_slot.assume_init_read()
-        };
-
-        // We manually handle "freeing" logic here to avoid double drop
-        // Actually alloc/free manage MaybeUninit, so free() just drops it.
-        // But we want to return the value.
-        // So we should NOT call free(), but implement the link update part of free manually
-        // and put it in free list, WITHOUT dropping value (since we moved it).
-
-        let slot = self.links.borrow_mut(token, head_idx);
-        *slot = LinkSlot::Free(self.free_head);
-        self.free_head = Some(head_idx);
+        // We use take to extract value and free the slot
+        let node = unsafe { self.pool.take(token, head_idx) };
+        let next_idx = node.next;
 
         if let Some(next) = next_idx {
-             if let LinkSlot::Occupied { prev, .. } = self.links.borrow_mut(token, next) {
-                 *prev = None;
+             if let Some(next_node) = self.pool.get_mut(token, next) {
+                 next_node.prev = None;
              }
              self.head = Some(next);
         } else {
@@ -215,32 +149,19 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
         }
 
         self.len -= 1;
-        Some(value)
+        Some(node.value)
     }
 
     /// Pops an element from the back of the list.
     pub fn pop_back(&mut self, token: &mut GhostToken<'brand>) -> Option<T> {
         let tail_idx = self.tail?;
 
-        let (prev_idx, _) = match self.links.borrow(token, tail_idx) {
-            LinkSlot::Occupied { prev, next } => (*prev, *next),
-            _ => panic!("Corrupted list: tail points to free slot"),
-        };
-
-        // Extract value
-        let value = unsafe {
-            let val_slot = self.values.borrow(token, tail_idx);
-            val_slot.assume_init_read()
-        };
-
-        // Update free list manually to avoid drop
-        let slot = self.links.borrow_mut(token, tail_idx);
-        *slot = LinkSlot::Free(self.free_head);
-        self.free_head = Some(tail_idx);
+        let node = unsafe { self.pool.take(token, tail_idx) };
+        let prev_idx = node.prev;
 
         if let Some(prev) = prev_idx {
-            if let LinkSlot::Occupied { next, .. } = self.links.borrow_mut(token, prev) {
-                *next = None;
+            if let Some(prev_node) = self.pool.get_mut(token, prev) {
+                prev_node.next = None;
             }
             self.tail = Some(prev);
         } else {
@@ -249,156 +170,120 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
         }
 
         self.len -= 1;
-        Some(value)
+        Some(node.value)
     }
 
     /// Returns a reference to the front element.
     pub fn front<'a>(&'a self, token: &'a GhostToken<'brand>) -> Option<&'a T> {
         let head_idx = self.head?;
-        match self.links.borrow(token, head_idx) {
-            LinkSlot::Occupied { .. } => {
-                unsafe { Some(self.values.borrow(token, head_idx).assume_init_ref()) }
-            }
-            _ => None,
-        }
+        let node = self.pool.get(token, head_idx)?;
+        Some(&node.value)
     }
 
     /// Returns a reference to the back element.
     pub fn back<'a>(&'a self, token: &'a GhostToken<'brand>) -> Option<&'a T> {
         let tail_idx = self.tail?;
-        match self.links.borrow(token, tail_idx) {
-            LinkSlot::Occupied { .. } => {
-                unsafe { Some(self.values.borrow(token, tail_idx).assume_init_ref()) }
-            }
-            _ => None,
-        }
+        let node = self.pool.get(token, tail_idx)?;
+        Some(&node.value)
     }
 
     /// Returns a reference to the element at the given index.
     pub fn get<'a>(&'a self, token: &'a GhostToken<'brand>, index: usize) -> Option<&'a T> {
-        // We must check if slot is occupied
-        match self.links.get(token, index) {
-            Some(LinkSlot::Occupied { .. }) => {
-                unsafe { Some(self.values.get_unchecked(token, index).assume_init_ref()) }
-            }
-            _ => None,
-        }
+        let node = self.pool.get(token, index)?;
+        Some(&node.value)
     }
 
     /// Returns a mutable reference to the element at the given index.
     pub fn get_mut<'a>(&'a mut self, token: &'a mut GhostToken<'brand>, index: usize) -> Option<&'a mut T> {
-        match self.links.get(token, index) {
-            Some(LinkSlot::Occupied { .. }) => {
-                unsafe { Some(self.values.get_unchecked_mut(token, index).assume_init_mut()) }
-            }
-            _ => None,
-        }
+        let node = self.pool.get_mut(token, index)?;
+        Some(&mut node.value)
     }
 
     /// Iterates over the list elements.
     pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> BrandedDoublyLinkedListIter<'a, 'brand, T> {
         BrandedDoublyLinkedListIter {
-            list: self,
+            storage: self.pool.as_slice(token),
             current: self.head,
-            token,
+            _marker: PhantomData,
         }
     }
 
     /// Moves the node at `index` to the front of the list.
-    ///
-    /// This operation is optimized by only touching the `links` vector,
-    /// avoiding cache pollution from loading `values`.
-    ///
-    /// # Panics
-    /// Panics if `index` is not a valid node index.
     pub fn move_to_front(&mut self, token: &mut GhostToken<'brand>, index: usize) {
         if self.head == Some(index) {
             return;
         }
 
-        // Verify index is valid and get neighbors
-        let (prev_idx, next_idx) = if let LinkSlot::Occupied { prev, next } = self.links.borrow(token, index) {
-            (*prev, *next)
-        } else {
-             panic!("Invalid index");
+        let (prev_idx, next_idx) = {
+            if let Some(node) = self.pool.get(token, index) {
+                (node.prev, node.next)
+            } else {
+                return; // Invalid index
+            }
         };
 
-        // Detach from current position
+        // Detach
         if let Some(prev) = prev_idx {
-            if let LinkSlot::Occupied { next, .. } = self.links.borrow_mut(token, prev) {
-                *next = next_idx;
-            }
+            if let Some(node) = self.pool.get_mut(token, prev) { node.next = next_idx; }
         }
 
         if let Some(next) = next_idx {
-            if let LinkSlot::Occupied { prev, .. } = self.links.borrow_mut(token, next) {
-                *prev = prev_idx;
-            }
+            if let Some(node) = self.pool.get_mut(token, next) { node.prev = prev_idx; }
         } else {
              self.tail = prev_idx;
         }
 
-        // Attach to front
+        // Attach
         let old_head = self.head;
         if let Some(head_idx) = old_head {
-             if let LinkSlot::Occupied { prev, .. } = self.links.borrow_mut(token, head_idx) {
-                 *prev = Some(index);
-             }
+             if let Some(node) = self.pool.get_mut(token, head_idx) { node.prev = Some(index); }
         }
 
-        if let LinkSlot::Occupied { prev, next } = self.links.borrow_mut(token, index) {
-            *prev = None;
-            *next = old_head;
+        if let Some(node_mut) = self.pool.get_mut(token, index) {
+            node_mut.prev = None;
+            node_mut.next = old_head;
         }
 
         self.head = Some(index);
-
         if self.tail.is_none() {
              self.tail = Some(index);
         }
     }
 
     /// Moves the node at `index` to the back of the list.
-    ///
-    /// # Panics
-    /// Panics if `index` is not a valid node index.
     pub fn move_to_back(&mut self, token: &mut GhostToken<'brand>, index: usize) {
         if self.tail == Some(index) {
             return;
         }
 
-        let (prev_idx, next_idx) = if let LinkSlot::Occupied { prev, next } = self.links.borrow(token, index) {
-            (*prev, *next)
-        } else {
-             panic!("Invalid index");
+        let (prev_idx, next_idx) = {
+            if let Some(node) = self.pool.get(token, index) {
+                (node.prev, node.next)
+            } else {
+                return; // Invalid index
+            }
         };
 
         // Detach
         if let Some(prev) = prev_idx {
-            if let LinkSlot::Occupied { next, .. } = self.links.borrow_mut(token, prev) {
-                *next = next_idx;
-            }
+            if let Some(node) = self.pool.get_mut(token, prev) { node.next = next_idx; }
         } else {
             self.head = next_idx;
         }
 
         if let Some(next) = next_idx {
-            if let LinkSlot::Occupied { prev, .. } = self.links.borrow_mut(token, next) {
-                *prev = prev_idx;
-            }
+            if let Some(node) = self.pool.get_mut(token, next) { node.prev = prev_idx; }
         }
 
-        // Attach to back
+        // Attach
         let old_tail = self.tail;
         if let Some(tail_idx) = old_tail {
-             if let LinkSlot::Occupied { next, .. } = self.links.borrow_mut(token, tail_idx) {
-                 *next = Some(index);
-             }
+             if let Some(node) = self.pool.get_mut(token, tail_idx) { node.next = Some(index); }
         }
 
-        if let LinkSlot::Occupied { prev, next } = self.links.borrow_mut(token, index) {
-            *next = None;
-            *prev = old_tail;
+        if let Some(node_mut) = self.pool.get_mut(token, index) {
+            node_mut.next = None;
+            node_mut.prev = old_tail;
         }
 
         self.tail = Some(index);
@@ -435,115 +320,29 @@ impl<'brand, T> Default for BrandedDoublyLinkedList<'brand, T> {
     }
 }
 
-impl<'brand, T> FromIterator<T> for BrandedDoublyLinkedList<'brand, T> {
-    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        let items: Vec<T> = iter.into_iter().collect();
-        let len = items.len();
-
-        if len == 0 {
-            return Self::new();
-        }
-
-        let mut links = BrandedVec::with_capacity(len);
-        let mut values = BrandedVec::with_capacity(len);
-
-        for (i, item) in items.into_iter().enumerate() {
-            let prev = if i == 0 { None } else { Some(i - 1) };
-            let next = if i == len - 1 { None } else { Some(i + 1) };
-
-            links.push(LinkSlot::Occupied { prev, next });
-            values.push(MaybeUninit::new(item));
-        }
-
-        Self {
-            links,
-            values,
-            head: Some(0),
-            tail: Some(len - 1),
-            free_head: None,
-            len,
-        }
-    }
-}
-
-/// Consuming iterator for BrandedDoublyLinkedList.
-pub struct IntoIter<T> {
-    links: Vec<Option<LinkSlot>>,
-    values: Vec<MaybeUninit<T>>,
-    current: Option<usize>,
-    len: usize,
-}
-
-impl<T> Iterator for IntoIter<T> {
-    type Item = T;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let idx = self.current?;
-        if let Some(slot) = self.links.get_mut(idx).and_then(|s| s.take()) {
-            match slot {
-                LinkSlot::Occupied { next, .. } => {
-                    self.current = next;
-                    self.len -= 1;
-                    // Read value
-                    // SAFETY: Slot was Occupied, so value is init.
-                    unsafe {
-                        Some(self.values.get_unchecked(idx).assume_init_read())
-                    }
-                }
-                LinkSlot::Free(_) => None,
-            }
-        } else {
-            None
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.len, Some(self.len))
-    }
-}
-
-impl<T> ExactSizeIterator for IntoIter<T> {
-    fn len(&self) -> usize {
-        self.len
-    }
-}
-
-impl<T> Drop for IntoIter<T> {
+// Implement Drop
+impl<'brand, T> Drop for BrandedDoublyLinkedList<'brand, T> {
     fn drop(&mut self) {
-        // Drop all remaining occupied values
-        for (i, slot) in self.links.iter().enumerate() {
-            if let Some(LinkSlot::Occupied { .. }) = slot {
-                unsafe {
-                    self.values.get_unchecked_mut(i).assume_init_drop();
-                }
+        let mut current = self.head;
+        while let Some(idx) = current {
+            if let Some(node) = self.pool.get_mut_exclusive(idx) {
+                current = node.next;
+                // Node destructor will run when pool is dropped, but values need dropping now?
+                // PoolSlot::Occupied(T) owns T.
+                // When pool drops, all slots drop. T drops.
+                // If we don't clear the list, T will be dropped when Pool drops.
+                // BUT if Pool is shared and we drop list, we want to free nodes in the pool?
+                // If Pool is OWNED by List (it is: `pool: BrandedPool`), then dropping pool drops all T.
+                // So we don't need manual drop logic if `PoolSlot` handles drop.
+                // `PoolSlot` is an enum with `Occupied(T)`. Drop of enum drops T.
+                // So this Drop impl is actually redundant if we own the pool!
+
+                // Wait, if we used `BrandedPool` as a shared structure (passed in), we would need to free.
+                // But `BrandedDoublyLinkedList` OWNS `BrandedPool`.
+                // So we can just let `BrandedPool` drop.
+            } else {
+                break;
             }
-        }
-    }
-}
-
-impl<'brand, T> IntoIterator for BrandedDoublyLinkedList<'brand, T> {
-    type Item = T;
-    type IntoIter = IntoIter<T>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        let len = self.len;
-        let head = self.head;
-
-        // Read fields to avoid Drop
-        let links_vec = unsafe { core::ptr::read(&self.links) };
-        let values_vec = unsafe { core::ptr::read(&self.values) };
-
-        // Forget self to prevent Drop from running and double-dropping values
-        core::mem::forget(self);
-
-        let links: Vec<Option<LinkSlot>> = links_vec.into_iter().map(Some).collect();
-        let values: Vec<MaybeUninit<T>> = values_vec.into_iter().collect();
-
-        IntoIter {
-            links,
-            values,
-            current: head,
-            len,
         }
     }
 }
@@ -571,69 +370,6 @@ impl<'brand, T> ZeroCopyOps<'brand, T> for BrandedDoublyLinkedList<'brand, T> {
     }
 }
 
-impl<'brand, T> Drop for BrandedDoublyLinkedList<'brand, T> {
-    fn drop(&mut self) {
-        // We need to drop all occupied values in `values`.
-        // Iterating through free list is hard if we want to find occupied.
-        // Easier: iterate all slots and check links.
-
-        // Wait, self.links is BrandedVec. accessing it needs token?
-        // No, Drop for BrandedVec drops contents.
-        // `links` drops LinkSlots (plain enums).
-        // `values` drops MaybeUninit<T>. MaybeUninit drop does nothing!
-        // We MUST drop T manually.
-
-        // Problem: We don't have a token in Drop.
-        // But we own the BrandedVecs.
-        // BrandedVec internal `Vec` is accessible via crate?
-        // `BrandedVec` field `inner` is `pub(crate)`.
-
-        // We can inspect `links.inner` and `values.inner`.
-        // `links.inner` is `Vec<GhostCell<LinkSlot>>`.
-        // `values.inner` is `Vec<GhostCell<MaybeUninit<T>>>`.
-
-        // GhostCell allows `into_inner`.
-        // But we are in Drop of BrandedDoublyLinkedList.
-        // We can't move out of fields in Drop.
-        // But we can iterate references if we use unsafe or into_inner on fields?
-        // No, fields are dropped after drop() returns.
-
-        // Solution: Since we don't have token, we can't safe-borrow.
-        // But we are dropping the structure, so we have exclusive access fundamentally.
-        // We can use UnsafeCell::get_mut equivalent or transmute.
-        // Since we are `BrandedDoublyLinkedList` dropping, no one else can have token access to our `brand`.
-        // Actually, token lifetime `'brand` might outlive the list.
-        // But if list is dropped, no one can access it.
-
-        // We can iterate `links` and `values` internal vectors (via some helper or just trusting index sync).
-        // `links` and `values` always have same length.
-
-        // But `BrandedVec` doesn't expose iter without token easily?
-        // We can rely on `BrandedVec` Drop behavior?
-        // `values` contains `MaybeUninit<T>`. Drop of `MaybeUninit` is no-op.
-        // So `BrandedVec` dropping `values` will NOT drop `T`.
-        // We MUST manually drop.
-
-        // We need to iterate 0..len.
-        // We can use `BrandedVec::inner` (it is pub crate).
-
-        let links_len = self.links.len();
-
-        // We iterate indices.
-        for i in 0..links_len {
-            // Get mutable references to content via GhostCell::get_mut
-            // This is safe because we are in Drop and own the list exclusively.
-            let link_slot = self.links.inner[i].get_mut();
-            let val_slot = self.values.inner[i].get_mut();
-
-            if let LinkSlot::Occupied { .. } = link_slot {
-                // Drop value
-                unsafe { val_slot.assume_init_drop() };
-            }
-        }
-    }
-}
-
 /// A mutable cursor for the linked list.
 pub struct CursorMut<'a, 'brand, T> {
     list: &'a mut BrandedDoublyLinkedList<'brand, T>,
@@ -650,30 +386,22 @@ impl<'a, 'brand, T> CursorMut<'a, 'brand, T> {
     /// Returns a reference to the current element.
     pub fn current<'b>(&'b self, token: &'b GhostToken<'brand>) -> Option<&'b T> {
         let idx = self.current?;
-        match unsafe { self.list.links.get_unchecked(token, idx) } {
-            LinkSlot::Occupied { .. } => {
-                unsafe { Some(self.list.values.get_unchecked(token, idx).assume_init_ref()) }
-            }
-            _ => None,
-        }
+        let node = self.list.pool.get(token, idx)?;
+        Some(&node.value)
     }
 
     /// Returns a mutable reference to the current element.
     pub fn current_mut<'b>(&'b mut self, token: &'b mut GhostToken<'brand>) -> Option<&'b mut T> {
         let idx = self.current?;
-        match unsafe { self.list.links.get_unchecked_mut(token, idx) } {
-            LinkSlot::Occupied { .. } => {
-                unsafe { Some(self.list.values.get_unchecked_mut(token, idx).assume_init_mut()) }
-            }
-            _ => None,
-        }
+        let node = self.list.pool.get_mut(token, idx)?;
+        Some(&mut node.value)
     }
 
     /// Moves the cursor to the next element.
     pub fn move_next(&mut self, token: &GhostToken<'brand>) {
         if let Some(curr_idx) = self.current {
-            if let LinkSlot::Occupied { next, .. } = unsafe { self.list.links.get_unchecked(token, curr_idx) } {
-                self.current = *next;
+            if let Some(node) = self.list.pool.get(token, curr_idx) {
+                self.current = node.next;
                 if self.current.is_some() {
                     self.index += 1;
                 }
@@ -687,8 +415,8 @@ impl<'a, 'brand, T> CursorMut<'a, 'brand, T> {
     /// Moves the cursor to the previous element.
     pub fn move_prev(&mut self, token: &GhostToken<'brand>) {
         if let Some(curr_idx) = self.current {
-            if let LinkSlot::Occupied { prev, .. } = unsafe { self.list.links.get_unchecked(token, curr_idx) } {
-                self.current = *prev;
+            if let Some(node) = self.list.pool.get(token, curr_idx) {
+                self.current = node.prev;
                 if self.current.is_some() {
                     self.index -= 1;
                 }
@@ -702,31 +430,22 @@ impl<'a, 'brand, T> CursorMut<'a, 'brand, T> {
     /// Inserts a new element after the current element.
     pub fn insert_after(&mut self, token: &mut GhostToken<'brand>, value: T) -> usize {
         if let Some(curr_idx) = self.current {
-            let new_idx = self.list.alloc(token, value);
+            // Read next_idx
+            let next_idx = self.list.pool.get(token, curr_idx).unwrap().next;
 
-            // Get current's next
-            let next_idx = if let LinkSlot::Occupied { next, .. } = self.list.links.borrow(token, curr_idx) {
-                *next
-            } else {
-                panic!("Corrupted list");
+            let node = ListNode {
+                prev: Some(curr_idx),
+                next: next_idx,
+                value,
             };
-
-            // Link new node
-            if let LinkSlot::Occupied { prev, next } = self.list.links.borrow_mut(token, new_idx) {
-                *prev = Some(curr_idx);
-                *next = next_idx;
-            }
+            let new_idx = self.list.pool.alloc(token, node);
 
             // Update current's next
-            if let LinkSlot::Occupied { next, .. } = self.list.links.borrow_mut(token, curr_idx) {
-                *next = Some(new_idx);
-            }
+            if let Some(node) = self.list.pool.get_mut(token, curr_idx) { node.next = Some(new_idx); }
 
             // Update next's prev or tail
             if let Some(next) = next_idx {
-                if let LinkSlot::Occupied { prev, .. } = self.list.links.borrow_mut(token, next) {
-                    *prev = Some(new_idx);
-                }
+                if let Some(node) = self.list.pool.get_mut(token, next) { node.prev = Some(new_idx); }
             } else {
                 self.list.tail = Some(new_idx);
             }
@@ -745,31 +464,22 @@ impl<'a, 'brand, T> CursorMut<'a, 'brand, T> {
     /// Inserts a new element before the current element.
     pub fn insert_before(&mut self, token: &mut GhostToken<'brand>, value: T) -> usize {
          if let Some(curr_idx) = self.current {
-            let new_idx = self.list.alloc(token, value);
+            // Read prev_idx
+            let prev_idx = self.list.pool.get(token, curr_idx).unwrap().prev;
 
-            // Get current's prev
-            let prev_idx = if let LinkSlot::Occupied { prev, .. } = self.list.links.borrow(token, curr_idx) {
-                *prev
-            } else {
-                panic!("Corrupted list");
+            let node = ListNode {
+                prev: prev_idx,
+                next: Some(curr_idx),
+                value,
             };
-
-            // Link new node
-            if let LinkSlot::Occupied { prev, next } = self.list.links.borrow_mut(token, new_idx) {
-                *prev = prev_idx;
-                *next = Some(curr_idx);
-            }
+            let new_idx = self.list.pool.alloc(token, node);
 
             // Update current's prev
-            if let LinkSlot::Occupied { prev, .. } = self.list.links.borrow_mut(token, curr_idx) {
-                *prev = Some(new_idx);
-            }
+            if let Some(node) = self.list.pool.get_mut(token, curr_idx) { node.prev = Some(new_idx); }
 
             // Update prev's next or head
             if let Some(prev) = prev_idx {
-                if let LinkSlot::Occupied { next, .. } = self.list.links.borrow_mut(token, prev) {
-                    *next = Some(new_idx);
-                }
+                if let Some(node) = self.list.pool.get_mut(token, prev) { node.next = Some(new_idx); }
             } else {
                 self.list.head = Some(new_idx);
             }
@@ -790,45 +500,28 @@ impl<'a, 'brand, T> CursorMut<'a, 'brand, T> {
     pub fn remove_current(&mut self, token: &mut GhostToken<'brand>) -> Option<T> {
         let curr_idx = self.current?;
 
-        let (prev_idx, next_idx) = if let LinkSlot::Occupied { prev, next } = self.list.links.borrow(token, curr_idx) {
-            (*prev, *next)
-        } else {
-            panic!("Corrupted list");
-        };
+        let mut node = unsafe { self.list.pool.take(token, curr_idx) };
+        let prev_idx = node.prev;
+        let next_idx = node.next;
 
         // Update prev node or head
         if let Some(prev) = prev_idx {
-            if let LinkSlot::Occupied { next, .. } = self.list.links.borrow_mut(token, prev) {
-                *next = next_idx;
-            }
+            if let Some(node) = self.list.pool.get_mut(token, prev) { node.next = next_idx; }
         } else {
             self.list.head = next_idx;
         }
 
         // Update next node or tail
         if let Some(next) = next_idx {
-            if let LinkSlot::Occupied { prev, .. } = self.list.links.borrow_mut(token, next) {
-                *prev = prev_idx;
-            }
+            if let Some(node) = self.list.pool.get_mut(token, next) { node.prev = prev_idx; }
         } else {
             self.list.tail = prev_idx;
         }
 
-        // Extract value
-        let value = unsafe {
-            let val_slot = self.list.values.borrow(token, curr_idx);
-            val_slot.assume_init_read()
-        };
-
-        // Free slot
-        let slot = self.list.links.borrow_mut(token, curr_idx);
-        *slot = LinkSlot::Free(self.list.free_head);
-        self.list.free_head = Some(curr_idx);
-
         self.list.len -= 1;
         self.current = next_idx;
 
-        Some(value)
+        Some(node.value)
     }
 }
 

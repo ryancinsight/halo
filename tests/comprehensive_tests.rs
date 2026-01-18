@@ -490,10 +490,10 @@ fn branded_collections_mathematical_correctness() {
 fn arena_key_invariants() {
     // Test that arena keys maintain their invariants
     GhostToken::new(|mut token| {
-        let mut arena: BrandedArena<'_, i32, 8> = BrandedArena::new();
+        let arena: BrandedArena<'_, i32, 8> = BrandedArena::new();
 
-        let k1 = arena.alloc(42);
-        let k2 = arena.alloc(24);
+        let k1 = arena.alloc(&mut token, 42);
+        let k2 = arena.alloc(&mut token, 24);
 
         // Keys should be valid and point to correct values
         assert_eq!(*arena.get_key(&token, k1), 42);

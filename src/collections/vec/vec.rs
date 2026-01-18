@@ -22,56 +22,6 @@ pub struct Assert<const COND: bool>;
 pub trait IsTrue {}
 impl IsTrue for Assert<true> {}
 
-/// Zero-cost iterator for BrandedVec that avoids closures per element access.
-/// This iterator directly borrows from GhostCells without allocation or indirection.
-pub struct BrandedVecIter<'a, 'brand, T> {
-    iter: slice::Iter<'a, GhostCell<'brand, T>>,
-    token: &'a GhostToken<'brand>,
-}
-
-impl<'a, 'brand, T> Iterator for BrandedVecIter<'a, 'brand, T> {
-    type Item = &'a T;
-
-    #[inline(always)]
-    fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next().map(|cell| cell.borrow(self.token))
-    }
-
-    #[inline(always)]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.iter.size_hint()
-    }
-
-    #[inline(always)]
-    fn count(self) -> usize {
-        self.iter.count()
-    }
-
-    #[inline(always)]
-    fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        self.iter.nth(n).map(|cell| cell.borrow(self.token))
-    }
-
-    #[inline(always)]
-    fn last(self) -> Option<Self::Item> {
-        self.iter.last().map(|cell| cell.borrow(self.token))
-    }
-}
-
-impl<'a, 'brand, T> ExactSizeIterator for BrandedVecIter<'a, 'brand, T> {}
-
-impl<'a, 'brand, T> DoubleEndedIterator for BrandedVecIter<'a, 'brand, T> {
-    #[inline(always)]
-    fn next_back(&mut self) -> Option<Self::Item> {
-        self.iter.next_back().map(|cell| cell.borrow(self.token))
-    }
-
-    #[inline(always)]
-    fn nth_back(&mut self, n: usize) -> Option<Self::Item> {
-        self.iter.nth_back(n).map(|cell| cell.borrow(self.token))
-    }
-}
-
 /// A vector of token-gated elements.
 pub struct BrandedVec<'brand, T> {
     pub(crate) inner: Vec<GhostCell<'brand, T>>,
@@ -233,6 +183,25 @@ impl<'brand, T> BrandedVec<'brand, T> {
         self.get_mut(token, idx).expect("index out of bounds")
     }
 
+    /// Returns a mutable reference to element `idx` without a token.
+    ///
+    /// This requires exclusive access to the vector (`&mut self`).
+    ///
+    /// # Safety
+    /// Caller must ensure `idx < self.len()`.
+    #[inline(always)]
+    pub unsafe fn get_unchecked_mut_exclusive(&mut self, idx: usize) -> &mut T {
+        self.inner.get_unchecked_mut(idx).get_mut()
+    }
+
+    /// Returns a mutable reference to element `idx` without a token.
+    ///
+    /// This requires exclusive access to the vector (`&mut self`).
+    #[inline(always)]
+    pub fn get_mut_exclusive(&mut self, idx: usize) -> Option<&mut T> {
+        self.inner.get_mut(idx).map(|cell| cell.get_mut())
+    }
+
     /// Returns a slice of the underlying elements.
     ///
     /// This enables the use of standard slice methods like `binary_search`, `windows`, etc.
@@ -276,14 +245,13 @@ impl<'brand, T> BrandedVec<'brand, T> {
     ///
     /// This iterator is zero-cost: no allocations, no closures per element.
     /// Returns direct references to elements without indirection.
+    ///
+    /// Optimized to use slice iterator, bypassing per-element `GhostCell` borrowing overhead.
     pub fn iter<'a>(
         &'a self,
         token: &'a GhostToken<'brand>,
-    ) -> BrandedVecIter<'a, 'brand, T> {
-        BrandedVecIter {
-            iter: self.inner.iter(),
-            token,
-        }
+    ) -> slice::Iter<'a, T> {
+        self.as_slice(token).iter()
     }
 
     /// Applies `f` to each element by exclusive reference.
@@ -294,6 +262,15 @@ impl<'brand, T> BrandedVec<'brand, T> {
     pub fn for_each_mut(&self, token: &mut GhostToken<'brand>, mut f: impl FnMut(&mut T)) {
         self.inner.iter().for_each(|cell| {
             f(cell.borrow_mut(token));
+        });
+    }
+
+    /// Applies `f` to each element by exclusive reference without a token.
+    ///
+    /// This requires exclusive access to the vector (`&mut self`).
+    pub fn for_each_mut_exclusive(&mut self, mut f: impl FnMut(&mut T)) {
+        self.inner.iter_mut().for_each(|cell| {
+            f(cell.get_mut());
         });
     }
 

@@ -43,10 +43,19 @@
 //! - **Bulk operations**: O(n) with optimal cache behavior
 //! - **Memory overhead**: ~8 bytes per chunk + cache-aligned allocation
 
-use crate::GhostToken;
+use crate::{GhostCell, GhostToken};
 use crate::collections::BrandedChunkedVec;
 use core::marker::PhantomData;
 use core::hint;
+
+/// Internal state of the arena, protected by GhostCell.
+#[repr(C)]
+struct ArenaState<'brand, T, const CHUNK: usize> {
+    nursery: BrandedChunkedVec<'brand, T, CHUNK>,
+    mature: BrandedChunkedVec<'brand, T, CHUNK>,
+    generation_threshold: usize,
+    allocation_epoch: usize,
+}
 
 /// A branded arena for monotonic allocations with generational optimization.
 ///
@@ -69,20 +78,9 @@ use core::hint;
 /// - **Memory prefetching**: Proactive cache loading for sequential access patterns
 /// - **Maintenance operations**: Periodic optimization of memory layout and thresholds
 /// - **Manual lifetimes**: All objects live until arena destruction (no automatic reclamation)
-#[repr(C)] // Optimize memory layout for generational access patterns
+#[repr(transparent)] // Optimize memory layout for generational access patterns
 pub struct BrandedArena<'brand, T, const CHUNK: usize = 1024> {
-    /// Nursery generation: short-lived objects allocated here first
-    /// Benefits from better cache locality for recently allocated objects
-    nursery: BrandedChunkedVec<'brand, T, CHUNK>,
-    /// Mature generation: long-lived objects promoted here
-    /// Separated to avoid cache pollution from short-lived object churn
-    mature: BrandedChunkedVec<'brand, T, CHUNK>,
-    /// Generation threshold: objects beyond this index are considered long-lived
-    /// Tunable parameter for generational optimization
-    generation_threshold: usize,
-    /// Allocation epoch for deferred reclamation concepts (mimalloc-inspired)
-    /// Tracks allocation patterns for optimization and statistics
-    allocation_epoch: usize,
+    state: GhostCell<'brand, ArenaState<'brand, T, CHUNK>>,
 }
 
 /// Memory usage statistics for a BrandedArena.
@@ -199,10 +197,12 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
     #[inline]
     pub const fn with_generation_threshold(generation_threshold: usize) -> Self {
         Self {
-            nursery: BrandedChunkedVec::new(),
-            mature: BrandedChunkedVec::new(),
-            generation_threshold,
-            allocation_epoch: 0,
+            state: GhostCell::new(ArenaState {
+                nursery: BrandedChunkedVec::new(),
+                mature: BrandedChunkedVec::new(),
+                generation_threshold,
+                allocation_epoch: 0,
+            })
         }
     }
 
@@ -212,23 +212,24 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
     /// - Objects below generation threshold: allocated in nursery (better cache locality for recent allocations)
     /// - Objects at/above threshold: allocated in mature generation (stable storage for longer-lived objects)
     /// - No automatic promotion or reclamation: objects stay in their generation until arena destruction
-    #[inline]
-    pub fn alloc(&mut self, value: T) -> BrandedArenaKey<'brand> {
-        let total_len = self.nursery.len() + self.mature.len();
+    #[inline(always)]
+    pub fn alloc(&self, token: &mut GhostToken<'brand>, value: T) -> BrandedArenaKey<'brand> {
+        let state = self.state.borrow_mut(token);
+        let total_len = state.nursery.len() + state.mature.len();
 
-        let key = if total_len < self.generation_threshold {
+        let key = if total_len < state.generation_threshold {
             // Nursery allocation: short-lived objects
-            let nursery_idx = self.nursery.push(value);
+            let nursery_idx = state.nursery.push(value);
             // Encode generation in the key: nursery keys have bit 63 set
             BrandedArenaKey::new(nursery_idx | (1 << 63))
         } else {
             // Mature allocation: long-lived objects
-            let mature_idx = self.mature.push(value);
+            let mature_idx = state.mature.push(value);
             BrandedArenaKey::new(mature_idx)
         };
 
         // Increment epoch for deferred reclamation tracking (mimalloc-inspired)
-        self.allocation_epoch = self.allocation_epoch.wrapping_add(1);
+        state.allocation_epoch = state.allocation_epoch.wrapping_add(1);
 
         key
     }
@@ -243,7 +244,7 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
     ///
     /// Returns keys for all allocated values.
     #[inline]
-    pub fn alloc_batch<I>(&mut self, values: I) -> Vec<BrandedArenaKey<'brand>>
+    pub fn alloc_batch<I>(&self, token: &mut GhostToken<'brand>, values: I) -> Vec<BrandedArenaKey<'brand>>
     where
         I: IntoIterator<Item = T>,
         I::IntoIter: ExactSizeIterator,
@@ -251,10 +252,12 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
         let values = values.into_iter();
         let batch_size = values.len();
 
+        let state = self.state.borrow_mut(token);
+
         // Cache-oblivious batch allocation strategy
-        let current_total = self.nursery.len() + self.mature.len();
-        let remaining_in_generation = if current_total < self.generation_threshold {
-            self.generation_threshold - current_total
+        let current_total = state.nursery.len() + state.mature.len();
+        let remaining_in_generation = if current_total < state.generation_threshold {
+            state.generation_threshold - current_total
         } else {
             0
         };
@@ -265,15 +268,20 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
         if batch_size <= remaining_in_generation {
             // SIMD-enhanced bulk allocation for large batches
             if batch_size >= 8 {
-                self.alloc_batch_simd_optimized(values, &mut keys);
+                // Since we already borrowed state mutably, we can't call a helper method that needs to borrow it again.
+                // We implement inline or pass &mut state.
+                Self::alloc_batch_simd_optimized(state, values, &mut keys);
             } else {
                 for value in values {
-                    keys.push(self.alloc(value));
+                    // Logic duplication from alloc because we have &mut state here
+                    let nursery_idx = state.nursery.push(value);
+                    keys.push(BrandedArenaKey::new(nursery_idx | (1 << 63)));
+                    state.allocation_epoch = state.allocation_epoch.wrapping_add(1);
                 }
             }
         } else {
             // Split batch across generations with cache-aware placement
-            self.alloc_batch_split_generations(values, remaining_in_generation, &mut keys);
+            Self::alloc_batch_split_generations(state, values, remaining_in_generation, &mut keys);
         }
 
         keys
@@ -283,22 +291,28 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
     ///
     /// Uses vectorized operations inspired by high-performance computing research.
     #[inline]
-    fn alloc_batch_simd_optimized<I>(&mut self, values: I, keys: &mut Vec<BrandedArenaKey<'brand>>)
+    fn alloc_batch_simd_optimized<I>(
+        state: &mut ArenaState<'brand, T, CHUNK>,
+        values: I,
+        keys: &mut Vec<BrandedArenaKey<'brand>>
+    )
     where
         I: IntoIterator<Item = T>,
     {
         // Prefetch memory for better cache performance
-        self.prefetch_allocation_sites();
+        Self::prefetch_allocation_sites(state);
 
         for value in values {
-            keys.push(self.alloc(value));
+             let nursery_idx = state.nursery.push(value);
+             keys.push(BrandedArenaKey::new(nursery_idx | (1 << 63)));
+             state.allocation_epoch = state.allocation_epoch.wrapping_add(1);
         }
     }
 
     /// Splits batch allocation across generations with cache-oblivious optimization.
     #[inline]
     fn alloc_batch_split_generations<I>(
-        &mut self,
+        state: &mut ArenaState<'brand, T, CHUNK>,
         values: I,
         nursery_capacity: usize,
         keys: &mut Vec<BrandedArenaKey<'brand>>
@@ -315,7 +329,9 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
             let chunk_size = core::cmp::min(block_size, nursery_capacity - allocated);
             for _ in 0..chunk_size {
                 if let Some(value) = iter.next() {
-                    keys.push(self.alloc(value));
+                    let nursery_idx = state.nursery.push(value);
+                    keys.push(BrandedArenaKey::new(nursery_idx | (1 << 63)));
+                    state.allocation_epoch = state.allocation_epoch.wrapping_add(1);
                     allocated += 1;
                 } else {
                     return; // No more values
@@ -324,14 +340,18 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
         }
 
         // Allocate remaining to mature generation
-        keys.extend(iter.map(|value| self.alloc(value)));
+        keys.extend(iter.map(|value| {
+            let mature_idx = state.mature.push(value);
+            state.allocation_epoch = state.allocation_epoch.wrapping_add(1);
+            BrandedArenaKey::new(mature_idx)
+        }));
     }
 
     /// Prefetches memory locations for better cache performance.
     ///
     /// Based on memory prefetching research for cache-oblivious algorithms.
     #[inline]
-    fn prefetch_allocation_sites(&self) {
+    fn prefetch_allocation_sites(state: &ArenaState<'brand, T, CHUNK>) {
         // Prefetch upcoming allocation sites for better cache performance
         // This is a hint to the CPU about future memory access patterns
         #[cfg(target_arch = "x86_64")]
@@ -339,14 +359,14 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
             use core::arch::x86_64::{_mm_prefetch, _MM_HINT_T0};
 
             // Prefetch nursery allocation site
-            if let Some(nursery_ptr) = self.nursery.as_ptr() {
+            if let Some(nursery_ptr) = state.nursery.as_ptr() {
                 if !nursery_ptr.is_null() {
                     _mm_prefetch(nursery_ptr as *const i8, _MM_HINT_T0);
                 }
             }
 
             // Prefetch mature allocation site if needed
-            if let Some(mature_ptr) = self.mature.as_ptr() {
+            if let Some(mature_ptr) = state.mature.as_ptr() {
                 if !mature_ptr.is_null() {
                     _mm_prefetch(mature_ptr as *const i8, _MM_HINT_T0);
                 }
@@ -357,8 +377,8 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
         #[cfg(not(target_arch = "x86_64"))]
         {
             // Compiler hints for prefetching
-            hint::black_box(&self.nursery);
-            hint::black_box(&self.mature);
+            hint::black_box(&state.nursery);
+            hint::black_box(&state.mature);
         }
     }
 
@@ -376,12 +396,14 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
     where
         F: FnMut(&T),
     {
+        let state = self.state.borrow(token);
+
         // Process nursery generation first (likely hotter data)
-        self.nursery.for_each(token, |value| f(value));
+        state.nursery.for_each(token, |value| f(value));
 
         // Process mature generation with memory prefetching
-        self.prefetch_mature_generation();
-        self.mature.for_each(token, |value| f(value));
+        Self::prefetch_mature_generation(state);
+        state.mature.for_each(token, |value| f(value));
     }
 
     /// Mutable version of SIMD-accelerated bulk operation.
@@ -392,25 +414,27 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
     where
         F: FnMut(&mut T),
     {
+        let mut state = self.state.borrow_mut(token);
+
         // Process nursery with mutation capability
-        self.nursery.for_each_mut(token, |value| f(value));
+        state.nursery.for_each_mut_exclusive(|value| f(value));
 
         // Process mature with prefetching
-        self.prefetch_mature_generation();
-        self.mature.for_each_mut(token, |value| f(value));
+        Self::prefetch_mature_generation(&state);
+        state.mature.for_each_mut_exclusive(|value| f(value));
     }
 
     /// Prefetches mature generation for better cache performance.
     ///
     /// Based on memory prefetching research for reducing cache misses.
     #[inline]
-    fn prefetch_mature_generation(&self) {
+    fn prefetch_mature_generation(state: &ArenaState<'brand, T, CHUNK>) {
         #[cfg(target_arch = "x86_64")]
         unsafe {
             use core::arch::x86_64::{_mm_prefetch, _MM_HINT_T0};
 
             // Prefetch the start of mature generation chunks
-            if let Some(ptr) = self.mature.as_ptr() {
+            if let Some(ptr) = state.mature.as_ptr() {
                 if !ptr.is_null() {
                     _mm_prefetch(ptr as *const i8, _MM_HINT_T0);
                 }
@@ -420,7 +444,7 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
         // For other architectures, rely on automatic prefetching
         #[cfg(not(target_arch = "x86_64"))]
         {
-            hint::black_box(&self.mature);
+            hint::black_box(&state.mature);
         }
     }
 
@@ -436,18 +460,20 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
     /// Call periodically during allocation-heavy phases for optimal performance.
     /// Based on research in adaptive memory management and cache-oblivious algorithms.
     #[inline]
-    pub fn maintenance(&mut self) {
+    pub fn maintenance(&self, token: &mut GhostToken<'brand>) {
+        let mut state = self.state.borrow_mut(token);
+
         // Cache-oblivious adaptive threshold tuning
-        self.adapt_threshold_cache_oblivious();
+        Self::adapt_threshold_cache_oblivious_inner(&mut state, CHUNK);
 
         // Advance epoch for deferred reclamation tracking
-        self.allocation_epoch = self.allocation_epoch.wrapping_add(1);
+        state.allocation_epoch = state.allocation_epoch.wrapping_add(1);
 
         // Memory layout optimization hints (research-based)
-        self.optimize_memory_layout();
+        Self::optimize_memory_layout_inner(&state);
 
         // Statistical profiling for future optimizations
-        self.update_allocation_statistics();
+        // Self::update_allocation_statistics(&mut state);
     }
 
     /// Cache-oblivious threshold adaptation based on allocation patterns.
@@ -455,8 +481,8 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
     /// Uses algorithms that perform well across different cache hierarchies
     /// without knowing cache sizes (Brooks, 2001).
     #[inline]
-    fn adapt_threshold_cache_oblivious(&mut self) {
-        let stats = self.memory_stats();
+    fn adapt_threshold_cache_oblivious_inner(state: &mut ArenaState<'brand, T, CHUNK>, chunk_size: usize) {
+        let stats = Self::memory_stats_inner(state, chunk_size);
 
         // Cache-oblivious adaptation: use logarithmic scaling based on total allocations
         let total_allocs = stats.total_elements as f64;
@@ -465,67 +491,53 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
         // Adaptive threshold based on cache-oblivious principles
         if nursery_ratio > 0.8 {
             // Too many objects in nursery, increase threshold
-            self.generation_threshold = (self.generation_threshold as f64 * 1.5) as usize;
+            state.generation_threshold = (state.generation_threshold as f64 * 1.5) as usize;
         } else if nursery_ratio < 0.2 && stats.total_elements > 100 {
             // Too few objects in nursery, decrease threshold for better cache locality
-            self.generation_threshold = (self.generation_threshold as f64 * 0.8) as usize;
+            state.generation_threshold = (state.generation_threshold as f64 * 0.8) as usize;
         }
 
         // Cache-oblivious bounds: ensure threshold is reasonable for typical cache sizes
         let min_threshold = CHUNK / 8;  // Small enough for L1 cache efficiency
         let max_threshold = CHUNK * 32; // Large enough for L2/L3 cache efficiency
-        self.generation_threshold = self.generation_threshold.clamp(min_threshold, max_threshold);
+        state.generation_threshold = state.generation_threshold.clamp(min_threshold, max_threshold);
     }
 
     /// Optimizes memory layout for better cache performance.
     ///
     /// Based on research in data structure layout optimization and spatial locality.
     #[inline]
-    fn optimize_memory_layout(&self) {
+    fn optimize_memory_layout_inner(state: &ArenaState<'brand, T, CHUNK>) {
         // Compiler hints for memory layout optimization
         // These help the compiler make better decisions about data placement
 
         // Hint that nursery and mature are accessed together
-        hint::black_box(&self.nursery);
-        hint::black_box(&self.mature);
+        hint::black_box(&state.nursery);
+        hint::black_box(&state.mature);
 
         // Prefetch hints for future access patterns
-        self.prefetch_allocation_sites();
-    }
-
-    /// Updates internal statistics for adaptive optimization.
-    ///
-    /// Tracks allocation patterns for future research-based optimizations.
-    #[inline]
-    fn update_allocation_statistics(&mut self) {
-        // This could be extended to track:
-        // - Allocation frequency patterns
-        // - Access patterns for cache optimization
-        // - Fragmentation statistics
-        // - Generational promotion rates
-
-        // For now, just ensure the statistics are up to date
-        let _stats = self.memory_stats();
+        Self::prefetch_allocation_sites(state);
     }
 
     /// Number of elements allocated across all generations.
     #[inline(always)]
-    pub fn len(&self) -> usize {
-        self.nursery.len() + self.mature.len()
+    pub fn len(&self, token: &GhostToken<'brand>) -> usize {
+        let state = self.state.borrow(token);
+        state.nursery.len() + state.mature.len()
     }
 
     /// Returns `true` if empty.
     #[inline(always)]
-    pub fn is_empty(&self) -> bool {
-        self.nursery.is_empty() && self.mature.is_empty()
+    pub fn is_empty(&self, token: &GhostToken<'brand>) -> bool {
+        self.len(token) == 0
     }
 
     /// Returns the current allocation epoch.
     ///
     /// Useful for tracking allocation patterns and implementing deferred reclamation.
     #[inline(always)]
-    pub fn current_epoch(&self) -> usize {
-        self.allocation_epoch
+    pub fn current_epoch(&self, token: &GhostToken<'brand>) -> usize {
+        self.state.borrow(token).allocation_epoch
     }
 
     /// Advances the allocation epoch.
@@ -533,8 +545,9 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
     /// Used for epoch-based reclamation strategies (mimalloc-inspired).
     /// Can help with implementing deferred cleanup in future extensions.
     #[inline]
-    pub fn advance_epoch(&mut self) {
-        self.allocation_epoch = self.allocation_epoch.wrapping_add(1);
+    pub fn advance_epoch(&self, token: &mut GhostToken<'brand>) {
+        let state = self.state.borrow_mut(token);
+        state.allocation_epoch = state.allocation_epoch.wrapping_add(1);
     }
 
     /// Adaptively tunes the generation threshold based on allocation patterns.
@@ -543,54 +556,60 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
     /// - Monitors cache efficiency and adjusts threshold accordingly
     /// - Aims for optimal balance between nursery and mature generations
     #[inline]
-    pub fn adapt_threshold(&mut self) {
-        let stats = self.memory_stats();
+    pub fn adapt_threshold(&self, token: &mut GhostToken<'brand>) {
+        let mut state = self.state.borrow_mut(token);
+        let stats = Self::memory_stats_inner(&state, CHUNK);
         let efficiency = stats.cache_efficiency_ratio();
 
         // Adaptive threshold tuning based on cache efficiency
         if efficiency < 0.5 {
             // Too many mature objects, reduce threshold to promote more to nursery
-            self.generation_threshold = (self.generation_threshold * 3) / 4;
+            state.generation_threshold = (state.generation_threshold * 3) / 4;
         } else if efficiency > 2.0 {
             // Too many nursery objects, increase threshold to promote fewer to nursery
-            self.generation_threshold = (self.generation_threshold * 5) / 4;
+            state.generation_threshold = (state.generation_threshold * 5) / 4;
         }
 
         // Clamp to reasonable bounds based on chunk size
         let min_threshold = CHUNK / 4;
         let max_threshold = CHUNK * 16;
-        self.generation_threshold = self.generation_threshold.clamp(min_threshold, max_threshold);
+        state.generation_threshold = state.generation_threshold.clamp(min_threshold, max_threshold);
     }
 
     /// Returns the generation threshold.
     #[inline(always)]
-    pub const fn generation_threshold(&self) -> usize {
-        self.generation_threshold
+    pub fn generation_threshold(&self, token: &GhostToken<'brand>) -> usize {
+        self.state.borrow(token).generation_threshold
     }
 
     /// Returns the number of elements in the nursery generation.
     #[inline(always)]
-    pub fn nursery_len(&self) -> usize {
-        self.nursery.len()
+    pub fn nursery_len(&self, token: &GhostToken<'brand>) -> usize {
+        self.state.borrow(token).nursery.len()
     }
 
     /// Returns the number of elements in the mature generation.
     #[inline(always)]
-    pub fn mature_len(&self) -> usize {
-        self.mature.len()
+    pub fn mature_len(&self, token: &GhostToken<'brand>) -> usize {
+        self.state.borrow(token).mature.len()
     }
 
     /// Returns memory usage statistics for introspection and profiling.
     #[inline]
-    pub fn memory_stats(&self) -> ArenaMemoryStats {
+    pub fn memory_stats(&self, token: &GhostToken<'brand>) -> ArenaMemoryStats {
+        let state = self.state.borrow(token);
+        Self::memory_stats_inner(state, CHUNK)
+    }
+
+    fn memory_stats_inner(state: &ArenaState<'brand, T, CHUNK>, chunk_size: usize) -> ArenaMemoryStats {
         ArenaMemoryStats {
-            total_elements: self.len(),
-            nursery_elements: self.nursery.len(),
-            mature_elements: self.mature.len(),
-            nursery_chunks: self.nursery.chunk_count(),
-            mature_chunks: self.mature.chunk_count(),
-            generation_threshold: self.generation_threshold,
-            chunk_size: CHUNK,
+            total_elements: state.nursery.len() + state.mature.len(),
+            nursery_elements: state.nursery.len(),
+            mature_elements: state.mature.len(),
+            nursery_chunks: state.nursery.chunk_count(),
+            mature_chunks: state.mature.chunk_count(),
+            generation_threshold: state.generation_threshold,
+            chunk_size,
         }
     }
 
@@ -598,16 +617,16 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
     ///
     /// Useful for scenarios where you know remaining objects will be long-lived.
     #[inline]
-    pub fn promote_remaining_to_mature(&mut self) {
-        self.generation_threshold = 0;
+    pub fn promote_remaining_to_mature(&self, token: &mut GhostToken<'brand>) {
+        self.state.borrow_mut(token).generation_threshold = 0;
     }
 
     /// Resets the generation threshold to a new value.
     ///
     /// Allows dynamic tuning of the generational behavior based on allocation patterns.
     #[inline]
-    pub fn set_generation_threshold(&mut self, threshold: usize) {
-        self.generation_threshold = threshold;
+    pub fn set_generation_threshold(&self, token: &mut GhostToken<'brand>, threshold: usize) {
+        self.state.borrow_mut(token).generation_threshold = threshold;
     }
 
     /// Returns the value for a key by shared reference, token-gated.
@@ -617,16 +636,17 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
     /// # Panics
     /// Panics if `key` is out of bounds for this arena (should be impossible for keys produced by
     /// `alloc` on this arena).
-    #[inline]
+    #[inline(always)]
     pub fn get_key<'a>(&'a self, token: &'a GhostToken<'brand>, key: BrandedArenaKey<'brand>) -> &'a T {
+        let state = self.state.borrow(token);
         let raw_index = key.index();
 
         // Check if this is a nursery key (high bit set)
         if raw_index & (1 << 63) != 0 {
             let nursery_index = raw_index & !(1 << 63); // Clear the generation bit
-            self.nursery.get(token, nursery_index).expect("BrandedArenaKey out of bounds")
+            state.nursery.get(token, nursery_index).expect("BrandedArenaKey out of bounds")
         } else {
-            self.mature.get(token, raw_index).expect("BrandedArenaKey out of bounds")
+            state.mature.get(token, raw_index).expect("BrandedArenaKey out of bounds")
         }
     }
 
@@ -637,20 +657,21 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
     /// # Panics
     /// Panics if `key` is out of bounds for this arena (should be impossible for keys produced by
     /// `alloc` on this arena).
-    #[inline]
+    #[inline(always)]
     pub fn get_key_mut<'a>(
         &'a self,
         token: &'a mut GhostToken<'brand>,
         key: BrandedArenaKey<'brand>,
     ) -> &'a mut T {
+        let state = self.state.borrow_mut(token);
         let raw_index = key.index();
 
         // Check if this is a nursery key (high bit set)
         if raw_index & (1 << 63) != 0 {
             let nursery_index = raw_index & !(1 << 63); // Clear the generation bit
-            self.nursery.get_mut(token, nursery_index).expect("BrandedArenaKey out of bounds")
+            state.nursery.get_mut_exclusive(nursery_index).expect("BrandedArenaKey out of bounds")
         } else {
-            self.mature.get_mut(token, raw_index).expect("BrandedArenaKey out of bounds")
+            state.mature.get_mut_exclusive(raw_index).expect("BrandedArenaKey out of bounds")
         }
     }
 
@@ -663,10 +684,11 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
     where
         F: FnMut(&T),
     {
+        let state = self.state.borrow(token);
         // Process nursery first for cache locality
-        self.nursery.for_each(token, |elem| f(elem));
+        state.nursery.for_each(token, |elem| f(elem));
         // Then process mature generation
-        self.mature.for_each(token, |elem| f(elem));
+        state.mature.for_each(token, |elem| f(elem));
     }
 
     /// Bulk operation: applies `f` to all values in the arena by mutable reference.
@@ -677,10 +699,12 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
     where
         F: FnMut(&mut T),
     {
+        let mut state = self.state.borrow_mut(token);
+
         // Process nursery first for cache locality
-        self.nursery.for_each_mut(token, |elem| f(elem));
+        state.nursery.for_each_mut_exclusive(|elem| f(elem));
         // Then process mature generation
-        self.mature.for_each_mut(token, |elem| f(elem));
+        state.mature.for_each_mut_exclusive(|elem| f(elem));
     }
 
 
@@ -700,9 +724,10 @@ mod tests {
     #[test]
     fn branded_arena_basic() {
         GhostToken::new(|mut token| {
-            let mut arena: BrandedArena<'_, i32, 1024> = BrandedArena::new();
-            let k1 = arena.alloc(10);
-            let k2 = arena.alloc(20);
+            // Note: BrandedArena is now shared (immutable self, mutable token)
+            let arena: BrandedArena<'_, i32, 1024> = BrandedArena::new();
+            let k1 = arena.alloc(&mut token, 10);
+            let k2 = arena.alloc(&mut token, 20);
 
             assert_eq!(*arena.get_key(&token, k1), 10);
             assert_eq!(*arena.get_key(&token, k2), 20);
@@ -712,4 +737,3 @@ mod tests {
         });
     }
 }
-
