@@ -94,53 +94,13 @@ where
         K: Borrow<Q>,
         Q: Ord,
     {
-        let mut current_links = &self.head_links;
-        let mut level_idx = self.max_level.saturating_sub(1);
-
-        loop {
-            // Find next node at this level
-            if let Some(next_idx) = current_links[level_idx] {
-                let node = self.nodes.get(token, next_idx).expect("Invalid link index");
-                match node.key.borrow().cmp(key) {
-                    Ordering::Less => {
-                        // Move forward
-                        // To move forward, we need the links of the 'next' node.
-                        // We can't update 'current_links' easily because 'head_links' is local,
-                        // but node links are in 'self.links'.
-                        // We need to restart loop or change how we track current.
-
-                        // Let's rewrite loop to track current node index.
-                        // But wait, we start from head which is not an index.
-                        // So we track 'current_ptr' which is Option<usize>.
-                        // But we also need to move *down*.
-                        // Standard SkipList logic:
-                        // curr = head
-                        // for level down to 0:
-                        //   while curr.next[level] != None && curr.next[level].key < key:
-                        //     curr = curr.next[level]
-                        // return curr.next[0]
-
-                        // Since head is special, we can use `Option<usize>` for `curr`. `None` means head.
-                        break; // Rewrite with better logic below
-                    }
-                    Ordering::Equal => return Some(&node.val),
-                    Ordering::Greater => {
-                        // Key is larger than what we are looking for.
-                        // Go down.
-                    }
-                }
-            }
-
-            if level_idx == 0 {
-                break;
-            }
-            level_idx -= 1;
-        }
-        // Re-implementing correctly below
         self.find_entry(token, key).map(|(_, v)| v)
     }
 
     /// Internal helper to find an entry.
+    ///
+    /// Optimized with `unsafe` unchecked access because indices are managed internally
+    /// and guaranteed to be valid by `insert`.
     fn find_entry<'a, Q: ?Sized>(&'a self, token: &'a GhostToken<'brand>, key: &Q) -> Option<(&'a K, &'a V)>
     where
         K: Borrow<Q>,
@@ -154,32 +114,36 @@ where
         }
 
         loop {
-            // Look ahead at current level
+            // Determine next pointer index
+            // SAFETY:
+            // - `curr` comes from valid internal links.
+            // - `offset` calculation is bounded by `node.level` which matches link allocation.
             let next_idx_opt = if let Some(c_idx) = curr {
-                let node = self.nodes.get(token, c_idx).expect("Invalid node index");
-                if node.level > level {
-                     // Get link from node's links
-                     let offset = node.link_offset + level;
-                     *self.links.get(token, offset).expect("Invalid link offset")
-                } else {
-                    None // Should not happen if logic is correct
+                unsafe {
+                    let node = self.nodes.get_unchecked(token, c_idx);
+                    // Assumption: node.level > level, so offset is valid
+                    let offset = node.link_offset + level;
+                    *self.links.get_unchecked(token, offset)
                 }
             } else {
                 self.head_links[level]
             };
 
             if let Some(next_idx) = next_idx_opt {
-                let next_node = self.nodes.get(token, next_idx).expect("Invalid next index");
-                match next_node.key.borrow().cmp(key) {
-                    Ordering::Less => {
-                        curr = Some(next_idx);
-                        continue; // Keep moving forward at same level
-                    }
-                    Ordering::Equal => {
-                        return Some((&next_node.key, &next_node.val));
-                    }
-                    Ordering::Greater => {
-                        // Next is too big, go down
+                // SAFETY: `next_idx` comes from valid links.
+                unsafe {
+                    let next_node = self.nodes.get_unchecked(token, next_idx);
+                    match next_node.key.borrow().cmp(key) {
+                        Ordering::Less => {
+                            curr = Some(next_idx);
+                            continue; // Keep moving forward at same level
+                        }
+                        Ordering::Equal => {
+                            return Some((&next_node.key, &next_node.val));
+                        }
+                        Ordering::Greater => {
+                            // Next is too big, go down
+                        }
                     }
                 }
             }
@@ -199,16 +163,17 @@ where
         K: Borrow<Q>,
         Q: Ord,
     {
-         // We can use the same logic as find_entry but we need to re-implement because get_mut takes &mut token
-         // and we can't share code easily with get which takes &token.
-         // Wait, we can use `find_entry_idx` helper which returns `usize`.
-
          let idx = self.find_index(&*token, key)?;
-         let node = self.nodes.get_mut(token, idx).expect("Invalid index found");
-         Some(&mut node.val)
+         // SAFETY: idx found by find_index is valid.
+         unsafe {
+             let node = self.nodes.get_unchecked_mut(token, idx);
+             Some(&mut node.val)
+         }
     }
 
     /// Helper to find index of a key.
+    ///
+    /// Optimized with `unsafe`.
     fn find_index<Q: ?Sized>(&self, token: &GhostToken<'brand>, key: &Q) -> Option<usize>
     where
         K: Borrow<Q>,
@@ -222,17 +187,20 @@ where
         }
 
         loop {
-            let next_idx_opt = self.get_next(token, curr, level);
+            let next_idx_opt = self.get_next_unchecked(token, curr, level);
 
             if let Some(next_idx) = next_idx_opt {
-                let next_node = self.nodes.get(token, next_idx).expect("Invalid next index");
-                match next_node.key.borrow().cmp(key) {
-                    Ordering::Less => {
-                        curr = Some(next_idx);
-                        continue;
+                // SAFETY: next_idx valid
+                unsafe {
+                    let next_node = self.nodes.get_unchecked(token, next_idx);
+                    match next_node.key.borrow().cmp(key) {
+                        Ordering::Less => {
+                            curr = Some(next_idx);
+                            continue;
+                        }
+                        Ordering::Equal => return Some(next_idx),
+                        Ordering::Greater => {}
                     }
-                    Ordering::Equal => return Some(next_idx),
-                    Ordering::Greater => {}
                 }
             }
 
@@ -244,11 +212,15 @@ where
         None
     }
 
-    fn get_next(&self, token: &GhostToken<'brand>, curr: Option<usize>, level: usize) -> Option<usize> {
+    // Unsafe version for hot paths
+    fn get_next_unchecked(&self, token: &GhostToken<'brand>, curr: Option<usize>, level: usize) -> Option<usize> {
         if let Some(c_idx) = curr {
-            let node = self.nodes.get(token, c_idx).expect("Invalid node index");
-            let offset = node.link_offset + level;
-            *self.links.get(token, offset).expect("Invalid link offset")
+            // SAFETY: Caller guarantees curr and level are valid
+            unsafe {
+                let node = self.nodes.get_unchecked(token, c_idx);
+                let offset = node.link_offset + level;
+                *self.links.get_unchecked(token, offset)
+            }
         } else {
             self.head_links[level]
         }
@@ -257,10 +229,14 @@ where
     /// Inserts a key-value pair into the map.
     pub fn insert(&mut self, token: &mut GhostToken<'brand>, key: K, value: V) -> Option<V> {
         // First check if key exists to update it
+        // We use shared token access for find to avoid exclusive borrow issues until we need to mutate
         if let Some(idx) = self.find_index(&*token, &key) {
-             let node = self.nodes.get_mut(token, idx).unwrap();
-             let old = std::mem::replace(&mut node.val, value);
-             return Some(old);
+             // SAFETY: idx is valid
+             unsafe {
+                 let node = self.nodes.get_unchecked_mut(token, idx);
+                 let old = std::mem::replace(&mut node.val, value);
+                 return Some(old);
+             }
         }
 
         // Need to insert.
@@ -272,12 +248,16 @@ where
         // If list is not empty, traverse
         if self.max_level > 0 {
             loop {
-                let next_idx_opt = self.get_next(token, curr, level);
+                // Use unsafe unchecked for performance
+                let next_idx_opt = self.get_next_unchecked(token, curr, level);
+
                 if let Some(next_idx) = next_idx_opt {
-                    let next_node = self.nodes.get(token, next_idx).unwrap();
-                    if next_node.key < key {
-                        curr = Some(next_idx);
-                        continue;
+                    unsafe {
+                        let next_node = self.nodes.get_unchecked(token, next_idx);
+                        if next_node.key < key {
+                            curr = Some(next_idx);
+                            continue;
+                        }
                     }
                 }
 
@@ -320,6 +300,7 @@ where
 
             // new_node.next[i] = pred.next[i]
             let old_next = if let Some(p_idx) = pred_idx {
+                // Safe here because we are modifying, not in hot loop
                 let pred_node = self.nodes.get(token, p_idx).unwrap();
                 *self.links.get(token, pred_node.link_offset + i).unwrap()
             } else {
@@ -327,11 +308,15 @@ where
             };
 
             // Update new node link
-            *self.links.get_mut(token, link_offset + i).unwrap() = old_next;
+            // We just pushed these, so they are valid.
+            unsafe {
+                 *self.links.get_unchecked_mut(token, link_offset + i) = old_next;
+            }
 
             // pred.next[i] = new_node
             if let Some(p_idx) = pred_idx {
                 let pred_node = self.nodes.get(token, p_idx).unwrap();
+                // Safe or unsafe? Safe is fine here, insertion is dominated by traversal/allocation.
                 *self.links.get_mut(token, pred_node.link_offset + i).unwrap() = Some(node_idx);
             } else {
                 self.head_links[i] = Some(node_idx);
@@ -370,13 +355,15 @@ impl<'brand, K, V> ZeroCopyMapOps<'brand, K, V> for BrandedSkipList<'brand, K, V
         // Iterating efficiently involves just walking level 0
         let mut curr = self.head_links[0];
         while let Some(idx) = curr {
-            let node = self.nodes.get(token, idx).expect("Invalid index in traversal");
-            if f(&node.key, &node.val) {
-                return Some((&node.key, &node.val));
+            unsafe {
+                let node = self.nodes.get_unchecked(token, idx);
+                if f(&node.key, &node.val) {
+                    return Some((&node.key, &node.val));
+                }
+                // Move next at level 0
+                let offset = node.link_offset; // level 0 is at offset
+                curr = *self.links.get_unchecked(token, offset);
             }
-            // Move next at level 0
-            let offset = node.link_offset; // level 0 is at offset
-            curr = *self.links.get(token, offset).expect("Invalid link offset");
         }
         None
     }
@@ -394,12 +381,14 @@ impl<'brand, K, V> ZeroCopyMapOps<'brand, K, V> for BrandedSkipList<'brand, K, V
     {
          let mut curr = self.head_links[0];
         while let Some(idx) = curr {
-            let node = self.nodes.get(token, idx).expect("Invalid index in traversal");
-            if !f(&node.key, &node.val) {
-                return false;
+            unsafe {
+                let node = self.nodes.get_unchecked(token, idx);
+                if !f(&node.key, &node.val) {
+                    return false;
+                }
+                let offset = node.link_offset;
+                curr = *self.links.get_unchecked(token, offset);
             }
-            let offset = node.link_offset;
-            curr = *self.links.get(token, offset).expect("Invalid link offset");
         }
         true
     }
@@ -417,15 +406,78 @@ impl<'a, 'brand, K, V> Iterator for Iter<'a, 'brand, K, V> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let idx = self.curr?;
-        let node = self.list.nodes.get(self.token, idx).expect("Invalid iter index");
+        unsafe {
+            let node = self.list.nodes.get_unchecked(self.token, idx);
 
-        // Advance
-        let offset = node.link_offset;
-        self.curr = *self.list.links.get(self.token, offset).expect("Invalid link offset");
+            // Advance
+            let offset = node.link_offset;
+            self.curr = *self.list.links.get_unchecked(self.token, offset);
 
-        Some((&node.key, &node.val))
+            Some((&node.key, &node.val))
+        }
     }
 }
+
+// Mutable Iterator implementation
+pub struct IterMut<'a, 'brand, K, V> {
+    list: &'a BrandedSkipList<'brand, K, V>,
+    token: &'a mut GhostToken<'brand>,
+    curr: Option<usize>,
+}
+
+impl<'a, 'brand, K, V> Iterator for IterMut<'a, 'brand, K, V> {
+    type Item = (&'a K, &'a mut V);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let idx = self.curr?;
+
+        // We need to return mutable reference.
+        // But we also need to advance self.curr using the list.
+        // We can't hold mutable borrow of list and read from it?
+        // Wait, iter_mut usually consumes the token or uses a split borrow.
+        // Here we have `&'a mut GhostToken`.
+        // To be safe and satisfy borrow checker, we need to leverage unsafe to extend lifetime
+        // OR rely on the fact that we are yielding disjoint mutable references (which is true for different nodes).
+        // Since `BrandedVec` doesn't support random access mutable iterators easily without consuming token,
+        // we have to be careful.
+
+        // However, standard pattern is `nodes.get_mut`. But we iterate sequentially.
+        // We can get the node.
+
+        // This is tricky safely.
+        // We can read `next` BEFORE borrowing `curr` mutably?
+        // Yes.
+
+        unsafe {
+             // 1. Get next pointer using SHARED access (we have exclusive token, but can downgrade)
+             let node_shared = self.list.nodes.get_unchecked(&*self.token, idx);
+             let offset = node_shared.link_offset;
+             let next_curr = *self.list.links.get_unchecked(&*self.token, offset);
+
+             // 2. Get MUTABLE reference to current
+             // We must ensure we don't alias.
+             // Since we advance `curr` and never look back, and SkipList is acyclic,
+             // we won't visit the same node twice.
+             // We can use `get_unchecked_mut`.
+             // But the lifetime of returned `&mut V` must be 'a.
+             // `get_unchecked_mut` takes `&'b mut Token` and returns `&'b mut T`.
+             // We need to transmute the lifetime to 'a.
+             // This is sound because each node is unique.
+
+             let node_mut = self.list.nodes.get_unchecked_mut(self.token, idx);
+
+             // Update state
+             self.curr = next_curr;
+
+             // Extend lifetime of return value to 'a
+             let key_ptr = &node_mut.key as *const K;
+             let val_ptr = &mut node_mut.val as *mut V;
+
+             Some((&*key_ptr, &mut *val_ptr))
+        }
+    }
+}
+
 
 impl<'brand, K, V> BrandedSkipList<'brand, K, V> {
     pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> Iter<'a, 'brand, K, V> {
@@ -433,6 +485,14 @@ impl<'brand, K, V> BrandedSkipList<'brand, K, V> {
             list: self,
             token,
             curr: self.head_links[0],
+        }
+    }
+
+    pub fn iter_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>) -> IterMut<'a, 'brand, K, V> {
+        IterMut {
+            list: self,
+            curr: self.head_links[0],
+            token,
         }
     }
 }
@@ -477,6 +537,24 @@ mod tests {
                 count += 1;
             }
             assert_eq!(count, 10);
+         });
+    }
+
+    #[test]
+    fn test_skip_list_iter_mut() {
+         GhostToken::new(|mut token| {
+            let mut list = BrandedSkipList::new();
+            for i in 0..10 {
+                list.insert(&mut token, i, i * 10);
+            }
+
+            for (_, v) in list.iter_mut(&mut token) {
+                *v += 1;
+            }
+
+            for i in 0..10 {
+                assert_eq!(*list.get(&token, &i).unwrap(), i * 10 + 1);
+            }
          });
     }
 
