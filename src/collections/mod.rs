@@ -13,7 +13,7 @@ pub mod other;
 pub mod string;
 
 // Re-export commonly used types from submodules
-pub use vec::{BrandedVec, BrandedVecDeque, BrandedChunkedVec, ChunkedVec};
+pub use vec::{BrandedVec, BrandedVecDeque, BrandedChunkedVec, ChunkedVec, BrandedSmallVec};
 pub use hash::{BrandedHashMap, BrandedHashSet};
 pub use btree::{BrandedBTreeMap, BrandedBTreeSet};
 pub use other::{

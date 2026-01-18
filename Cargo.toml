@@ -62,6 +62,10 @@ harness = false
 name = "linked_list_benchmark"
 harness = false
 
+[[bench]]
+name = "small_vec_benchmark"
+harness = false
+
 [[bin]]
 name = "analyze_performance"
 path = "analyze_performance.rs"
