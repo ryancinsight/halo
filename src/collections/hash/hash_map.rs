@@ -660,9 +660,9 @@ where
     S: BuildHasher,
 {
     fn extend<T: IntoIterator<Item = (K, V)>>(&mut self, iter: T) {
-        for (k, v) in iter {
+        iter.into_iter().for_each(|(k, v)| {
             self.insert(k, v);
-        }
+        });
     }
 }
 

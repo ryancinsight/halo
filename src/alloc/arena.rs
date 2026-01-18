@@ -324,9 +324,7 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
         }
 
         // Allocate remaining to mature generation
-        for value in iter {
-            keys.push(self.alloc(value));
-        }
+        keys.extend(iter.map(|value| self.alloc(value)));
     }
 
     /// Prefetches memory locations for better cache performance.
