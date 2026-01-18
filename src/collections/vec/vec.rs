@@ -233,6 +233,25 @@ impl<'brand, T> BrandedVec<'brand, T> {
         self.get_mut(token, idx).expect("index out of bounds")
     }
 
+    /// Returns a mutable reference to element `idx` without a token.
+    ///
+    /// This requires exclusive access to the vector (`&mut self`).
+    ///
+    /// # Safety
+    /// Caller must ensure `idx < self.len()`.
+    #[inline(always)]
+    pub unsafe fn get_unchecked_mut_exclusive(&mut self, idx: usize) -> &mut T {
+        self.inner.get_unchecked_mut(idx).get_mut()
+    }
+
+    /// Returns a mutable reference to element `idx` without a token.
+    ///
+    /// This requires exclusive access to the vector (`&mut self`).
+    #[inline(always)]
+    pub fn get_mut_exclusive(&mut self, idx: usize) -> Option<&mut T> {
+        self.inner.get_mut(idx).map(|cell| cell.get_mut())
+    }
+
     /// Returns a slice of the underlying elements.
     ///
     /// This enables the use of standard slice methods like `binary_search`, `windows`, etc.
@@ -294,6 +313,15 @@ impl<'brand, T> BrandedVec<'brand, T> {
     pub fn for_each_mut(&self, token: &mut GhostToken<'brand>, mut f: impl FnMut(&mut T)) {
         self.inner.iter().for_each(|cell| {
             f(cell.borrow_mut(token));
+        });
+    }
+
+    /// Applies `f` to each element by exclusive reference without a token.
+    ///
+    /// This requires exclusive access to the vector (`&mut self`).
+    pub fn for_each_mut_exclusive(&mut self, mut f: impl FnMut(&mut T)) {
+        self.inner.iter_mut().for_each(|cell| {
+            f(cell.get_mut());
         });
     }
 

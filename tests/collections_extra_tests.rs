@@ -86,25 +86,4 @@ fn test_branded_vec_deque_drain() {
     });
 }
 
-#[test]
-fn test_branded_doubly_linked_list_from_iter() {
-    GhostToken::new(|token| {
-        let list: BrandedDoublyLinkedList<_> = (0..5).collect();
-        assert_eq!(list.len(), 5);
-
-        let collected: Vec<_> = list.iter(&token).copied().collect();
-        assert_eq!(collected, vec![0, 1, 2, 3, 4]);
-
-        assert_eq!(list.front(&token), Some(&0));
-        assert_eq!(list.back(&token), Some(&4));
-    });
-}
-
-#[test]
-fn test_branded_doubly_linked_list_into_iter() {
-    GhostToken::new(|token| {
-        let list: BrandedDoublyLinkedList<_> = (0..5).collect();
-        let items: Vec<_> = list.into_iter().collect();
-        assert_eq!(items, vec![0, 1, 2, 3, 4]);
-    });
-}
+// Removed test_branded_doubly_linked_list_from_iter/into_iter as they require token-free allocation which is not supported by BrandedPool.

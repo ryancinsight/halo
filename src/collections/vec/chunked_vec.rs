@@ -245,6 +245,43 @@ impl<'brand, T, const CHUNK: usize> BrandedChunkedVec<'brand, T, CHUNK> {
         }
     }
 
+    /// Returns a mutable reference to the element at `index` without a token.
+    ///
+    /// This requires exclusive access to the vector (`&mut self`).
+    #[inline]
+    pub fn get_mut_exclusive<'a>(&'a mut self, index: usize) -> Option<&'a mut T> {
+        if index >= self.len {
+            return None;
+        }
+
+        let (chunk_idx, elem_idx) = Self::index_to_chunk(index);
+        let mut current = self.head.as_mut()?;
+        let mut chunk_count = 0;
+
+        // Find the right chunk
+        while chunk_count < chunk_idx {
+            current = current.next.as_mut()?;
+            chunk_count += 1;
+        }
+
+        unsafe {
+            let cell = current.chunk.get_unchecked(elem_idx);
+            // GhostCell::get_mut requires &mut GhostCell.
+            // We have &mut self -> &mut ChunkNode -> &mut BrandedChunk -> &mut [GhostCell] -> &mut GhostCell.
+            // But `chunk.data` is array of GhostCell. `get_unchecked` returns `&GhostCell`.
+            // We need `get_unchecked_mut` for BrandedChunk?
+            // BrandedChunk `get_unchecked` is implemented. We need mutable version.
+            // Since we are inside the crate, we can probably access or cast.
+            // But let's assume we can get it.
+            // Wait, BrandedChunk::get_unchecked is unsafe.
+            // I need to update BrandedChunk to support getting &mut GhostCell.
+
+            // Accessing inner data directly:
+            let cell_ref = current.chunk.data.get_unchecked_mut(elem_idx);
+            Some(cell_ref.get_mut())
+        }
+    }
+
     /// Iterates over the elements.
     #[inline]
     pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> BrandedChunkedVecIter<'a, 'brand, T, CHUNK> {
@@ -359,6 +396,31 @@ impl<'brand, T, const CHUNK: usize> BrandedChunkedVec<'brand, T, CHUNK> {
                 }
             }
             current = node.next.as_ref();
+        }
+    }
+
+    /// Applies a mutable function to all elements in the BrandedChunkedVec without a token.
+    ///
+    /// This requires exclusive access to the vector (`&mut self`).
+    #[inline]
+    pub fn for_each_mut_exclusive<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&mut T),
+    {
+        let mut current = self.head.as_mut();
+        while let Some(node) = current {
+            let chunk_len = node.chunk.len();
+            // Access chunk data mutably
+            // node.chunk.data is [GhostCell<T>; CHUNK]
+            // We need to iterate it.
+            for i in 0..chunk_len {
+                unsafe {
+                    let cell_ref = node.chunk.data.get_unchecked_mut(i);
+                    let elem = cell_ref.get_mut();
+                    f(elem);
+                }
+            }
+            current = node.next.as_mut();
         }
     }
 

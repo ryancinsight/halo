@@ -61,12 +61,12 @@ fn test_branded_hash_set_ops() {
 #[test]
 fn test_branded_arena_stress() {
     GhostToken::new(|mut token| {
-        let mut arena: BrandedArena<'_, usize, 1024> = BrandedArena::new();
+        let arena: BrandedArena<'_, usize, 1024> = BrandedArena::new();
         let mut keys = Vec::new();
         for i in 0..10000 {
-            keys.push(arena.alloc(i));
+            keys.push(arena.alloc(&mut token, i));
         }
-        assert_eq!(arena.len(), 10000);
+        assert_eq!(arena.len(&token), 10000);
         for (i, &key) in keys.iter().enumerate() {
             assert_eq!(*arena.get_key(&token, key), i);
         }
@@ -83,18 +83,18 @@ fn test_branded_arena_stress() {
 fn test_branded_arena_generational() {
     GhostToken::new(|mut token| {
         // Test with low threshold (aggressive promotion)
-        let mut arena = BrandedArena::<i32, 4>::with_generation_threshold(2);
+        let arena = BrandedArena::<i32, 4>::with_generation_threshold(2);
 
         // First 2 allocations should go to nursery
-        let k1 = arena.alloc(10);
-        let k2 = arena.alloc(20);
-        assert_eq!(arena.nursery_len(), 2);
-        assert_eq!(arena.mature_len(), 0);
+        let k1 = arena.alloc(&mut token, 10);
+        let k2 = arena.alloc(&mut token, 20);
+        assert_eq!(arena.nursery_len(&token), 2);
+        assert_eq!(arena.mature_len(&token), 0);
 
         // Third allocation should go to mature (crossed threshold)
-        let k3 = arena.alloc(30);
-        assert_eq!(arena.nursery_len(), 2);
-        assert_eq!(arena.mature_len(), 1);
+        let k3 = arena.alloc(&mut token, 30);
+        assert_eq!(arena.nursery_len(&token), 2);
+        assert_eq!(arena.mature_len(&token), 1);
 
         // Verify access works across generations
         assert_eq!(*arena.get_key(&token, k1), 10); // nursery
@@ -111,14 +111,14 @@ fn test_branded_arena_generational() {
 #[test]
 fn test_branded_arena_bulk_allocation() {
     GhostToken::new(|mut token| {
-        let mut arena = BrandedArena::<i32, 8>::new();
+        let arena = BrandedArena::<i32, 8>::new();
 
         // Test bulk allocation with exact fit
         let values1 = vec![1, 2, 3, 4];
-        let keys1 = arena.alloc_batch(values1);
+        let keys1 = arena.alloc_batch(&mut token, values1);
 
         assert_eq!(keys1.len(), 4);
-        assert_eq!(arena.len(), 4);
+        assert_eq!(arena.len(&token), 4);
 
         // Verify all values are accessible
         for (i, &key) in keys1.iter().enumerate() {
@@ -126,13 +126,13 @@ fn test_branded_arena_bulk_allocation() {
         }
 
         // Test bulk allocation that spans generations
-        let mut arena2 = BrandedArena::<i32, 4>::with_generation_threshold(2);
+        let arena2 = BrandedArena::<i32, 4>::with_generation_threshold(2);
         let values2 = vec![10, 20, 30, 40, 50]; // 5 values, threshold is 2
-        let keys2 = arena2.alloc_batch(values2);
+        let keys2 = arena2.alloc_batch(&mut token, values2);
 
         assert_eq!(keys2.len(), 5);
-        assert_eq!(arena2.nursery_len(), 2); // First 2 in nursery
-        assert_eq!(arena2.mature_len(), 3); // Remaining 3 in mature
+        assert_eq!(arena2.nursery_len(&token), 2); // First 2 in nursery
+        assert_eq!(arena2.mature_len(&token), 3); // Remaining 3 in mature
 
         // Verify generation placement
         assert_eq!(*arena2.get_key(&token, keys2[0]), 10); // nursery
@@ -146,111 +146,112 @@ fn test_branded_arena_bulk_allocation() {
 #[test]
 fn test_branded_arena_adaptive_thresholds() {
     GhostToken::new(|mut token| {
-        let mut arena = BrandedArena::<i32, 8>::with_generation_threshold(10);
+        let arena = BrandedArena::<i32, 8>::with_generation_threshold(10);
 
         // Initially allocate to nursery (below threshold)
         for i in 0..10 {
-            arena.alloc(i);
+            arena.alloc(&mut token, i);
         }
-        assert_eq!(arena.nursery_len(), 10);
-        assert_eq!(arena.mature_len(), 0);
+        assert_eq!(arena.nursery_len(&token), 10);
+        assert_eq!(arena.mature_len(&token), 0);
 
         // Adaptive tuning: too many nursery objects, should increase threshold
-        arena.adapt_threshold();
+        arena.adapt_threshold(&mut token);
         // Threshold should have increased (10 * 5/4 = 12.5, so 12)
-        assert!(arena.generation_threshold() >= 10);
+        assert!(arena.generation_threshold(&token) >= 10);
 
         // Reset and test low efficiency scenario
-        let mut arena2 = BrandedArena::<i32, 8>::with_generation_threshold(100);
+        let arena2 = BrandedArena::<i32, 8>::with_generation_threshold(100);
         for i in 0..5 {
-            arena2.alloc(i);
+            arena2.alloc(&mut token, i);
         }
         // 5 nursery, 0 mature = infinite efficiency, but threshold may still adapt based on other factors
-        let original_threshold = arena2.generation_threshold();
-        arena2.adapt_threshold();
+        let _original_threshold = arena2.generation_threshold(&token);
+        arena2.adapt_threshold(&mut token);
         // Threshold might change due to the adaptive algorithm, just ensure it's within bounds
-        assert!(arena2.generation_threshold() >= 2 && arena2.generation_threshold() <= 1600);
+        assert!(arena2.generation_threshold(&token) >= 2 && arena2.generation_threshold(&token) <= 1600);
 
         // Add mature objects to create low efficiency
         for i in 0..50 {
-            arena2.alloc(i + 100);
+            arena2.alloc(&mut token, i + 100);
         }
         // Now we have 5 nursery, 50 mature = 0.1 efficiency (low ratio)
-        arena2.adapt_threshold();
+        arena2.adapt_threshold(&mut token);
         // The algorithm should adjust the threshold based on the efficiency ratio
         // Just verify it's within reasonable bounds and has changed
-        assert!(arena2.generation_threshold() >= 2 && arena2.generation_threshold() <= 128);
+        assert!(arena2.generation_threshold(&token) >= 2 && arena2.generation_threshold(&token) <= 128);
     });
 }
 
 #[test]
 fn test_branded_arena_epoch_tracking() {
-    let mut arena = BrandedArena::<i32, 8>::new();
+    GhostToken::new(|mut token| {
+        let arena = BrandedArena::<i32, 8>::new();
 
-    // Initial epoch should be 0
-    assert_eq!(arena.current_epoch(), 0);
+        // Initial epoch should be 0
+        assert_eq!(arena.current_epoch(&token), 0);
 
-    // Each allocation should increment epoch
-    arena.alloc(1);
-    assert_eq!(arena.current_epoch(), 1);
+        // Each allocation should increment epoch
+        arena.alloc(&mut token, 1);
+        assert_eq!(arena.current_epoch(&token), 1);
 
-    arena.alloc(2);
-    assert_eq!(arena.current_epoch(), 2);
+        arena.alloc(&mut token, 2);
+        assert_eq!(arena.current_epoch(&token), 2);
 
-    // Manual epoch advancement
-    arena.advance_epoch();
-    assert_eq!(arena.current_epoch(), 3);
+        // Manual epoch advancement
+        arena.advance_epoch(&mut token);
+        assert_eq!(arena.current_epoch(&token), 3);
 
-    // Bulk allocation increments epoch once per batch
-    let values = vec![10, 20, 30];
-    arena.alloc_batch(values);
-    // Bulk alloc increments epoch once, plus 3 individual allocs = 6 total
-    assert_eq!(arena.current_epoch(), 6);
+        // Bulk allocation increments epoch once per batch
+        let values = vec![10, 20, 30];
+        arena.alloc_batch(&mut token, values);
+        // Bulk alloc increments epoch once, plus 3 individual allocs = 6 total
+        assert_eq!(arena.current_epoch(&token), 6);
+    });
 }
 
 #[test]
 fn test_branded_arena_maintenance() {
     GhostToken::new(|mut token| {
-        let mut arena = BrandedArena::<i32, 8>::with_generation_threshold(10);
+        let arena = BrandedArena::<i32, 8>::with_generation_threshold(10);
 
         // Allocate some objects to create a pattern
         for i in 0..15 {
-            arena.alloc(i);
+            arena.alloc(&mut token, i);
         }
 
-        let initial_threshold = arena.generation_threshold();
-        let initial_epoch = arena.current_epoch();
+        let initial_epoch = arena.current_epoch(&token);
 
         // Run maintenance
-        arena.maintenance();
+        arena.maintenance(&mut token);
 
         // Should have advanced epoch
-        assert!(arena.current_epoch() > initial_epoch);
+        assert!(arena.current_epoch(&token) > initial_epoch);
 
         // Adaptive threshold should have been called (though result depends on current state)
         // This mainly tests that maintenance doesn't crash and calls the expected functions
-        let _ = arena.generation_threshold(); // Should not have changed dramatically
+        let _ = arena.generation_threshold(&token); // Should not have changed dramatically
     });
 }
 
 #[test]
 fn test_branded_arena_fragmentation_stats() {
-    GhostToken::new(|token| {
-        let mut arena = BrandedArena::<i32, 8>::new();
+    GhostToken::new(|mut token| {
+        let arena = BrandedArena::<i32, 8>::new();
 
         // Get memory stats
-        let stats = arena.memory_stats();
+        let stats = arena.memory_stats(&token);
 
         // Empty arena should have 0 fragmentation
         assert_eq!(stats.fragmentation_ratio(), 0.0);
 
         // Allocate some objects
         for i in 0..10 {
-            arena.alloc(i);
+            arena.alloc(&mut token, i);
         }
 
         // Check stats after allocation
-        let stats_after = arena.memory_stats();
+        let stats_after = arena.memory_stats(&token);
         assert_eq!(stats_after.total_elements, 10);
         assert!(stats_after.total_elements == stats_after.nursery_elements + stats_after.mature_elements);
 
@@ -260,25 +261,28 @@ fn test_branded_arena_fragmentation_stats() {
     });
 }
 
+#[test]
 fn test_branded_arena_memory_stats() {
-    let mut arena = BrandedArena::<i32, 8>::with_generation_threshold(4);
+    GhostToken::new(|mut token| {
+        let arena = BrandedArena::<i32, 8>::with_generation_threshold(4);
 
-    // Allocate some elements
-    for i in 0..10 {
-        arena.alloc(i);
-    }
+        // Allocate some elements
+        for i in 0..10 {
+            arena.alloc(&mut token, i);
+        }
 
-    let stats = arena.memory_stats();
-    assert_eq!(stats.total_elements, 10);
-    assert_eq!(stats.nursery_elements, 4); // First 4 in nursery
-    assert_eq!(stats.mature_elements, 6);  // Next 6 in mature
-    assert_eq!(stats.chunk_size, 8);
-    assert!(stats.nursery_chunks >= 1); // At least 1 chunk for nursery
-    assert!(stats.mature_chunks >= 1); // At least 1 chunk for mature
+        let stats = arena.memory_stats(&token);
+        assert_eq!(stats.total_elements, 10);
+        assert_eq!(stats.nursery_elements, 4); // First 4 in nursery
+        assert_eq!(stats.mature_elements, 6);  // Next 6 in mature
+        assert_eq!(stats.chunk_size, 8);
+        assert!(stats.nursery_chunks >= 1); // At least 1 chunk for nursery
+        assert!(stats.mature_chunks >= 1); // At least 1 chunk for mature
 
-    // Test cache efficiency calculation
-    let ratio = stats.cache_efficiency_ratio();
-    assert!(ratio > 0.0);
+        // Test cache efficiency calculation
+        let ratio = stats.cache_efficiency_ratio();
+        assert!(ratio > 0.0);
+    });
 }
 
 #[test]
