@@ -1,5 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion, BatchSize};
 use halo::alloc::BrandedBumpAllocator;
+use halo::GhostToken;
 
 fn bench_alloc_single(c: &mut Criterion) {
     let mut group = c.benchmark_group("Single Allocation");
@@ -9,9 +10,6 @@ fn bench_alloc_single(c: &mut Criterion) {
             black_box(Box::new(42u64));
         })
     });
-
-    // For Bump, we can't easily reset per single alloc without cost.
-    // We'll benchmark a batch of allocations.
 }
 
 fn bench_alloc_batch(c: &mut Criterion) {
@@ -31,24 +29,17 @@ fn bench_alloc_batch(c: &mut Criterion) {
     group.bench_function("BrandedBumpAllocator", |b| {
         b.iter_batched(
             || {
-                 // Setup: Create allocator inside token
-                 // We can't return allocator out of token closure because of brand.
-                 // This makes benchmarking tricky with Criterion's structure.
-                 // We have to put the loop inside the token closure.
-                 // But iter_batched expects setup -> input.
-
-                 // Alternative: Just create allocator in the measurement loop?
-                 // Allocator creation is cheap (vec new).
-                 BrandedBumpAllocator::new()
+                 // We need to return the allocator setup, but we can't easily pass the token.
+                 // So we will create the token inside the measurement.
+                 // This adds token creation overhead to the benchmark, but it should be minimal (ZST).
             },
-            |allocator| {
-                // Measurement: Allocate 1000 items
-                // We need to keep allocator alive.
-                let alloc = &allocator;
-                for i in 0..BATCH_SIZE {
-                    black_box(alloc.alloc(i));
-                }
-                // Allocator drops here, freeing memory.
+            |()| {
+                 GhostToken::new(|mut token| {
+                    let allocator = BrandedBumpAllocator::new();
+                    for i in 0..BATCH_SIZE {
+                        black_box(allocator.alloc(i, &mut token));
+                    }
+                 });
             },
             BatchSize::SmallInput,
         )
@@ -63,15 +54,18 @@ fn bench_alloc_mixed(c: &mut Criterion) {
 
     group.bench_function("BrandedBumpAllocator Mixed", |b| {
         b.iter_batched(
-            || BrandedBumpAllocator::new(),
-            |allocator| {
-                for i in 0..BATCH_SIZE {
-                    if i % 2 == 0 {
-                        black_box(allocator.alloc(i as u64));
-                    } else {
-                        black_box(allocator.alloc_str("short string"));
+            || {},
+            |()| {
+                GhostToken::new(|mut token| {
+                    let allocator = BrandedBumpAllocator::new();
+                    for i in 0..BATCH_SIZE {
+                        if i % 2 == 0 {
+                            black_box(allocator.alloc(i as u64, &mut token));
+                        } else {
+                            black_box(allocator.alloc_str("short string", &mut token));
+                        }
                     }
-                }
+                });
             },
             BatchSize::SmallInput,
         )

@@ -7,9 +7,9 @@ fn test_bump_allocator() {
     GhostToken::new(|mut token| {
         let allocator = BrandedBumpAllocator::new();
 
-        let x = allocator.alloc(42);
-        let y = allocator.alloc(100);
-        let s = allocator.alloc_str("hello");
+        let x = allocator.alloc(42, &mut token);
+        let y = allocator.alloc(100, &mut token);
+        let s = allocator.alloc_str("hello", &mut token);
 
         assert_eq!(*x, 42);
         assert_eq!(*y, 100);
@@ -19,7 +19,7 @@ fn test_bump_allocator() {
         assert_eq!(*x, 43);
 
         // GhostCell allocation
-        let c = allocator.alloc_cell(10);
+        let c = allocator.alloc_cell(10, &mut token);
         assert_eq!(*c.borrow(&token), 10);
 
         *c.borrow_mut(&mut token) = 20;
@@ -27,7 +27,7 @@ fn test_bump_allocator() {
 
         // Trait usage
         let layout = Layout::new::<u64>();
-        let ptr = allocator.allocate(layout).unwrap();
+        let ptr = allocator.allocate(&mut token, layout).unwrap();
         unsafe {
             *(ptr.as_ptr() as *mut u64) = 999;
             assert_eq!(*(ptr.as_ptr() as *mut u64), 999);
