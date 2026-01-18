@@ -225,6 +225,45 @@ impl<'brand, T> BrandedVec<'brand, T> {
         self.get_mut(token, idx).expect("index out of bounds")
     }
 
+    /// Returns a slice of the underlying elements.
+    ///
+    /// This enables the use of standard slice methods like `binary_search`, `windows`, etc.
+    ///
+    /// # Safety
+    /// This uses `unsafe` code to transmute `&[GhostCell<T>]` to `&[T]`.
+    /// This is safe because:
+    /// 1. `GhostCell<T>` is `repr(transparent)` over `UnsafeCell<T>`.
+    /// 2. `UnsafeCell<T>` has the same memory layout as `T`.
+    /// 3. The token guarantees we have access permission.
+    #[inline(always)]
+    pub fn as_slice<'a>(&'a self, _token: &'a GhostToken<'brand>) -> &'a [T] {
+        // SAFETY: We have shared token access, so reading T is safe.
+        // We obtain a pointer to elements and create a slice.
+        unsafe {
+            let ptr = self.inner.as_ptr() as *const T;
+            std::slice::from_raw_parts(ptr, self.inner.len())
+        }
+    }
+
+    /// Returns a mutable slice of the underlying elements.
+    ///
+    /// This enables the use of standard mutable slice methods like `sort`, `sort_by`, `chunks_mut`, etc.
+    ///
+    /// # Safety
+    /// This uses `unsafe` code to create `&mut [T]` from the vector's buffer.
+    /// This is safe because:
+    /// 1. Layout compatibility: `GhostCell<T>` has same layout as `T`.
+    /// 2. We hold `&mut GhostToken`, guaranteeing exclusive access to all cells with this brand.
+    /// 3. We hold `&self`, guaranteeing the vector buffer remains valid (no reallocation).
+    /// 4. The returned lifetime is tied to `&mut GhostToken`, ensuring exclusivity is maintained.
+    #[inline(always)]
+    pub fn as_mut_slice<'a>(&'a self, _token: &'a mut GhostToken<'brand>) -> &'a mut [T] {
+        unsafe {
+            let ptr = self.inner.as_ptr() as *mut T;
+            std::slice::from_raw_parts_mut(ptr, self.inner.len())
+        }
+    }
+
     /// Iterates over all elements by shared reference.
     ///
     /// This iterator is zero-cost: no allocations, no closures per element.
@@ -603,6 +642,24 @@ impl<'brand, T, const CAPACITY: usize> BrandedArray<'brand, T, CAPACITY> {
         self.inner[idx].borrow_mut(token)
     }
 
+    /// Returns a slice of the underlying elements.
+    #[inline(always)]
+    pub fn as_slice<'a>(&'a self, _token: &'a GhostToken<'brand>) -> &'a [T] {
+        unsafe {
+            let ptr = self.inner.as_ptr() as *const T;
+            std::slice::from_raw_parts(ptr, self.len)
+        }
+    }
+
+    /// Returns a mutable slice of the underlying elements.
+    #[inline(always)]
+    pub fn as_mut_slice<'a>(&'a self, _token: &'a mut GhostToken<'brand>) -> &'a mut [T] {
+        unsafe {
+            let ptr = self.inner.as_ptr() as *mut T;
+            std::slice::from_raw_parts_mut(ptr, self.len)
+        }
+    }
+
     /// Iterates over all elements by shared reference.
     pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> impl Iterator<Item = &'a T> + 'a {
         self.inner[..self.len].iter().map(|cell| cell.borrow(token))
@@ -861,6 +918,41 @@ impl<'brand, T: Default, const CAPACITY: usize> Default for BrandedArray<'brand,
         arr.push(1);
         arr.push(2);
         arr.push(3); // This should panic
+    }
+
+    #[test]
+    fn branded_vec_as_slice_mut() {
+        GhostToken::new(|mut token| {
+            let mut vec = BrandedVec::new();
+            vec.push(3);
+            vec.push(1);
+            vec.push(2);
+
+            // Use standard slice sort via as_mut_slice
+            vec.as_mut_slice(&mut token).sort();
+
+            assert_eq!(vec.as_slice(&token), &[1, 2, 3]);
+
+            // Mutate via slice
+            for x in vec.as_mut_slice(&mut token) {
+                *x *= 2;
+            }
+            assert_eq!(vec.as_slice(&token), &[2, 4, 6]);
+        });
+    }
+
+    #[test]
+    fn branded_array_as_slice() {
+        GhostToken::new(|mut token| {
+            let mut arr: BrandedArray<'_, i32, 4> = BrandedArray::new();
+            arr.push(10);
+            arr.push(20);
+
+            assert_eq!(arr.as_slice(&token), &[10, 20]);
+
+            arr.as_mut_slice(&mut token)[0] = 30;
+            assert_eq!(arr.as_slice(&token), &[30, 20]);
+        });
     }
 }
 

@@ -126,6 +126,49 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
         }
     }
 
+    /// Returns a pair of slices representing the deque contents.
+    ///
+    /// # Safety
+    /// This uses `unsafe` code to transmute `&[GhostCell<T>]` to `&[T]`.
+    /// This is safe because:
+    /// 1. `GhostCell<T>` is `repr(transparent)` over `UnsafeCell<T>`.
+    /// 2. `UnsafeCell<T>` has the same memory layout as `T`.
+    /// 3. The token guarantees we have access permission.
+    #[inline(always)]
+    pub fn as_slices<'a>(&'a self, _token: &'a GhostToken<'brand>) -> (&'a [T], &'a [T]) {
+        unsafe {
+            let (s1, s2) = self.inner.as_slices();
+            (
+                std::slice::from_raw_parts(s1.as_ptr() as *const T, s1.len()),
+                std::slice::from_raw_parts(s2.as_ptr() as *const T, s2.len()),
+            )
+        }
+    }
+
+    /// Returns a pair of mutable slices representing the deque contents.
+    ///
+    /// # Safety
+    /// This uses `unsafe` code to create `&mut [T]` from the deque's buffers.
+    /// This is safe because:
+    /// 1. Layout compatibility (as above).
+    /// 2. We hold `&mut GhostToken`, guaranteeing exclusive access to all cells with this brand.
+    /// 3. We hold `&self`, guaranteeing the deque structure remains valid.
+    #[inline(always)]
+    pub fn as_mut_slices<'a>(&'a self, _token: &'a mut GhostToken<'brand>) -> (&'a mut [T], &'a mut [T]) {
+        unsafe {
+            let (s1, s2) = self.inner.as_slices();
+            let p1 = s1.as_ptr() as *mut T;
+            let len1 = s1.len();
+            let p2 = s2.as_ptr() as *mut T;
+            let len2 = s2.len();
+
+            (
+                std::slice::from_raw_parts_mut(p1, len1),
+                std::slice::from_raw_parts_mut(p2, len2)
+            )
+        }
+    }
+
     /// Bulk operation: applies `f` to all elements by shared reference.
     ///
     /// This provides direct access to the internal storage for maximum efficiency
@@ -269,6 +312,36 @@ mod tests {
             assert_eq!(dq.find_ref(&token, |&x| x == 2), Some(&2));
             assert!(dq.any_ref(&token, |&x| x == 3));
             assert!(dq.all_ref(&token, |&x| x > 0));
+        });
+    }
+
+    #[test]
+    fn branded_vec_deque_slices() {
+        GhostToken::new(|mut token| {
+            let mut dq = BrandedVecDeque::new();
+            dq.push_back(1);
+            dq.push_back(2);
+            dq.push_front(3);
+            dq.push_front(4);
+            // 4, 3, 1, 2
+
+            let (s1, s2) = dq.as_slices(&token);
+            // Internal layout depends on implementation, but concatenated they should match
+            let mut collected = Vec::new();
+            collected.extend_from_slice(s1);
+            collected.extend_from_slice(s2);
+            assert_eq!(collected, vec![4, 3, 1, 2]);
+
+            // Mutate via slices
+            let (m1, m2) = dq.as_mut_slices(&mut token);
+            for x in m1 { *x *= 10; }
+            for x in m2 { *x *= 10; }
+
+            let (s1, s2) = dq.as_slices(&token);
+            let mut collected = Vec::new();
+            collected.extend_from_slice(s1);
+            collected.extend_from_slice(s2);
+            assert_eq!(collected, vec![40, 30, 10, 20]);
         });
     }
 }
