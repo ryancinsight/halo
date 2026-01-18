@@ -185,6 +185,28 @@ impl<'brand, T> BrandedVec<'brand, T> {
         self.inner.get(idx).map(|c| c.borrow_mut(token))
     }
 
+    /// Returns a token-gated shared reference to element `idx` without bounds checking.
+    ///
+    /// # Safety
+    /// Caller must ensure `idx < self.len()`.
+    #[inline(always)]
+    pub unsafe fn get_unchecked<'a>(&'a self, token: &'a GhostToken<'brand>, idx: usize) -> &'a T {
+        self.inner.get_unchecked(idx).borrow(token)
+    }
+
+    /// Returns a token-gated exclusive reference to element `idx` without bounds checking.
+    ///
+    /// # Safety
+    /// Caller must ensure `idx < self.len()`.
+    #[inline(always)]
+    pub unsafe fn get_unchecked_mut<'a>(
+        &'a self,
+        token: &'a mut GhostToken<'brand>,
+        idx: usize,
+    ) -> &'a mut T {
+        self.inner.get_unchecked(idx).borrow_mut(token)
+    }
+
     /// Returns a token-gated shared reference to element `idx`.
     ///
     /// # Panics
