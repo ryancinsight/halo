@@ -120,6 +120,7 @@ pub use collections::{
     BrandedCowStrings,
     BrandedString,
     BrandedDoublyLinkedList,
+    BrandedIntervalMap,
 };
 pub use graph::{GhostAdjacencyGraph, GhostBipartiteGraph, GhostCscGraph, GhostCsrGraph, GhostDag};
 pub use token::GhostToken;

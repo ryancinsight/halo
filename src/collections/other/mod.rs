@@ -10,6 +10,7 @@ pub mod binary_heap;
 pub mod lru_cache;
 pub mod skip_list;
 pub mod slot_map;
+pub mod interval_map;
 
 pub use deque::BrandedDeque;
 pub use cow_strings::BrandedCowStrings;
@@ -18,3 +19,4 @@ pub use binary_heap::BrandedBinaryHeap;
 pub use lru_cache::BrandedLruCache;
 pub use skip_list::BrandedSkipList;
 pub use slot_map::{BrandedSlotMap, SlotKey};
+pub use interval_map::BrandedIntervalMap;

@@ -97,3 +97,7 @@ harness = false
 [[bench]]
 name = "alloc_benchmark"
 harness = false
+
+[[bench]]
+name = "interval_map_benchmark"
+harness = false
