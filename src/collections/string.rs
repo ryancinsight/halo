@@ -5,28 +5,33 @@
 //!
 //! # Design
 //!
-//! Unlike `GhostCell<String>`, which locks the entire string container (including length and capacity),
-//! `BrandedString` owns the container metadata (`len`, `capacity`) but brands the *content* (bytes).
+//! This implementation wraps [`BrandedVec<u8>`](crate::collections::BrandedVec) to provide
+//! string-specific operations while harnessing the existing token-gated safety mechanisms.
 //!
-//! This allows:
+//! It allows:
 //! - **Structural inspection without a token**: `len()`, `capacity()`, `is_empty()`
 //! - **Structural mutation without a token**: `push_str()`, `clear()`, `reserve()`
 //! - **Content access requires a token**: `as_str()`
 //!
-//! This follows the same pattern as `BrandedVec`.
+//! # Implementation Note
+//!
+//! To achieve high performance for structural mutations (like `push_str`), `BrandedString`
+//! accesses the internal storage of `BrandedVec` directly (via `pub(crate)` visibility)
+//! to perform bulk operations without per-byte token overhead, while trusting `BrandedVec`'s
+//! branding guarantees.
 
 use crate::{GhostCell, GhostToken};
-use std::fmt;
+use crate::collections::BrandedVec;
 use std::mem;
 
 /// A branded string compatible with GhostCell.
 ///
 /// This struct manages a buffer of branded bytes, enforcing UTF-8 validity
 /// while allowing structural operations without a token.
+#[repr(transparent)]
 pub struct BrandedString<'brand> {
-    /// The underlying storage.
-    /// We use `Vec<GhostCell<'brand, u8>>` which matches the layout of `Vec<u8>`.
-    vec: Vec<GhostCell<'brand, u8>>,
+    /// The underlying branded vector of bytes.
+    vec: BrandedVec<'brand, u8>,
 }
 
 impl<'brand> BrandedString<'brand> {
@@ -34,7 +39,7 @@ impl<'brand> BrandedString<'brand> {
     #[inline]
     pub fn new() -> Self {
         Self {
-            vec: Vec::new(),
+            vec: BrandedVec::new(),
         }
     }
 
@@ -42,7 +47,7 @@ impl<'brand> BrandedString<'brand> {
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
-            vec: Vec::with_capacity(capacity),
+            vec: BrandedVec::with_capacity(capacity),
         }
     }
 
@@ -51,28 +56,24 @@ impl<'brand> BrandedString<'brand> {
     pub fn from_string(s: String) -> Self {
         // SAFETY: `GhostCell<u8>` has the same layout as `u8`.
         // `Vec<GhostCell<u8>>` has the same layout as `Vec<u8>`.
-        // We take ownership of the String's vector.
+        // We take ownership of the String's vector and wrap it in BrandedVec.
         let bytes = s.into_bytes();
-        let vec = unsafe { mem::transmute::<Vec<u8>, Vec<GhostCell<'brand, u8>>>(bytes) };
-        Self { vec }
+        let inner_vec = unsafe { mem::transmute::<Vec<u8>, Vec<GhostCell<'brand, u8>>>(bytes) };
+        Self {
+            vec: BrandedVec { inner: inner_vec }
+        }
     }
 
     /// Returns a shared reference to the string slice.
     ///
     /// Requires a token to prove permission to read the branded bytes.
     #[inline]
-    pub fn as_str<'a>(&'a self, _token: &'a GhostToken<'brand>) -> &'a str {
-        // SAFETY:
-        // 1. `Vec<GhostCell<u8>>` layout == `Vec<u8>`.
-        // 2. We maintain UTF-8 invariant in all mutation methods.
-        // 3. Token proves access permission.
-        unsafe {
-            let slice = std::slice::from_raw_parts(
-                self.vec.as_ptr() as *const u8,
-                self.vec.len()
-            );
-            std::str::from_utf8_unchecked(slice)
-        }
+    pub fn as_str<'a>(&'a self, token: &'a GhostToken<'brand>) -> &'a str {
+        // Leverage BrandedVec's safe token-gated slice access
+        let slice = self.vec.as_slice(token);
+
+        // SAFETY: We maintain UTF-8 invariant in all mutation methods.
+        unsafe { std::str::from_utf8_unchecked(slice) }
     }
 
     /// Appends a string slice.
@@ -85,8 +86,9 @@ impl<'brand> BrandedString<'brand> {
         // 1. `Vec<GhostCell<u8>>` layout == `Vec<u8>`.
         // 2. Appending valid UTF-8 bytes to a valid UTF-8 string maintains validity.
         unsafe {
+            // Access the inner vector directly for performance
             // Cast &mut Vec<GhostCell<u8>> to &mut Vec<u8>
-            let vec_ptr = &mut self.vec as *mut Vec<GhostCell<'brand, u8>>;
+            let vec_ptr = &mut self.vec.inner as *mut Vec<GhostCell<'brand, u8>>;
             let vec_u8_ptr = vec_ptr as *mut Vec<u8>;
             let vec_u8 = &mut *vec_u8_ptr;
             vec_u8.extend_from_slice(string.as_bytes());
@@ -154,39 +156,9 @@ impl<'brand> BrandedString<'brand> {
             return;
         }
 
-        // We need to check UTF-8 boundary.
-        // To do this, we need to inspect the byte at new_len.
-        // We don't have a token, but we are `&mut self`.
-        // The token protects against *aliased* access.
-        // Since we have `&mut self`, we have exclusive access to the container.
-        // But the *values* inside `GhostCell` are logically protected.
-        // However, `GhostCell` protects against data races and shared mutation.
-        // If we are `&mut self`, we can drop elements (remove them) without a token.
-        // Can we read them?
-        // `truncate` logic in `String` checks `is_char_boundary`.
-        // This requires reading the byte.
-        // Reading the byte requires a token?
-        // Technically yes, `GhostCell::borrow` needs a token.
-        // But wait, `GhostCell` owns the value.
-        // If we own the `GhostCell` (via `&mut Vec`), we can get `&mut T` via `get_mut` on `GhostCell`.
-        // `GhostCell::get_mut` requires `&mut self`.
-        // So we CAN read the byte if we treat it as mutable access to the cell itself?
-        // `GhostCell` does NOT have `get_mut`?
-        // `GhostCell` wraps `UnsafeCell`. `UnsafeCell` has `get_mut`.
-        // Let's check `GhostCell` API.
-
-        // Actually, we can use `as_str` logic but we don't have a token.
-        // BUT, we are implementing the string itself.
-        // If we implement `is_char_boundary` manually:
-        // A char boundary is where byte is not a continuation byte (0b10xxxxxx).
-        // (byte & 0xC0) != 0x80.
-
-        // We can access the raw byte via `UnsafeCell` / pointer cast since we have `&mut self`.
-        // Safety: We have exclusive access to `self`, so no other thread/alias can be reading via token.
-        // Reading the byte to check boundary is safe.
-
         if self.is_char_boundary_internal(new_len) {
-            self.vec.truncate(new_len);
+            // BrandedVec doesn't expose truncate, but we can access inner
+            self.vec.inner.truncate(new_len);
         } else {
             panic!("new_len does not lie on a char boundary");
         }
@@ -206,17 +178,9 @@ impl<'brand> BrandedString<'brand> {
         // Read byte at index
         // SAFETY: index is in bounds. We have `&self`.
         // We are reading a byte to check its bit pattern.
-        // We don't have a token, but we are effectively the "kernel" of this type.
-        // Is it sound to read without token?
-        // If someone else has `&token`, they could have `&str` (shared ref).
-        // If we have `&self` (shared ref), we co-exist.
-        // They might be reading. We are reading. Safe.
-        // Wait, `truncate` takes `&mut self`.
-        // So no one else has `&self`.
-        // So no one has `&str`.
-        // So it's safe to read.
+        // We safely read from the inner vector using raw pointer access via UnsafeCell/GhostCell.
         unsafe {
-            let ptr = self.vec.as_ptr() as *const u8;
+            let ptr = self.vec.inner.as_ptr() as *const u8;
             let byte = *ptr.add(index);
             // Check if it's NOT a continuation byte (10xxxxxx)
             (byte as i8) >= -0x40
