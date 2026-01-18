@@ -13,6 +13,9 @@
 
 use core::marker::PhantomData;
 
+pub mod shared;
+pub use shared::SharedGhostToken;
+
 /// A zero-sized token that controls access to GhostCells
 ///
 /// The token uses a phantom type parameter to create branded types,
@@ -83,5 +86,3 @@ impl<'brand> GhostToken<'brand> {
 // - Exclusive mutation still requires `&mut GhostToken<'brand>`, which Rust borrowing
 //   prevents from coexisting with any shared references to the same token.
 unsafe impl<'brand> Sync for GhostToken<'brand> {}
-
-
