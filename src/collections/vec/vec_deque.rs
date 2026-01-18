@@ -145,6 +145,29 @@ impl<'brand, T> Default for BrandedVecDeque<'brand, T> {
     }
 }
 
+impl<'brand, T> FromIterator<T> for BrandedVecDeque<'brand, T> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        Self {
+            inner: iter.into_iter().map(GhostCell::new).collect(),
+        }
+    }
+}
+
+impl<'brand, T> IntoIterator for BrandedVecDeque<'brand, T> {
+    type Item = T;
+    type IntoIter = std::iter::Map<std::collections::vec_deque::IntoIter<GhostCell<'brand, T>>, fn(GhostCell<'brand, T>) -> T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.into_iter().map(GhostCell::into_inner)
+    }
+}
+
+impl<'brand, T> Extend<T> for BrandedVecDeque<'brand, T> {
+    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        self.inner.extend(iter.into_iter().map(GhostCell::new));
+    }
+}
+
 impl<'brand, T> From<T> for BrandedVecDeque<'brand, T> {
     fn from(value: T) -> Self {
         let mut deque = Self::new();
@@ -167,10 +190,16 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
     ///
     /// This is a zero-cost operation as it only moves the deque.
     pub fn into_vec_deque(self) -> VecDeque<T> {
-        // SAFETY: GhostToken linearity ensures no outstanding borrows
-        GhostToken::new(|_token| {
-            self.inner.into_iter().map(|cell| cell.into_inner()).collect()
-        })
+        self.inner.into_iter().map(|cell| cell.into_inner()).collect()
+    }
+
+    /// Creates a draining iterator that removes the specified range in the deque
+    /// and yields the removed items.
+    pub fn drain<R>(&mut self, range: R) -> impl Iterator<Item = T> + '_
+    where
+        R: std::ops::RangeBounds<usize>,
+    {
+        self.inner.drain(range).map(GhostCell::into_inner)
     }
 }
 
