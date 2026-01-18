@@ -89,3 +89,7 @@ harness = false
 [[bench]]
 name = "slot_map_benchmark"
 harness = false
+
+[[bench]]
+name = "index_map_benchmark"
+harness = false
