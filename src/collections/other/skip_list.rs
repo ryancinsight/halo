@@ -788,4 +788,57 @@ mod tests {
             }
         });
     }
+
+    #[test]
+    fn test_skip_list_large_insert() {
+        GhostToken::new(|mut token| {
+            let mut list = BrandedSkipList::new();
+            // Insert enough to force multiple splits and levels
+            for i in 0..100 {
+                list.insert(&mut token, i, i);
+            }
+            assert_eq!(list.len(), 100);
+            for i in 0..100 {
+                assert_eq!(*list.get(&token, &i).unwrap(), i);
+            }
+        });
+    }
+
+    #[test]
+    fn test_skip_list_iter_mut() {
+        GhostToken::new(|mut token| {
+            let mut list = BrandedSkipList::new();
+            for i in 0..20 {
+                list.insert(&mut token, i, i);
+            }
+
+            for (_, v) in list.iter_mut(&mut token) {
+                *v += 1;
+            }
+
+            for i in 0..20 {
+                assert_eq!(*list.get(&token, &i).unwrap(), i + 1);
+            }
+        });
+    }
+
+    #[test]
+    fn test_skip_list_chunk_splits() {
+        GhostToken::new(|mut token| {
+            let mut list = BrandedSkipList::new();
+            // CHUNK_SIZE is 16.
+            // Insert 17 items. Should split.
+            for i in 0..17 {
+                list.insert(&mut token, i, i);
+            }
+            assert_eq!(list.len(), 17);
+
+            // Check order
+            let keys: Vec<_> = list.iter(&token).map(|(k, _)| *k).collect();
+            assert_eq!(keys.len(), 17);
+            for i in 0..17 {
+                assert_eq!(keys[i], i);
+            }
+        });
+    }
 }
