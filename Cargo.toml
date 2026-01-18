@@ -82,3 +82,6 @@ lto = true
 codegen-units = 1
 panic = "abort"
 debug = true
+[[bench]]
+name = "skip_list_benchmark"
+harness = false
