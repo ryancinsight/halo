@@ -161,10 +161,13 @@ where
         let mut hasher = self.hash_builder.build_hasher();
         key.hash(&mut hasher);
         let hash = hasher.finish();
-        // Top bits for H1 (index), bottom 7 bits for H2 (tag)
+        // Bottom bits for H1 (index) since capacity is power of 2
         let h1 = (hash as usize) & (self.capacity - 1);
-        let h2 = (hash & 0x7F) as u8;
-        (h1, h2)
+        // Top 7 bits for H2 (tag) to ensure independence from H1
+        // (hash >> 57) for 64-bit hash
+        let h2 = (hash >> 57) as u8;
+        // Ensure H2 is in 0..128 range (top bit 0)
+        (h1, h2 & 0x7F)
     }
 
     /// Finds the slot for a key. Returns (index, true) if found, (index, false) if not found.
