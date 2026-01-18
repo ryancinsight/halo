@@ -6,8 +6,9 @@
 //!
 //! Optimization details:
 //! - **Chunking**: Nodes hold up to 16 elements. Linear search within chunks is highly efficient.
-//! - **Memory**: `u32` indices, `MaybeUninit` for lazy initialization.
+//! - **Memory**: `NodeIdx` (u32) indices to reduce memory footprint.
 //! - **Splitting**: When a chunk fills, it splits into two, promoting the split key to the skip list index.
+//! - **Branding**: Indices are branded (`NodeIdx<'brand>`) to prevent misuse across tokens.
 //!
 //! Access is controlled via `GhostToken`.
 
@@ -15,13 +16,44 @@ use crate::{GhostCell, GhostToken, BrandedVec};
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::mem::MaybeUninit;
+use std::marker::PhantomData;
 use crate::collections::{BrandedCollection, ZeroCopyMapOps};
 
 const MAX_LEVEL: usize = 16;
-const NONE: u32 = u32::MAX;
 const CHUNK_SIZE: usize = 16;
-// Split threshold: typically half full, but we can fill up to CHUNK_SIZE
-const SPLIT_SIZE: usize = CHUNK_SIZE;
+
+/// A branded index into the skip list storage.
+///
+/// Wraps a `u32` to provide type safety and prevent mixing indices from different
+/// branded contexts or raw integers.
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct NodeIdx<'brand>(u32, PhantomData<fn(&'brand ()) -> &'brand ()>);
+
+impl<'brand> NodeIdx<'brand> {
+    const NONE: Self = Self(u32::MAX, PhantomData);
+
+    #[inline(always)]
+    fn new(idx: usize) -> Self {
+        debug_assert!(idx < u32::MAX as usize);
+        Self(idx as u32, PhantomData)
+    }
+
+    #[inline(always)]
+    fn index(self) -> usize {
+        self.0 as usize
+    }
+
+    #[inline(always)]
+    fn is_none(self) -> bool {
+        self.0 == u32::MAX
+    }
+
+    #[inline(always)]
+    fn is_some(self) -> bool {
+        self.0 != u32::MAX
+    }
+}
 
 /// Simple Xorshift RNG for level generation.
 struct XorShift64 {
@@ -84,8 +116,8 @@ impl<K, V> NodeData<K, V> {
 /// A Chunked SkipList map with token-gated values.
 pub struct BrandedSkipList<'brand, K, V> {
     nodes: BrandedVec<'brand, NodeData<K, V>>,
-    links: BrandedVec<'brand, u32>, // indices into `nodes`
-    head_links: [u32; MAX_LEVEL],
+    links: BrandedVec<'brand, NodeIdx<'brand>>, // indices into `nodes`
+    head_links: [NodeIdx<'brand>; MAX_LEVEL],
     len: usize,
     max_level: usize,
     rng: XorShift64,
@@ -97,7 +129,7 @@ impl<'brand, K, V> BrandedSkipList<'brand, K, V> {
         Self {
             nodes: BrandedVec::new(),
             links: BrandedVec::new(),
-            head_links: [NONE; MAX_LEVEL],
+            head_links: [NodeIdx::NONE; MAX_LEVEL],
             len: 0,
             max_level: 0,
             rng: XorShift64::new(0x1234_5678),
@@ -109,7 +141,7 @@ impl<'brand, K, V> BrandedSkipList<'brand, K, V> {
         Self {
             nodes: BrandedVec::new(),
             links: BrandedVec::new(),
-            head_links: [NONE; MAX_LEVEL],
+            head_links: [NodeIdx::NONE; MAX_LEVEL],
             len: 0,
             max_level: 0,
             rng: XorShift64::new(seed),
@@ -145,7 +177,7 @@ where
         K: Borrow<Q>,
         Q: Ord,
     {
-        let mut curr: u32 = NONE;
+        let mut curr = NodeIdx::NONE;
         let mut level = self.max_level.saturating_sub(1);
 
         if self.max_level == 0 {
@@ -156,32 +188,16 @@ where
             // Find next chunk
             let next_idx = self.get_next(token, curr, level);
 
-            if next_idx != NONE {
+            if next_idx.is_some() {
                 unsafe {
-                    let next_node = self.nodes.get_unchecked(token, next_idx as usize);
+                    let next_node = self.nodes.get_unchecked(token, next_idx.index());
                     // Check first key of next node
                     // Assuming node is not empty (invariant)
                     let first_key = next_node.key_at(0);
 
                     if first_key.borrow() <= key {
-                        // Move to next node if key is potentially inside or after
-                        // However, strictly speaking, in a chunked list, we index by the *last* key or *first* key?
-                        // Usually, the index points to chunks where all keys >= index key.
-                        // Let's use simplified logic:
-                        // Scan forward at this level as long as next_node.max_key < key?
-                        // Or typical skip list: next_node.key < key.
-                        // Since next_node contains a range, we should check if `key` could be in `next_node` or after.
-
-                        // We need to look at the LAST key of next_node to decide if we skip over it?
-                        // Or simpler: The skip list indexes the FIRST key of each chunk.
-                        // So if `key >= next_node.first_key`, we *might* go there.
-                        // We should go to the rightmost node such that `node.first_key <= key`.
-
-                        // So:
-                        if first_key.borrow() <= key {
-                            curr = next_idx;
-                            continue;
-                        }
+                        curr = next_idx;
+                        continue;
                     }
                 }
             }
@@ -193,9 +209,9 @@ where
         }
 
         // We are at `curr`. The key should be in `curr` or it doesn't exist.
-        if curr != NONE {
+        if curr.is_some() {
             unsafe {
-                let node = self.nodes.get_unchecked(token, curr as usize);
+                let node = self.nodes.get_unchecked(token, curr.index());
                 // Linear search in chunk
                 for i in 0..node.len as usize {
                     let k = node.key_at(i);
@@ -217,7 +233,7 @@ where
         Q: Ord,
     {
         // Copy logic from find_entry but return mut ref
-        let mut curr: u32 = NONE;
+        let mut curr = NodeIdx::NONE;
         let mut level = self.max_level.saturating_sub(1);
 
         if self.max_level == 0 {
@@ -226,9 +242,9 @@ where
 
         loop {
             let next_idx = self.get_next_unchecked(token, curr, level);
-            if next_idx != NONE {
+            if next_idx.is_some() {
                 unsafe {
-                    let next_node = self.nodes.get_unchecked(token, next_idx as usize);
+                    let next_node = self.nodes.get_unchecked(token, next_idx.index());
                     if next_node.key_at(0).borrow() <= key {
                         curr = next_idx;
                         continue;
@@ -239,9 +255,9 @@ where
             level -= 1;
         }
 
-        if curr != NONE {
+        if curr.is_some() {
             unsafe {
-                let node = self.nodes.get_unchecked_mut(token, curr as usize);
+                let node = self.nodes.get_unchecked_mut(token, curr.index());
                 for i in 0..node.len as usize {
                     if node.key_at(i).borrow() == key {
                         return Some(node.val_at_mut(i));
@@ -256,14 +272,14 @@ where
     }
 
     // Helper
-    fn get_next(&self, token: &GhostToken<'brand>, curr: u32, level: usize) -> u32 {
+    fn get_next(&self, token: &GhostToken<'brand>, curr: NodeIdx<'brand>, level: usize) -> NodeIdx<'brand> {
         self.get_next_unchecked(token, curr, level)
     }
 
-    fn get_next_unchecked(&self, token: &GhostToken<'brand>, curr: u32, level: usize) -> u32 {
-        if curr != NONE {
+    fn get_next_unchecked(&self, token: &GhostToken<'brand>, curr: NodeIdx<'brand>, level: usize) -> NodeIdx<'brand> {
+        if curr.is_some() {
             unsafe {
-                let node = self.nodes.get_unchecked(token, curr as usize);
+                let node = self.nodes.get_unchecked(token, curr.index());
                 let offset = node.link_offset as usize + level;
                 *self.links.get_unchecked(token, offset)
             }
@@ -274,19 +290,17 @@ where
 
     /// Inserts a key-value pair into the map.
     pub fn insert(&mut self, token: &mut GhostToken<'brand>, key: K, value: V) -> Option<V> {
-        let mut update = [NONE; MAX_LEVEL];
-        let mut curr: u32 = NONE;
+        let mut update = [NodeIdx::NONE; MAX_LEVEL];
+        let mut curr = NodeIdx::NONE;
         let mut level = self.max_level.saturating_sub(1);
 
         // Find predecessors
         if self.max_level > 0 {
             loop {
                 let next_idx = self.get_next_unchecked(token, curr, level);
-                if next_idx != NONE {
+                if next_idx.is_some() {
                     unsafe {
-                        let next_node = self.nodes.get_unchecked(token, next_idx as usize);
-                        // We move to next_node if its first key <= key.
-                        // This finds the rightmost node starting before or at `key`.
+                        let next_node = self.nodes.get_unchecked(token, next_idx.index());
                         if next_node.key_at(0) <= &key {
                             curr = next_idx;
                             continue;
@@ -300,10 +314,10 @@ where
         }
 
         // `curr` is the node where `key` belongs.
-        if curr != NONE {
+        if curr.is_some() {
             // Check if exists in `curr`
             unsafe {
-                let node = self.nodes.get_unchecked_mut(token, curr as usize);
+                let node = self.nodes.get_unchecked_mut(token, curr.index());
                 for i in 0..node.len as usize {
                     if node.key_at(i) == &key {
                         let old = std::mem::replace(node.val_at_mut(i), value);
@@ -333,21 +347,11 @@ where
             return None;
         }
 
-        // If we are here, `curr` is NONE, meaning `key` is smaller than first node's first key?
-        // Wait, if `key` < first node's first key, `curr` would remain NONE (head).
-        // But we should insert into the first node (head's next).
-        // The loop condition `next_node.key_at(0) <= &key` skips nodes starting after key.
-        // So `curr` is the node starting <= key.
-
-        // If `curr` is NONE, it means `key` < `head_links[0].key_at(0)`.
-        // So we should insert into `head_links[0]`.
-        // Or if list is empty.
-
         let first_node_idx = self.head_links[0];
-        if first_node_idx != NONE {
+        if first_node_idx.is_some() {
              // Insert into first node
              unsafe {
-                 let node = self.nodes.get_unchecked_mut(token, first_node_idx as usize);
+                 let node = self.nodes.get_unchecked_mut(token, first_node_idx.index());
                  if (node.len as usize) < CHUNK_SIZE {
                      self.insert_into_leaf(token, first_node_idx, key, value);
                      self.len += 1;
@@ -359,7 +363,6 @@ where
              return None;
         }
 
-        // Should be covered by len == 0 check, but safe fallback
         self.create_first_node(token, key, value);
         self.len += 1;
         None
@@ -372,10 +375,10 @@ where
         }
 
         let link_offset = self.links.len() as u32;
-        let node_idx = self.nodes.len() as u32;
+        let node_idx = NodeIdx::new(self.nodes.len());
 
         for _ in 0..level {
-            self.links.push(NONE);
+            self.links.push(NodeIdx::NONE);
         }
         for i in 0..level {
             self.head_links[i] = node_idx;
@@ -390,9 +393,9 @@ where
         self.nodes.push(node);
     }
 
-    fn insert_into_leaf(&mut self, token: &mut GhostToken<'brand>, node_idx: u32, key: K, value: V) {
+    fn insert_into_leaf(&mut self, token: &mut GhostToken<'brand>, node_idx: NodeIdx<'brand>, key: K, value: V) {
         unsafe {
-            let node = self.nodes.get_unchecked_mut(token, node_idx as usize);
+            let node = self.nodes.get_unchecked_mut(token, node_idx.index());
             // Find position
             let mut pos = node.len as usize;
             for i in 0..node.len as usize {
@@ -422,39 +425,27 @@ where
         }
     }
 
-    fn split_and_insert(&mut self, token: &mut GhostToken<'brand>, node_idx: u32, update: &mut [u32], key: K, value: V) {
+    fn split_and_insert(&mut self, token: &mut GhostToken<'brand>, node_idx: NodeIdx<'brand>, update: &mut [NodeIdx<'brand>], key: K, value: V) {
         // 1. Create new node
         let new_level = self.random_level();
         if new_level > self.max_level {
             for i in self.max_level..new_level {
-                update[i] = NONE;
+                update[i] = NodeIdx::NONE;
             }
             self.max_level = new_level;
         }
 
         let new_link_offset = self.links.len() as u32;
-        let new_node_idx = self.nodes.len() as u32;
+        let new_node_idx = NodeIdx::new(self.nodes.len());
         for _ in 0..new_level {
-            self.links.push(NONE);
+            self.links.push(NodeIdx::NONE);
         }
 
         let mut new_node = NodeData::new(new_level as u8, new_link_offset);
 
-        // 2. Distribute keys between `node` and `new_node`
-        // Also insert `key`
+        // 2. Distribute keys
         unsafe {
-            let node = self.nodes.get_unchecked_mut(token, node_idx as usize);
-
-            // Create a temporary buffer to sort/split keys
-            // Because CHUNK_SIZE is small (16), we can stack allocate or just shuffle.
-            // Simplified:
-            // - Determine where key goes.
-            // - Total items = CHUNK_SIZE + 1.
-            // - Split index = (CHUNK_SIZE + 1) / 2 = 8.
-            // - First 8 go to `node`, rest to `new_node`.
-
-            // To avoid allocs, we shift elements from `node` to `new_node`.
-            // But we need to insert `key` too.
+            let node = self.nodes.get_unchecked_mut(token, node_idx.index());
 
             // Find insert pos
             let mut pos = node.len as usize;
@@ -465,23 +456,10 @@ where
                 }
             }
 
-            // We have `node.keys[0..16]` and `key`.
-            // We want `node` to have `0..8`, `new_node` to have `9..17`.
-            // Split point 8.
-
             let split_idx = CHUNK_SIZE / 2;
 
-            // Move items to new_node
-            // Case 1: Insert in first half
-            // Case 2: Insert in second half
-
             if pos < split_idx {
-                // key goes to left node.
-                // Move [split_idx - 1 .. end] to new_node
-                // Shift [pos .. split_idx - 1] in node
-                // Insert key at pos
-
-                let move_count = CHUNK_SIZE - (split_idx - 1); // e.g. 16 - 7 = 9 items
+                let move_count = CHUNK_SIZE - (split_idx - 1);
                 let src_start = split_idx - 1;
 
                 std::ptr::copy_nonoverlapping(
@@ -501,10 +479,6 @@ where
                 self.insert_into_leaf(token, node_idx, key, value);
 
             } else {
-                // key goes to right node (or exactly at split)
-                // Move [split_idx .. end] to new_node.
-                // Insert key into new_node.
-
                 let move_count = CHUNK_SIZE - split_idx;
                 std::ptr::copy_nonoverlapping(
                     node.keys.as_ptr().add(split_idx),
@@ -520,10 +494,6 @@ where
                 node.len = split_idx as u8;
 
                 // Insert key into new_node
-                // new_node is not in `nodes` yet, pass ref?
-                // insert_into_leaf takes index.
-                // We handle it manually here since new_node is local.
-
                 let rel_pos = pos - split_idx;
                 if rel_pos < new_node.len as usize {
                      std::ptr::copy(
@@ -546,23 +516,10 @@ where
         self.nodes.push(new_node);
 
         // 3. Update links
-        // new_node should be inserted after `node_idx`.
-        // BUT `node_idx` might not be the predecessor at all levels!
-        // `update` array contains predecessors for `key`.
-        // Since `new_node` contains `key` (or keys > `key`), `update` is correct for `new_node`.
-
-        // Wait, `update` points to nodes where `key` would be inserted.
-        // `node_idx` is one of them (likely `curr` from find).
-        // For levels where `update[i] == node_idx`, we link `node -> new_node`.
-        // For levels where `update[i]` is something else (above `node`'s level), we link `pred -> new_node`.
-
-        // Correct logic: `new_node` is inserted in the list. `update[i]` are its predecessors.
-
         for i in 0..new_level {
             let pred_idx = update[i];
 
-            // If pred_idx is NONE, we update head
-            if pred_idx == NONE {
+            if pred_idx.is_none() {
                 let old_head = self.head_links[i];
                 unsafe {
                     *self.links.get_unchecked_mut(token, new_link_offset as usize + i) = old_head;
@@ -570,18 +527,11 @@ where
                 self.head_links[i] = new_node_idx;
             } else {
                 unsafe {
-                    let pred_node = self.nodes.get_unchecked(token, pred_idx as usize);
-                    // Use index instead of pointer reference to avoid double mutable borrow conflict
-                    // `get_unchecked` returns shared ref, but we need index to mutate via `links` vector.
+                    let pred_node = self.nodes.get_unchecked(token, pred_idx.index());
                     let offset = pred_node.link_offset as usize + i;
-
-                    // Read old next
                     let old_next = *self.links.get_unchecked(token, offset);
 
-                    // Write new next to new node's links
                     *self.links.get_unchecked_mut(token, new_link_offset as usize + i) = old_next;
-
-                    // Update predecessor's link
                     *self.links.get_unchecked_mut(token, offset) = new_node_idx;
                 }
             }
@@ -599,16 +549,15 @@ impl<'brand, K, V> BrandedCollection<'brand> for BrandedSkipList<'brand, K, V> {
     }
 }
 
-// ZeroCopyOps implementation needs to traverse chunks
 impl<'brand, K, V> ZeroCopyMapOps<'brand, K, V> for BrandedSkipList<'brand, K, V> {
     fn find_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<(&'a K, &'a V)>
     where
         F: Fn(&K, &V) -> bool,
     {
         let mut curr = self.head_links[0];
-        while curr != NONE {
+        while curr.is_some() {
             unsafe {
-                let node = self.nodes.get_unchecked(token, curr as usize);
+                let node = self.nodes.get_unchecked(token, curr.index());
                 for i in 0..node.len as usize {
                     let k = node.key_at(i);
                     let v = node.val_at(i);
@@ -635,9 +584,9 @@ impl<'brand, K, V> ZeroCopyMapOps<'brand, K, V> for BrandedSkipList<'brand, K, V
         F: Fn(&K, &V) -> bool,
     {
          let mut curr = self.head_links[0];
-        while curr != NONE {
+        while curr.is_some() {
             unsafe {
-                let node = self.nodes.get_unchecked(token, curr as usize);
+                let node = self.nodes.get_unchecked(token, curr.index());
                 for i in 0..node.len as usize {
                     if !f(node.key_at(i), node.val_at(i)) {
                         return false;
@@ -655,7 +604,7 @@ impl<'brand, K, V> ZeroCopyMapOps<'brand, K, V> for BrandedSkipList<'brand, K, V
 pub struct Iter<'a, 'brand, K, V> {
     list: &'a BrandedSkipList<'brand, K, V>,
     token: &'a GhostToken<'brand>,
-    curr: u32,
+    curr: NodeIdx<'brand>,
     idx: usize,
 }
 
@@ -663,19 +612,18 @@ impl<'a, 'brand, K, V> Iterator for Iter<'a, 'brand, K, V> {
     type Item = (&'a K, &'a V);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.curr == NONE {
+        if self.curr.is_none() {
             return None;
         }
 
         unsafe {
-            let node = self.list.nodes.get_unchecked(self.token, self.curr as usize);
+            let node = self.list.nodes.get_unchecked(self.token, self.curr.index());
             if self.idx < node.len as usize {
                 let k = node.key_at(self.idx);
                 let v = node.val_at(self.idx);
                 self.idx += 1;
                 return Some((k, v));
             } else {
-                // Move to next chunk
                 let offset = node.link_offset as usize;
                 self.curr = *self.list.links.get_unchecked(self.token, offset);
                 self.idx = 0;
@@ -688,7 +636,7 @@ impl<'a, 'brand, K, V> Iterator for Iter<'a, 'brand, K, V> {
 pub struct IterMut<'a, 'brand, K, V> {
     list: &'a BrandedSkipList<'brand, K, V>,
     token: &'a mut GhostToken<'brand>,
-    curr: u32,
+    curr: NodeIdx<'brand>,
     idx: usize,
 }
 
@@ -696,21 +644,12 @@ impl<'a, 'brand, K, V> Iterator for IterMut<'a, 'brand, K, V> {
     type Item = (&'a K, &'a mut V);
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.curr == NONE {
+        if self.curr.is_none() {
             return None;
         }
 
         unsafe {
-            // Need to re-borrow node to get mutable reference
-            // This is safe because we only yield one element at a time
-            // and `GhostToken` linearity is maintained by `&'a mut GhostToken` in struct.
-            // But we need to use `get_unchecked_mut` which requires `&mut Token`.
-            // We have it.
-
-            // To avoid borrow checker issues with `self.token`, we use raw pointers or unsafe reborrow.
-            // Standard pattern: split borrow.
-
-            let node = self.list.nodes.get_unchecked_mut(self.token, self.curr as usize);
+            let node = self.list.nodes.get_unchecked_mut(self.token, self.curr.index());
 
             if self.idx < node.len as usize {
                 let k_ptr = node.key_at(self.idx) as *const K;
@@ -720,8 +659,6 @@ impl<'a, 'brand, K, V> Iterator for IterMut<'a, 'brand, K, V> {
 
                 return Some((&*k_ptr, &mut *v_ptr));
             } else {
-                // Move next
-                // Read next link using shared access (safe)
                 let offset = node.link_offset as usize;
                 let next_curr = *self.list.links.get_unchecked(self.token, offset);
 
