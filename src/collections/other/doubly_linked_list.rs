@@ -417,6 +417,98 @@ impl<'brand, T> Default for BrandedDoublyLinkedList<'brand, T> {
     }
 }
 
+impl<'brand, T> FromIterator<T> for BrandedDoublyLinkedList<'brand, T> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        let items: Vec<T> = iter.into_iter().collect();
+        let len = items.len();
+
+        if len == 0 {
+            return Self::new();
+        }
+
+        let mut storage = BrandedVec::with_capacity(len);
+
+        for (i, item) in items.into_iter().enumerate() {
+            let prev = if i == 0 { None } else { Some(i - 1) };
+            let next = if i == len - 1 { None } else { Some(i + 1) };
+
+            let node = Node {
+                value: item,
+                prev,
+                next,
+            };
+
+            storage.push(Slot::Occupied(node));
+        }
+
+        Self {
+            storage,
+            head: Some(0),
+            tail: Some(len - 1),
+            free_head: None,
+            len,
+        }
+    }
+}
+
+/// Consuming iterator for BrandedDoublyLinkedList.
+pub struct IntoIter<T> {
+    slots: Vec<Option<Slot<T>>>,
+    current: Option<usize>,
+    len: usize,
+}
+
+impl<T> Iterator for IntoIter<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let idx = self.current?;
+        if let Some(slot) = self.slots.get_mut(idx).and_then(|s| s.take()) {
+            match slot {
+                Slot::Occupied(node) => {
+                    self.current = node.next;
+                    self.len -= 1;
+                    Some(node.value)
+                }
+                Slot::Free(_) => {
+                    // Should not happen if following valid links
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.len, Some(self.len))
+    }
+}
+
+impl<T> ExactSizeIterator for IntoIter<T> {
+    fn len(&self) -> usize {
+        self.len
+    }
+}
+
+impl<'brand, T> IntoIterator for BrandedDoublyLinkedList<'brand, T> {
+    type Item = T;
+    type IntoIter = IntoIter<T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        let len = self.len;
+        let head = self.head;
+        // BrandedVec::into_iter() returns Iterator<Item = Slot<T>>
+        let slots: Vec<Option<Slot<T>>> = self.storage.into_iter().map(Some).collect();
+
+        IntoIter {
+            slots,
+            current: head,
+            len,
+        }
+    }
+}
+
 impl<'brand, T> ZeroCopyOps<'brand, T> for BrandedDoublyLinkedList<'brand, T> {
     fn find_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<&'a T>
     where

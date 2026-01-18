@@ -365,6 +365,15 @@ impl<'brand, T> BrandedVec<'brand, T> {
     {
         self.iter(token).max_by(|a, b| f(a, b))
     }
+
+    /// Creates a draining iterator that removes the specified range in the vector
+    /// and yields the removed items.
+    pub fn drain<R>(&mut self, range: R) -> impl Iterator<Item = T> + '_
+    where
+        R: std::ops::RangeBounds<usize>,
+    {
+        self.inner.drain(range).map(GhostCell::into_inner)
+    }
 }
 
 impl<'brand, T> crate::collections::BrandedCollection<'brand> for BrandedVec<'brand, T> {
@@ -408,6 +417,29 @@ impl<'brand, T> crate::collections::ZeroCopyOps<'brand, T> for BrandedVec<'brand
 impl<'brand, T> Default for BrandedVec<'brand, T> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl<'brand, T> FromIterator<T> for BrandedVec<'brand, T> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        Self {
+            inner: iter.into_iter().map(GhostCell::new).collect(),
+        }
+    }
+}
+
+impl<'brand, T> IntoIterator for BrandedVec<'brand, T> {
+    type Item = T;
+    type IntoIter = std::iter::Map<std::vec::IntoIter<GhostCell<'brand, T>>, fn(GhostCell<'brand, T>) -> T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.into_iter().map(GhostCell::into_inner)
+    }
+}
+
+impl<'brand, T> Extend<T> for BrandedVec<'brand, T> {
+    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        self.inner.extend(iter.into_iter().map(GhostCell::new));
     }
 }
 
