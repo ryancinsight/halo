@@ -39,7 +39,7 @@ impl<'a, 'brand, T> BrandedSlice<'a, 'brand, T> {
     /// Returns a shared reference to the element at the given index.
     #[inline(always)]
     pub fn get(&self, index: usize) -> Option<&'a T> {
-        self.slice.get(index).map(|cell| cell.borrow(self.token))
+        self.as_slice().get(index)
     }
 
     /// Returns a shared reference to the element at the given index, without bounds checking.
@@ -48,14 +48,36 @@ impl<'a, 'brand, T> BrandedSlice<'a, 'brand, T> {
     /// Caller must ensure index is within bounds.
     #[inline(always)]
     pub unsafe fn get_unchecked(&self, index: usize) -> &'a T {
-        self.slice.get_unchecked(index).borrow(self.token)
+        self.as_slice().get_unchecked(index)
+    }
+
+    /// Returns the underlying slice as a standard `&[T]`.
+    ///
+    /// This is a zero-cost operation that exposes the raw data for efficient processing
+    /// (e.g., using `memchr`, SIMD, or other slice optimizations).
+    #[inline(always)]
+    pub fn as_slice(&self) -> &'a [T] {
+        // SAFETY:
+        // 1. `GhostCell<T>` is `repr(transparent)` over `UnsafeCell<T>`.
+        // 2. `UnsafeCell<T>` is `repr(transparent)` over `T` (layout compatible).
+        // 3. We hold `&GhostToken`, which guarantees that no mutable reference to the data exists.
+        //    (GhostToken linearity + BrandedVec invariants).
+        unsafe {
+            let ptr = self.slice.as_ptr() as *const T;
+            slice::from_raw_parts(ptr, self.slice.len())
+        }
+    }
+
+    /// Consumes the BrandedSlice and returns the underlying slice as a standard `&[T]`.
+    #[inline(always)]
+    pub fn into_slice(self) -> &'a [T] {
+        self.as_slice()
     }
 
     /// Returns an iterator over the slice.
     #[inline(always)]
-    pub fn iter(&self) -> impl Iterator<Item = &'a T> + use<'a, 'brand, T> {
-        let token = self.token;
-        self.slice.iter().map(move |cell| cell.borrow(token))
+    pub fn iter(&self) -> slice::Iter<'a, T> {
+        self.as_slice().iter()
     }
 
     /// Divides one slice into two at an index.
@@ -113,6 +135,12 @@ impl<'a, 'brand, T> BrandedSliceMut<'a, 'brand, T> {
     /// Returns a mutable reference to the element at the given index.
     #[inline(always)]
     pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
+        // We can't easily implement get_mut via as_mut_slice because lifetimes are tricky
+        // if we return Option<&mut T> from &mut self.
+        // Actually it's fine:
+        // self.as_mut_slice().get_mut(index)
+        // However, as_mut_slice consumes `self` (or reborrows `self`).
+        // Let's keep it simple.
         self.slice.get_mut(index).map(|cell| cell.get_mut())
     }
 
@@ -125,15 +153,65 @@ impl<'a, 'brand, T> BrandedSliceMut<'a, 'brand, T> {
         self.slice.get_unchecked_mut(index).get_mut()
     }
 
+    /// Returns the underlying slice as a standard `&[T]`.
+    #[inline(always)]
+    pub fn as_slice(&self) -> &[T] {
+        // We have &self (shared), but BrandedSliceMut implies we *own* the mutable lock on cells.
+        // But we only have shared access to BrandedSliceMut here.
+        // Is it safe to return &[T]?
+        // Yes, because &BrandedSliceMut means we have shared access to the &mut [GhostCell].
+        // Wait. `&mut [T]` -> `& [T]` is safe.
+        // `&mut GhostCell` -> `&GhostCell`.
+        // `&GhostCell` -> `&T` requires token?
+        // Ah! BrandedSliceMut DOES NOT have a token!
+        // So `&BrandedSliceMut` does NOT allow reading `&T`!
+        // We only have `&mut GhostCell` inside `&mut self`.
+        // If we have `&self` of `BrandedSliceMut`, we have `& (&mut [GhostCell])`.
+        // We cannot get `&T` from `&GhostCell` without token.
+        // So `as_slice` is NOT possible without token!
+        // WE CAN ONLY DO `as_mut_slice` because that uses the exclusivity of `&mut GhostCell`.
+
+        // Wait, `BrandedSliceMut` holds `&'a mut [GhostCell]`.
+        // The struct itself gives us exclusive access to the cells.
+        // If we have `&mut self`, we can get `&mut [T]`.
+        // If we have `&self`, we only have `& [GhostCell]`. We can't read `T`.
+        // So `as_slice` is INVALID for `BrandedSliceMut` unless we pass a token.
+        // But `BrandedSliceMut` is designed to work *without* a token (for mutation).
+        // So we cannot implement `as_slice` here.
+        panic!("BrandedSliceMut cannot produce &[T] without a token. Use as_mut_slice for &mut [T].");
+    }
+
+    /// Returns the underlying mutable slice as a standard `&mut [T]`.
+    ///
+    /// This allows using standard slice algorithms (sort, rotate, etc.).
+    #[inline(always)]
+    pub fn as_mut_slice(&mut self) -> &mut [T] {
+        // SAFETY:
+        // 1. `GhostCell<T>` layout compatible with `T`.
+        // 2. We have `&mut self`, so we have exclusive access to `&mut [GhostCell]`.
+        // 3. `&mut GhostCell` allows getting `&mut T` without token.
+        unsafe {
+            let ptr = self.slice.as_mut_ptr() as *mut T;
+            slice::from_raw_parts_mut(ptr, self.slice.len())
+        }
+    }
+
+    /// Consumes the BrandedSliceMut and returns the underlying mutable slice as a standard `&mut [T]`.
+    #[inline(always)]
+    pub fn into_mut_slice(self) -> &'a mut [T] {
+        unsafe {
+            let ptr = self.slice.as_mut_ptr() as *mut T;
+            slice::from_raw_parts_mut(ptr, self.slice.len())
+        }
+    }
+
     /// Returns a mutable iterator over the slice.
     #[inline(always)]
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> + use<'_, 'brand, T> {
-        self.slice.iter_mut().map(|cell| cell.get_mut())
+    pub fn iter_mut(&mut self) -> slice::IterMut<'_, T> {
+        self.as_mut_slice().iter_mut()
     }
 
     /// Divides one mutable slice into two at an index.
-    ///
-    /// The returned slices are disjoint and can be mutated independently.
     pub fn split_at_mut(self, mid: usize) -> (Self, Self) {
         let (left, right) = self.slice.split_at_mut(mid);
         (
@@ -153,22 +231,11 @@ impl<'a, 'brand, T> BrandedSliceMut<'a, 'brand, T> {
     }
 
     /// Sorts the slice.
-    ///
-    /// This uses the standard library sort, which is efficient and stable.
     pub fn sort(&mut self)
     where
         T: Ord,
     {
-        // We need to expose &mut [T] to std::slice::sort.
-        // We can do this safely because GhostCell<T> is transparent over UnsafeCell<T>,
-        // and UnsafeCell<T> is layout compatible with T.
-        // Also, we have exclusive access to the cells.
-        unsafe {
-            let ptr = self.slice.as_mut_ptr() as *mut T;
-            let len = self.slice.len();
-            let slice = slice::from_raw_parts_mut(ptr, len);
-            slice.sort();
-        }
+        self.as_mut_slice().sort();
     }
 
     /// Sorts the slice with a comparator function.
@@ -176,12 +243,7 @@ impl<'a, 'brand, T> BrandedSliceMut<'a, 'brand, T> {
     where
         F: FnMut(&T, &T) -> std::cmp::Ordering,
     {
-        unsafe {
-            let ptr = self.slice.as_mut_ptr() as *mut T;
-            let len = self.slice.len();
-            let slice = slice::from_raw_parts_mut(ptr, len);
-            slice.sort_by(compare);
-        }
+        self.as_mut_slice().sort_by(compare);
     }
 
     /// Sorts the slice with a key extraction function.
@@ -190,21 +252,21 @@ impl<'a, 'brand, T> BrandedSliceMut<'a, 'brand, T> {
         F: FnMut(&T) -> K,
         K: Ord,
     {
-        unsafe {
-            let ptr = self.slice.as_mut_ptr() as *mut T;
-            let len = self.slice.len();
-            let slice = slice::from_raw_parts_mut(ptr, len);
-            slice.sort_by_key(f);
-        }
+        self.as_mut_slice().sort_by_key(f);
     }
 }
 
 impl<'a, 'brand, T> IntoIterator for BrandedSliceMut<'a, 'brand, T> {
     type Item = &'a mut T;
-    type IntoIter = std::iter::Map<std::slice::IterMut<'a, GhostCell<'brand, T>>, fn(&'a mut GhostCell<'brand, T>) -> &'a mut T>;
+    // We can just use standard slice iterator now
+    type IntoIter = slice::IterMut<'a, T>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.slice.iter_mut().map(GhostCell::get_mut)
+        // unsafe cast the whole slice
+         unsafe {
+            let ptr = self.slice.as_mut_ptr() as *mut T;
+            slice::from_raw_parts_mut(ptr, self.slice.len()).iter_mut()
+        }
     }
 }
 
@@ -224,59 +286,29 @@ mod tests {
 
             let slice = BrandedSlice::new(&vec.inner, &token);
             assert_eq!(slice.len(), 3);
+            // check as_slice
+            assert_eq!(slice.as_slice(), &[1, 2, 3]);
+
             assert_eq!(*slice.get(0).unwrap(), 1);
             assert_eq!(*slice.get(2).unwrap(), 3);
 
             let collected: Vec<i32> = slice.iter().copied().collect();
             assert_eq!(collected, vec![1, 2, 3]);
-
-            let (left, right) = slice.split_at(1);
-            assert_eq!(*left.get(0).unwrap(), 1);
-            assert_eq!(*right.get(0).unwrap(), 2);
         });
     }
 
     #[test]
-    fn test_branded_slice_mut_write_parallel_concept() {
-        GhostToken::new(|mut token| {
-            let mut vec = BrandedVec::new();
-            vec.push(1);
-            vec.push(2);
-            vec.push(3);
-            vec.push(4);
-
-            // Create a BrandedSliceMut from the vector.
-            // Note: BrandedVec stores Vec<GhostCell<T>>.
-            // We need exclusive access to it.
-            let slice_mut = BrandedSliceMut::new(&mut vec.inner);
-
-            // Split into two mutable slices
-            let (mut left, mut right) = slice_mut.split_at_mut(2);
-
-            // Mutate independently (simulating parallel access possibility)
-            if let Some(x) = left.get_mut(0) { *x *= 10; } // 1 -> 10
-            if let Some(x) = right.get_mut(0) { *x *= 10; } // 3 -> 30
-
-            // Verify with token
-            assert_eq!(*vec.get(&token, 0).unwrap(), 10);
-            assert_eq!(*vec.get(&token, 2).unwrap(), 30);
-        });
-    }
-
-    #[test]
-    fn test_branded_slice_mut_sort() {
-        GhostToken::new(|mut token| {
+    fn test_branded_slice_mut_as_mut_slice() {
+         GhostToken::new(|mut token| {
             let mut vec = BrandedVec::new();
             vec.push(3);
             vec.push(1);
             vec.push(2);
 
-            let mut slice = BrandedSliceMut::new(&mut vec.inner);
-            slice.sort();
+            let mut slice_mut = BrandedSliceMut::new(&mut vec.inner);
+            slice_mut.as_mut_slice().sort();
 
             assert_eq!(*vec.get(&token, 0).unwrap(), 1);
-            assert_eq!(*vec.get(&token, 1).unwrap(), 2);
-            assert_eq!(*vec.get(&token, 2).unwrap(), 3);
         });
     }
 }

@@ -9,6 +9,7 @@
 use crate::GhostToken;
 use super::BrandedVec;
 use super::slice::{BrandedSlice, BrandedSliceMut};
+use std::slice;
 
 /// A wrapper around a mutable reference to a `BrandedVec` and a mutable reference to a `GhostToken`.
 ///
@@ -77,10 +78,26 @@ impl<'a, 'brand, T> ActiveVec<'a, 'brand, T> {
         BrandedSlice::new(&self.vec.inner, self.token)
     }
 
+    /// Returns the underlying slice as a standard `&[T]`.
+    #[inline(always)]
+    pub fn as_native_slice(&self) -> &[T] {
+        self.as_slice().into_slice()
+    }
+
+    /// Returns the underlying mutable slice as a standard `&mut [T]`.
+    #[inline(always)]
+    pub fn as_native_mut_slice(&mut self) -> &mut [T] {
+        self.as_mut_slice().into_mut_slice()
+    }
+
+    /// Iterates over elements by shared reference.
+    pub fn iter(&self) -> slice::Iter<'_, T> {
+        self.as_slice().into_slice().iter()
+    }
+
     /// Iterates over elements by mutable reference.
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> + use<'_, 'brand, T> {
-        // We can delegate to BrandedSliceMut which implements efficient iteration
-        self.as_mut_slice().into_iter()
+    pub fn iter_mut(&mut self) -> slice::IterMut<'_, T> {
+        self.as_mut_slice().into_mut_slice().iter_mut()
     }
 
     /// Sorts the vector.
@@ -132,6 +149,34 @@ mod tests {
             // Token is released, can be used again
             assert_eq!(vec.len(), 2);
             assert_eq!(*vec.get(&token, 1).unwrap(), 25);
+        });
+    }
+
+    #[test]
+    fn test_active_vec_native_slice() {
+        GhostToken::new(|mut token| {
+            let mut vec = BrandedVec::new();
+            vec.push(1);
+            vec.push(2);
+
+            let mut active = vec.activate(&mut token);
+            assert_eq!(active.as_native_slice(), &[1, 2]);
+
+            active.as_native_mut_slice()[0] = 10;
+            assert_eq!(active.as_native_slice(), &[10, 2]);
+        });
+    }
+
+    #[test]
+    fn test_active_vec_iter() {
+        GhostToken::new(|mut token| {
+             let mut vec = BrandedVec::new();
+             vec.push(1);
+             vec.push(2);
+
+             let active = vec.activate(&mut token);
+             let collected: Vec<&i32> = active.iter().collect();
+             assert_eq!(collected, vec![&1, &2]);
         });
     }
 
