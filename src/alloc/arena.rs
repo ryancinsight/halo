@@ -212,7 +212,7 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
     /// - Objects below generation threshold: allocated in nursery (better cache locality for recent allocations)
     /// - Objects at/above threshold: allocated in mature generation (stable storage for longer-lived objects)
     /// - No automatic promotion or reclamation: objects stay in their generation until arena destruction
-    #[inline]
+    #[inline(always)]
     pub fn alloc(&self, token: &mut GhostToken<'brand>, value: T) -> BrandedArenaKey<'brand> {
         let state = self.state.borrow_mut(token);
         let total_len = state.nursery.len() + state.mature.len();
@@ -636,7 +636,7 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
     /// # Panics
     /// Panics if `key` is out of bounds for this arena (should be impossible for keys produced by
     /// `alloc` on this arena).
-    #[inline]
+    #[inline(always)]
     pub fn get_key<'a>(&'a self, token: &'a GhostToken<'brand>, key: BrandedArenaKey<'brand>) -> &'a T {
         let state = self.state.borrow(token);
         let raw_index = key.index();
@@ -657,7 +657,7 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
     /// # Panics
     /// Panics if `key` is out of bounds for this arena (should be impossible for keys produced by
     /// `alloc` on this arena).
-    #[inline]
+    #[inline(always)]
     pub fn get_key_mut<'a>(
         &'a self,
         token: &'a mut GhostToken<'brand>,

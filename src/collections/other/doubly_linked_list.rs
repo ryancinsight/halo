@@ -16,9 +16,12 @@ struct ListNode<T> {
     value: T,
 }
 
+use crate::alloc::pool::PoolSlot;
+use crate::collections::vec::BrandedVec;
+
 /// Zero-cost iterator for BrandedDoublyLinkedList.
 pub struct BrandedDoublyLinkedListIter<'a, 'brand, T> {
-    list: &'a BrandedDoublyLinkedList<'brand, T>,
+    storage: &'a BrandedVec<'brand, PoolSlot<ListNode<T>>>,
     current: Option<usize>,
     token: &'a GhostToken<'brand>,
 }
@@ -28,8 +31,10 @@ impl<'a, 'brand, T> Iterator for BrandedDoublyLinkedListIter<'a, 'brand, T> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let idx = self.current?;
-        // SAFETY: Internal indices are guaranteed to be valid and synchronized.
-        let node = unsafe { self.list.pool.get(self.token, idx) };
+        // SAFETY: We have storage ref and token. Indices are valid.
+        let slot = unsafe { self.storage.get_unchecked(self.token, idx) };
+        // Access union field value. Pool guarantees T is init if allocated.
+        let node = unsafe { &slot.value };
         self.current = node.next;
         Some(&node.value)
     }
@@ -190,7 +195,7 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
     /// Iterates over the list elements.
     pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> BrandedDoublyLinkedListIter<'a, 'brand, T> {
         BrandedDoublyLinkedListIter {
-            list: self,
+            storage: self.pool.storage(token),
             current: self.head,
             token,
         }

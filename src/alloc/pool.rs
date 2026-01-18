@@ -17,8 +17,8 @@ use core::mem::ManuallyDrop;
 /// A slot in the pool.
 #[derive(Copy, Clone)]
 pub(crate) union PoolSlot<T> {
-    value: ManuallyDrop<T>,
-    next_free: usize,
+    pub(crate) value: ManuallyDrop<T>,
+    pub(crate) next_free: usize,
 }
 
 /// Internal state of the pool.
@@ -57,6 +57,7 @@ impl<'brand, T> BrandedPool<'brand, T> {
     }
 
     /// Allocates a value in the pool, returning its index.
+    #[inline]
     pub fn alloc(&self, token: &mut GhostToken<'brand>, value: T) -> usize {
         let state = self.state.borrow_mut(token);
 
@@ -91,6 +92,7 @@ impl<'brand, T> BrandedPool<'brand, T> {
     /// # Safety
     /// The `index` must be currently allocated (occupied).
     /// Double-freeing or freeing an invalid index causes undefined behavior.
+    #[inline]
     pub unsafe fn free(&self, token: &mut GhostToken<'brand>, index: usize) {
         let state = self.state.borrow_mut(token);
 
@@ -110,6 +112,7 @@ impl<'brand, T> BrandedPool<'brand, T> {
     ///
     /// # Safety
     /// The `index` must be currently allocated (occupied).
+    #[inline]
     pub unsafe fn take(&self, token: &mut GhostToken<'brand>, index: usize) -> T {
         let state = self.state.borrow_mut(token);
 
@@ -131,6 +134,7 @@ impl<'brand, T> BrandedPool<'brand, T> {
     ///
     /// # Safety
     /// `index` must be occupied.
+    #[inline]
     pub unsafe fn get<'a>(&'a self, token: &'a GhostToken<'brand>, index: usize) -> &'a T {
         let state = self.state.borrow(token);
         let slot = state.storage.get_unchecked(token, index);
@@ -141,6 +145,7 @@ impl<'brand, T> BrandedPool<'brand, T> {
     ///
     /// # Safety
     /// `index` must be occupied.
+    #[inline]
     pub unsafe fn get_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>, index: usize) -> &'a mut T {
         let state = self.state.borrow_mut(token);
         let slot = state.storage.get_unchecked_mut_exclusive(index);
@@ -153,24 +158,37 @@ impl<'brand, T> BrandedPool<'brand, T> {
     ///
     /// # Safety
     /// `index` must be occupied.
+    #[inline]
     pub unsafe fn get_mut_exclusive<'a>(&'a mut self, index: usize) -> &'a mut T {
         let state = self.state.get_mut();
         let slot = state.storage.get_unchecked_mut_exclusive(index);
         &mut slot.value
     }
 
+    /// Returns a reference to the underlying storage.
+    ///
+    /// Useful for caching the storage reference during iteration to avoid repeated
+    /// state borrowing.
+    #[inline]
+    pub fn storage<'a>(&'a self, token: &'a GhostToken<'brand>) -> &'a BrandedVec<'brand, PoolSlot<T>> {
+        &self.state.borrow(token).storage
+    }
+
     /// Returns the raw capacity of the underlying storage.
     /// Used for iterating in Drop.
+    #[inline]
     pub fn capacity_len(&mut self) -> usize {
         self.state.get_mut().storage.len()
     }
 
     /// Returns the number of allocated items.
+    #[inline]
     pub fn len(&self, token: &GhostToken<'brand>) -> usize {
         self.state.borrow(token).len
     }
 
     /// Returns true if empty.
+    #[inline]
     pub fn is_empty(&self, token: &GhostToken<'brand>) -> bool {
         self.len(token) == 0
     }
