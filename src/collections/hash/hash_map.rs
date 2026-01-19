@@ -484,7 +484,7 @@ where
         })
     }
 
-    pub fn values<'a>(&'a self, token: &'a GhostToken<'brand>) -> impl Iterator<Item = &'a V> {
+    pub fn values<'a>(&'a self, token: &'a GhostToken<'brand>) -> impl Iterator<Item = &'a V> + use<'a, 'brand, K, V, S> {
         self.ctrl[0..self.capacity].iter().enumerate().filter_map(move |(i, &c)| {
             if c & 0x80 == 0 {
                 unsafe {

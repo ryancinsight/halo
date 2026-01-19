@@ -511,7 +511,7 @@ where
 
     // Iterators
 
-    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> impl Iterator<Item = (&'a K, &'a V)> {
+    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> impl Iterator<Item = (&'a K, &'a V)> + use<'a, 'brand, K, V, S> {
         Iter {
             map: self,
             token,

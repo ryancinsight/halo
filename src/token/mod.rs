@@ -14,14 +14,17 @@
 use core::marker::PhantomData;
 
 pub mod shared;
+pub mod invariant;
+
 pub use shared::SharedGhostToken;
+pub use invariant::InvariantLifetime;
 
 /// A zero-sized token that controls access to GhostCells
 ///
 /// The token uses a phantom type parameter to create branded types,
 /// ensuring type-level separation between different token scopes.
 #[derive(Debug)]
-pub struct GhostToken<'brand>(PhantomData<&'brand mut ()>);
+pub struct GhostToken<'brand>(InvariantLifetime<'brand>);
 
 impl<'brand> GhostToken<'brand> {
     /// Creates a new token and executes a closure with it
@@ -46,7 +49,7 @@ impl<'brand> GhostToken<'brand> {
     where
         F: for<'new_brand> FnOnce(GhostToken<'new_brand>) -> R,
     {
-        f(GhostToken(PhantomData))
+        f(GhostToken(InvariantLifetime::default()))
     }
 
     // NOTE: we intentionally keep the public surface small. If you need a

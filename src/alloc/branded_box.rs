@@ -1,10 +1,11 @@
 use core::marker::PhantomData;
-use core::ptr::NonNull;
+use core::ptr::{self, NonNull};
 use core::alloc::Layout;
 use std::alloc::{alloc, dealloc, handle_alloc_error};
 use crate::GhostToken;
 use super::static_rc::StaticRc;
 use crate::cell::GhostCell;
+use crate::token::InvariantLifetime;
 
 /// A uniquely owned heap allocation that is tied to a specific type-level brand.
 ///
@@ -12,46 +13,44 @@ use crate::cell::GhostCell;
 /// and branding, independent of `Box<T>`.
 pub struct BrandedBox<'id, T> {
     ptr: NonNull<T>,
-    _marker: PhantomData<fn(&'id ()) -> &'id ()>,
+    _brand: InvariantLifetime<'id>,
+    _marker: PhantomData<T>,
 }
 
 impl<'id, T> BrandedBox<'id, T> {
     /// Creates a new `BrandedBox` containing `value`.
     ///
-    /// The existence of `&mut GhostToken<'id>` proves we are in the scope of brand `'id`.
-    pub fn new(value: T, _token: &mut GhostToken<'id>) -> Self {
+    /// The allocation uses `std::alloc::alloc`.
+    pub fn new(value: T) -> Self {
         let layout = Layout::new::<T>();
-        let ptr = if layout.size() == 0 {
-            NonNull::dangling()
+        // SAFETY: T is Sized, layout is valid.
+        let raw = if layout.size() == 0 {
+             NonNull::dangling().as_ptr()
         } else {
-            // SAFETY: Layout is correct for T.
-            let raw = unsafe { alloc(layout) } as *mut T;
-            if raw.is_null() {
-                handle_alloc_error(layout);
-            }
-            // SAFETY: pointer is valid and non-null.
-            unsafe {
-                NonNull::new_unchecked(raw)
-            }
+             unsafe { alloc(layout) as *mut T }
         };
 
-        // SAFETY: ptr is valid for writes (dangling is valid for ZST, alloc ptr is valid for sized).
-        unsafe {
-            ptr::write(ptr.as_ptr(), value);
+        if raw.is_null() {
+             handle_alloc_error(layout);
         }
 
-        Self {
-            ptr,
-            _marker: PhantomData,
+        // SAFETY: raw is non-null.
+        unsafe {
+            ptr::write(raw, value);
+            Self {
+                ptr: NonNull::new_unchecked(raw),
+                _brand: InvariantLifetime::default(),
+                _marker: PhantomData,
+            }
         }
     }
 
     /// Access the inner value using the token.
     ///
     /// Requires `&mut self` (unique ownership of box) and `&mut GhostToken` (unique ownership of token/brand access).
-    /// This satisfies the AXM requirement.
     pub fn borrow_mut<'a>(&'a mut self, _token: &'a mut GhostToken<'id>) -> &'a mut T {
         // SAFETY: We own the allocation and have exclusive access via &mut self.
+        // The token ensures we have the right brand.
         unsafe { self.ptr.as_mut() }
     }
 
@@ -63,24 +62,22 @@ impl<'id, T> BrandedBox<'id, T> {
 
     /// Downgrades the BrandedBox into a shared StaticRc.
     ///
-    /// Converts `BrandedBox<'id, T>` into `StaticRc<GhostCell<'id, T>, D, D>`.
+    /// Converts `BrandedBox<'id, T>` into `StaticRc<'id, GhostCell<'id, T>, D, D>`.
     /// This allows the object to enter a shared/cyclic structure while maintaining the brand.
     /// The result has full ownership (N=D), which can then be split using `StaticRc::split`.
-    pub fn into_shared<const D: usize>(self) -> StaticRc<GhostCell<'id, T>, D, D> {
+    pub fn into_shared<const D: usize>(self) -> StaticRc<'id, GhostCell<'id, T>, D, D> {
         let ptr = self.ptr;
         // Forget self so we don't deallocate.
         std::mem::forget(self);
 
         // Cast to GhostCell pointer.
         // SAFETY: GhostCell<T> is #[repr(transparent)] over T (transitively), so layout matches.
-        // Allocator was std::alloc::alloc with Layout::new::<T>(), which matches Layout::new::<GhostCell<T>>().
         let cell_ptr = ptr.as_ptr() as *mut GhostCell<'id, T>;
 
         // SAFETY:
         // 1. ptr is a valid heap allocation of T.
         // 2. We transferred ownership from `self` (consumed) to `StaticRc`.
-        // 3. The allocation was created via `std::alloc::alloc`, which is compatible with `Box::from_raw`
-        //    (which StaticRc uses for Drop) IF layout matches.
+        // 3. The allocation was created via `std::alloc::alloc`, which is compatible with `StaticRc::drop` (dealloc).
         unsafe {
              StaticRc::from_raw(NonNull::new_unchecked(cell_ptr))
         }
@@ -89,19 +86,19 @@ impl<'id, T> BrandedBox<'id, T> {
 
 impl<'id, T> Drop for BrandedBox<'id, T> {
     fn drop(&mut self) {
-        let layout = Layout::new::<T>();
         // SAFETY: We own the pointer. It is valid to drop the value.
         unsafe {
-            std::ptr::drop_in_place(self.ptr.as_ptr());
-        }
+            ptr::drop_in_place(self.ptr.as_ptr());
 
-        if layout.size() != 0 {
-            // SAFETY: We own the pointer, it was allocated with alloc, and layout matches.
-            unsafe {
+            let layout = Layout::new::<T>();
+            if layout.size() != 0 {
                 dealloc(self.ptr.as_ptr() as *mut u8, layout);
             }
         }
     }
 }
 
-use core::ptr;
+// SAFETY: Send/Sync if T is Send/Sync.
+// The brand ensures safety, but thread safety depends on T.
+unsafe impl<'id, T: Send> Send for BrandedBox<'id, T> {}
+unsafe impl<'id, T: Sync> Sync for BrandedBox<'id, T> {}

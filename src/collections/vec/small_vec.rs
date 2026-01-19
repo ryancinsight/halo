@@ -139,7 +139,7 @@ impl<'brand, T, const N: usize> BrandedSmallVec<'brand, T, N> {
     }
 
     /// Iterates over elements by shared reference.
-    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> impl Iterator<Item = &'a T> + 'a {
+    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> impl Iterator<Item = &'a T> + 'a + use<'a, 'brand, T, N> {
         BrandedSmallVecIter {
             vec: self,
             index: 0,
