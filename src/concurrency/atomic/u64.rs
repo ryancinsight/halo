@@ -69,5 +69,3 @@ impl<'brand> GhostAtomicU64<'brand> {
 // SAFETY: `AtomicU64` is Send + Sync; brand is a ZST marker.
 unsafe impl<'brand> Send for GhostAtomicU64<'brand> {}
 unsafe impl<'brand> Sync for GhostAtomicU64<'brand> {}
-
-

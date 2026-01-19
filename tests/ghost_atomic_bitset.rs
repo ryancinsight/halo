@@ -21,9 +21,3 @@ fn atomic_bitset_basic() {
         assert!(!b.is_set(129));
     });
 }
-
-
-
-
-
-

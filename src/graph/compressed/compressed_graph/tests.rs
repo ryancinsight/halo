@@ -6,12 +6,7 @@ use crate::GhostToken;
 #[test]
 fn compressed_graph_basic_operations() {
     GhostToken::new(|_token| {
-        let adjacency = vec![
-            vec![1, 2, 3],
-            vec![0, 2],
-            vec![0, 1, 3],
-            vec![0, 2],
-        ];
+        let adjacency = vec![vec![1, 2, 3], vec![0, 2], vec![0, 1, 3], vec![0, 2]];
 
         let graph = GhostCompressedGraph::<64>::from_adjacency(&adjacency);
 
@@ -59,4 +54,3 @@ fn compression_stats() {
         // This demonstrates the research concept rather than guaranteed compression
     });
 }
-

@@ -20,8 +20,8 @@
 //! to perform bulk operations without per-byte token overhead, while trusting `BrandedVec`'s
 //! branding guarantees.
 
-use crate::{GhostCell, GhostToken};
 use crate::collections::BrandedVec;
+use crate::{GhostCell, GhostToken};
 use std::mem;
 
 /// A branded string compatible with GhostCell.
@@ -60,7 +60,7 @@ impl<'brand> BrandedString<'brand> {
         let bytes = s.into_bytes();
         let inner_vec = unsafe { mem::transmute::<Vec<u8>, Vec<GhostCell<'brand, u8>>>(bytes) };
         Self {
-            vec: BrandedVec { inner: inner_vec }
+            vec: BrandedVec { inner: inner_vec },
         }
     }
 
@@ -272,7 +272,7 @@ mod tests {
     #[should_panic]
     fn test_branded_string_truncate_panic() {
         let mut s = BrandedString::from("héllo"); // 'é' is 2 bytes
-        // 'h' is index 0. 'é' starts at 1. next char at 3.
+                                                  // 'h' is index 0. 'é' starts at 1. next char at 3.
         s.truncate(2); // Mid-char boundary of 'é'
     }
 

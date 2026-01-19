@@ -1,5 +1,8 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BatchSize};
-use halo::{GhostToken, collections::{BrandedHashSet, ActiveHashSet, ActivateHashSet}};
+use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
+use halo::{
+    collections::{ActivateHashSet, ActiveHashSet, BrandedHashSet},
+    GhostToken,
+};
 use std::collections::HashSet;
 
 fn bench_set_insert(c: &mut Criterion) {
@@ -16,7 +19,7 @@ fn bench_set_insert(c: &mut Criterion) {
     });
 
     group.bench_function("BrandedHashSet", |b| {
-         b.iter_batched(
+        b.iter_batched(
             || {},
             |()| {
                 // BrandedHashSet insertion is structural and does not require a token
@@ -58,7 +61,9 @@ fn bench_set_contains(c: &mut Criterion) {
         b.iter_batched(
             || {
                 let mut s = HashSet::new();
-                for i in 0..100 { s.insert(i); }
+                for i in 0..100 {
+                    s.insert(i);
+                }
                 s
             },
             |s| {
@@ -71,10 +76,12 @@ fn bench_set_contains(c: &mut Criterion) {
     });
 
     group.bench_function("BrandedHashSet", |b| {
-         b.iter_batched(
+        b.iter_batched(
             || {
                 let mut s = BrandedHashSet::new();
-                for i in 0..100 { s.insert(i); }
+                for i in 0..100 {
+                    s.insert(i);
+                }
                 s
             },
             |s| {
@@ -93,11 +100,13 @@ fn bench_set_contains(c: &mut Criterion) {
             |()| {
                 GhostToken::new(|mut token| {
                     let mut s = BrandedHashSet::new();
-                    for i in 0..100 { s.insert(i); }
+                    for i in 0..100 {
+                        s.insert(i);
+                    }
                     let active = s.activate(&mut token);
 
                     for i in 0..100 {
-                         black_box(active.contains(&i));
+                        black_box(active.contains(&i));
                     }
                 });
             },

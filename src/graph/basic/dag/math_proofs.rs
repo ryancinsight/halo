@@ -23,6 +23,3 @@ pub const fn longest_path_well_defined(node_count: usize, _edge_count: usize) ->
     // For the DP to be well-defined, we need a topological order.
     node_count > 0
 }
-
-
-

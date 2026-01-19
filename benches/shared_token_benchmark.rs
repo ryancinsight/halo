@@ -1,9 +1,9 @@
-use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId};
-use halo::{GhostToken, SharedGhostToken, BrandedHashMap};
-use std::sync::{Arc, RwLock, Barrier};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use halo::{BrandedHashMap, GhostToken, SharedGhostToken};
+use std::collections::HashMap;
+use std::sync::{Arc, Barrier, RwLock};
 use std::thread;
 use std::time::Duration;
-use std::collections::HashMap;
 
 fn benchmark_shared_token(c: &mut Criterion) {
     let mut group = c.benchmark_group("shared_token_vs_rwlock");

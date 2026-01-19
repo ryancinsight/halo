@@ -189,6 +189,3 @@ impl<'brand, const EDGE_CHUNK: usize> GhostAmtGraph<'brand, EDGE_CHUNK> {
         self.visited.try_visit(node, Ordering::AcqRel)
     }
 }
-
-
-

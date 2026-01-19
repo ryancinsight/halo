@@ -8,18 +8,16 @@
 //!   inherent hardware cost.
 //! - The goal is that the *wrapper* overhead is optimized away.
 
+/// Branded atomic bitsets.
+pub mod bitset;
 /// Branded `AtomicBool`.
 pub mod bool;
 /// Branded `AtomicU64`.
 pub mod u64;
 /// Branded `AtomicUsize`.
 pub mod usize;
-/// Branded atomic bitsets.
-pub mod bitset;
 
+pub use bitset::GhostAtomicBitset;
 pub use bool::GhostAtomicBool;
 pub use u64::GhostAtomicU64;
 pub use usize::GhostAtomicUsize;
-pub use bitset::GhostAtomicBitset;
-
-

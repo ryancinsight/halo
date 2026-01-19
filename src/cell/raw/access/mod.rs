@@ -12,7 +12,5 @@
 //! This module does **not** make operations safe by itself. It provides *uniform*
 //! building blocks whose safety conditions are documented and can be audited in one place.
 
-pub(crate) mod maybe_uninit;
 pub(crate) mod ghost_unsafe_cell;
-
-
+pub(crate) mod maybe_uninit;

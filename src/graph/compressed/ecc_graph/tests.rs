@@ -6,12 +6,7 @@ use crate::GhostToken;
 #[test]
 fn ecc_graph_basic_operations() {
     GhostToken::new(|_token| {
-        let adjacency = vec![
-            vec![1, 2, 3],
-            vec![0, 2],
-            vec![0, 1, 3],
-            vec![0, 2],
-        ];
+        let adjacency = vec![vec![1, 2, 3], vec![0, 2], vec![0, 1, 3], vec![0, 2]];
 
         let graph = GhostEccGraph::from_adjacency(&adjacency);
 
@@ -53,11 +48,7 @@ fn ecc_graph_triangle_counting() {
 fn ecc_graph_clustering_coefficient() {
     GhostToken::new(|_token| {
         // Complete graph K3
-        let adjacency = vec![
-            vec![1, 2],
-            vec![0, 2],
-            vec![0, 1],
-        ];
+        let adjacency = vec![vec![1, 2], vec![0, 2], vec![0, 1]];
 
         let graph = GhostEccGraph::from_adjacency(&adjacency);
 
@@ -73,11 +64,7 @@ fn ecc_graph_clustering_coefficient() {
 #[test]
 fn ecc_graph_stats() {
     GhostToken::new(|_token| {
-        let adjacency = vec![
-            vec![1, 2],
-            vec![0, 2],
-            vec![0, 1],
-        ];
+        let adjacency = vec![vec![1, 2], vec![0, 2], vec![0, 1]];
 
         let graph = GhostEccGraph::from_adjacency(&adjacency);
         let stats = graph.graph_stats();
@@ -93,12 +80,7 @@ fn ecc_graph_stats() {
 #[test]
 fn ecc_graph_bfs() {
     GhostToken::new(|_token| {
-        let adjacency = vec![
-            vec![1, 2],
-            vec![0, 2, 3],
-            vec![0, 1],
-            vec![1],
-        ];
+        let adjacency = vec![vec![1, 2], vec![0, 2, 3], vec![0, 1], vec![1]];
 
         let graph = GhostEccGraph::from_adjacency(&adjacency);
         let traversal = graph.bfs(0);
@@ -110,4 +92,3 @@ fn ecc_graph_bfs() {
         assert!(traversal.contains(&3));
     });
 }
-

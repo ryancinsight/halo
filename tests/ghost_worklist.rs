@@ -65,5 +65,3 @@ fn treiber_stack_multi_thread_unique_push_pop() {
         assert_eq!(s.pop(), None);
     });
 }
-
-

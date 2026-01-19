@@ -43,10 +43,10 @@
 //! - **Bulk operations**: O(n) with optimal cache behavior
 //! - **Memory overhead**: ~8 bytes per chunk + cache-aligned allocation
 
-use crate::{GhostCell, GhostToken};
 use crate::collections::BrandedChunkedVec;
-use core::marker::PhantomData;
+use crate::{GhostCell, GhostToken};
 use core::hint;
+use core::marker::PhantomData;
 
 /// Internal state of the arena, protected by GhostCell.
 #[repr(C)]
@@ -112,7 +112,8 @@ impl ArenaMemoryStats {
         let chunk_overhead = core::mem::size_of::<usize>() * 2; // initialized + data pointer overhead
         let element_size = core::mem::size_of::<crate::GhostCell<'static, ()>>(); // Approximate
 
-        let nursery_memory = self.nursery_chunks * (chunk_overhead + self.chunk_size * element_size);
+        let nursery_memory =
+            self.nursery_chunks * (chunk_overhead + self.chunk_size * element_size);
         let mature_memory = self.mature_chunks * (chunk_overhead + self.chunk_size * element_size);
 
         nursery_memory + mature_memory
@@ -147,7 +148,6 @@ impl ArenaMemoryStats {
 
         waste as f64 / total_capacity as f64
     }
-
 }
 
 /// A branded handle into a [`BrandedArena`].
@@ -164,7 +164,6 @@ impl ArenaMemoryStats {
 #[repr(transparent)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct BrandedArenaKey<'brand>(usize, PhantomData<fn(&'brand ()) -> &'brand ()>);
-
 
 impl<'brand> BrandedArenaKey<'brand> {
     #[inline(always)]
@@ -202,7 +201,7 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
                 mature: BrandedChunkedVec::new(),
                 generation_threshold,
                 allocation_epoch: 0,
-            })
+            }),
         }
     }
 
@@ -244,7 +243,11 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
     ///
     /// Returns keys for all allocated values.
     #[inline]
-    pub fn alloc_batch<I>(&self, token: &mut GhostToken<'brand>, values: I) -> Vec<BrandedArenaKey<'brand>>
+    pub fn alloc_batch<I>(
+        &self,
+        token: &mut GhostToken<'brand>,
+        values: I,
+    ) -> Vec<BrandedArenaKey<'brand>>
     where
         I: IntoIterator<Item = T>,
         I::IntoIter: ExactSizeIterator,
@@ -294,18 +297,17 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
     fn alloc_batch_simd_optimized<I>(
         state: &mut ArenaState<'brand, T, CHUNK>,
         values: I,
-        keys: &mut Vec<BrandedArenaKey<'brand>>
-    )
-    where
+        keys: &mut Vec<BrandedArenaKey<'brand>>,
+    ) where
         I: IntoIterator<Item = T>,
     {
         // Prefetch memory for better cache performance
         Self::prefetch_allocation_sites(state);
 
         for value in values {
-             let nursery_idx = state.nursery.push(value);
-             keys.push(BrandedArenaKey::new(nursery_idx | (1 << 63)));
-             state.allocation_epoch = state.allocation_epoch.wrapping_add(1);
+            let nursery_idx = state.nursery.push(value);
+            keys.push(BrandedArenaKey::new(nursery_idx | (1 << 63)));
+            state.allocation_epoch = state.allocation_epoch.wrapping_add(1);
         }
     }
 
@@ -315,7 +317,7 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
         state: &mut ArenaState<'brand, T, CHUNK>,
         values: I,
         nursery_capacity: usize,
-        keys: &mut Vec<BrandedArenaKey<'brand>>
+        keys: &mut Vec<BrandedArenaKey<'brand>>,
     ) where
         I: IntoIterator<Item = T>,
         I::IntoIter: Iterator,
@@ -481,7 +483,10 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
     /// Uses algorithms that perform well across different cache hierarchies
     /// without knowing cache sizes (Brooks, 2001).
     #[inline]
-    fn adapt_threshold_cache_oblivious_inner(state: &mut ArenaState<'brand, T, CHUNK>, chunk_size: usize) {
+    fn adapt_threshold_cache_oblivious_inner(
+        state: &mut ArenaState<'brand, T, CHUNK>,
+        chunk_size: usize,
+    ) {
         let stats = Self::memory_stats_inner(state, chunk_size);
 
         // Cache-oblivious adaptation: use logarithmic scaling based on total allocations
@@ -498,9 +503,11 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
         }
 
         // Cache-oblivious bounds: ensure threshold is reasonable for typical cache sizes
-        let min_threshold = CHUNK / 8;  // Small enough for L1 cache efficiency
+        let min_threshold = CHUNK / 8; // Small enough for L1 cache efficiency
         let max_threshold = CHUNK * 32; // Large enough for L2/L3 cache efficiency
-        state.generation_threshold = state.generation_threshold.clamp(min_threshold, max_threshold);
+        state.generation_threshold = state
+            .generation_threshold
+            .clamp(min_threshold, max_threshold);
     }
 
     /// Optimizes memory layout for better cache performance.
@@ -573,7 +580,9 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
         // Clamp to reasonable bounds based on chunk size
         let min_threshold = CHUNK / 4;
         let max_threshold = CHUNK * 16;
-        state.generation_threshold = state.generation_threshold.clamp(min_threshold, max_threshold);
+        state.generation_threshold = state
+            .generation_threshold
+            .clamp(min_threshold, max_threshold);
     }
 
     /// Returns the generation threshold.
@@ -601,7 +610,10 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
         Self::memory_stats_inner(state, CHUNK)
     }
 
-    fn memory_stats_inner(state: &ArenaState<'brand, T, CHUNK>, chunk_size: usize) -> ArenaMemoryStats {
+    fn memory_stats_inner(
+        state: &ArenaState<'brand, T, CHUNK>,
+        chunk_size: usize,
+    ) -> ArenaMemoryStats {
         ArenaMemoryStats {
             total_elements: state.nursery.len() + state.mature.len(),
             nursery_elements: state.nursery.len(),
@@ -637,16 +649,26 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
     /// Panics if `key` is out of bounds for this arena (should be impossible for keys produced by
     /// `alloc` on this arena).
     #[inline(always)]
-    pub fn get_key<'a>(&'a self, token: &'a GhostToken<'brand>, key: BrandedArenaKey<'brand>) -> &'a T {
+    pub fn get_key<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+        key: BrandedArenaKey<'brand>,
+    ) -> &'a T {
         let state = self.state.borrow(token);
         let raw_index = key.index();
 
         // Check if this is a nursery key (high bit set)
         if raw_index & (1 << 63) != 0 {
             let nursery_index = raw_index & !(1 << 63); // Clear the generation bit
-            state.nursery.get(token, nursery_index).expect("BrandedArenaKey out of bounds")
+            state
+                .nursery
+                .get(token, nursery_index)
+                .expect("BrandedArenaKey out of bounds")
         } else {
-            state.mature.get(token, raw_index).expect("BrandedArenaKey out of bounds")
+            state
+                .mature
+                .get(token, raw_index)
+                .expect("BrandedArenaKey out of bounds")
         }
     }
 
@@ -669,9 +691,15 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
         // Check if this is a nursery key (high bit set)
         if raw_index & (1 << 63) != 0 {
             let nursery_index = raw_index & !(1 << 63); // Clear the generation bit
-            state.nursery.get_mut_exclusive(nursery_index).expect("BrandedArenaKey out of bounds")
+            state
+                .nursery
+                .get_mut_exclusive(nursery_index)
+                .expect("BrandedArenaKey out of bounds")
         } else {
-            state.mature.get_mut_exclusive(raw_index).expect("BrandedArenaKey out of bounds")
+            state
+                .mature
+                .get_mut_exclusive(raw_index)
+                .expect("BrandedArenaKey out of bounds")
         }
     }
 
@@ -706,8 +734,6 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
         // Then process mature generation
         state.mature.for_each_mut_exclusive(|elem| f(elem));
     }
-
-
 }
 
 impl<'brand, T, const CHUNK: usize> Default for BrandedArena<'brand, T, CHUNK> {

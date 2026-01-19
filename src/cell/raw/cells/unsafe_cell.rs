@@ -16,12 +16,7 @@
 //! - raw pointers that are `unsafe` to dereference/mutate, placing the burden
 //!   on the caller (standard Rust contract for raw pointers).
 
-use core::{
-    cell::UnsafeCell,
-    marker::PhantomData,
-    mem,
-    ptr,
-};
+use core::{cell::UnsafeCell, marker::PhantomData, mem, ptr};
 
 use crate::GhostToken;
 
@@ -125,5 +120,3 @@ unsafe impl<'brand, T: Send> Send for GhostUnsafeCell<'brand, T> {}
 // SAFETY: sharing `&GhostUnsafeCell` between threads is fine if `T: Sync` because
 // the only safe shared access yields `&T`, and `&T` is thread-safe iff `T: Sync`.
 unsafe impl<'brand, T: Sync> Sync for GhostUnsafeCell<'brand, T> {}
-
-

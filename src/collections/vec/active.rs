@@ -6,9 +6,9 @@
 //!
 //! It also supports slicing into `BrandedSliceMut`, enabling parallel mutation patterns.
 
-use crate::GhostToken;
-use super::{BrandedVec, BrandedVecDeque};
 use super::slice::{BrandedSlice, BrandedSliceMut};
+use super::{BrandedVec, BrandedVecDeque};
+use crate::GhostToken;
 use std::slice;
 
 /// A wrapper around a mutable reference to a `BrandedVec` and a mutable reference to a `GhostToken`.
@@ -129,7 +129,10 @@ pub struct ActiveVecDeque<'a, 'brand, T> {
 
 impl<'a, 'brand, T> ActiveVecDeque<'a, 'brand, T> {
     /// Creates a new active deque handle.
-    pub fn new(deque: &'a mut BrandedVecDeque<'brand, T>, token: &'a mut GhostToken<'brand>) -> Self {
+    pub fn new(
+        deque: &'a mut BrandedVecDeque<'brand, T>,
+        token: &'a mut GhostToken<'brand>,
+    ) -> Self {
         Self { deque, token }
     }
 
@@ -208,11 +211,17 @@ impl<'a, 'brand, T> ActiveVecDeque<'a, 'brand, T> {
 
 /// Extension trait to easily create ActiveVecDeque from BrandedVecDeque.
 pub trait ActivateVecDeque<'brand, T> {
-    fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveVecDeque<'a, 'brand, T>;
+    fn activate<'a>(
+        &'a mut self,
+        token: &'a mut GhostToken<'brand>,
+    ) -> ActiveVecDeque<'a, 'brand, T>;
 }
 
 impl<'brand, T> ActivateVecDeque<'brand, T> for BrandedVecDeque<'brand, T> {
-    fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveVecDeque<'a, 'brand, T> {
+    fn activate<'a>(
+        &'a mut self,
+        token: &'a mut GhostToken<'brand>,
+    ) -> ActiveVecDeque<'a, 'brand, T> {
         ActiveVecDeque::new(self, token)
     }
 }
@@ -266,13 +275,13 @@ mod tests {
     #[test]
     fn test_active_vec_iter() {
         GhostToken::new(|mut token| {
-             let mut vec = BrandedVec::new();
-             vec.push(1);
-             vec.push(2);
+            let mut vec = BrandedVec::new();
+            vec.push(1);
+            vec.push(2);
 
-             let active = vec.activate(&mut token);
-             let collected: Vec<&i32> = active.iter().collect();
-             assert_eq!(collected, vec![&1, &2]);
+            let active = vec.activate(&mut token);
+            let collected: Vec<&i32> = active.iter().collect();
+            assert_eq!(collected, vec![&1, &2]);
         });
     }
 

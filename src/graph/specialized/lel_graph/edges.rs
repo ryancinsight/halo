@@ -48,6 +48,3 @@ impl DeltaEncodedEdges {
         self.sorted_edges.len()
     }
 }
-
-
-

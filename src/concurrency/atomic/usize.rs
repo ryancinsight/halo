@@ -89,7 +89,8 @@ impl<'brand> GhostAtomicUsize<'brand> {
         success: Ordering,
         failure: Ordering,
     ) -> Result<usize, usize> {
-        self.inner.compare_exchange_weak(current, new, success, failure)
+        self.inner
+            .compare_exchange_weak(current, new, success, failure)
     }
 
     /// Atomically loads the current value and applies a function to it.
@@ -154,5 +155,3 @@ impl<'brand> GhostAtomicUsize<'brand> {
 
 unsafe impl<'brand> Send for GhostAtomicUsize<'brand> {}
 unsafe impl<'brand> Sync for GhostAtomicUsize<'brand> {}
-
-

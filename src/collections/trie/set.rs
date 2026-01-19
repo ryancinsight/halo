@@ -1,8 +1,8 @@
 use core::marker::PhantomData;
 
-use crate::GhostToken;
-use crate::collections::{BrandedCollection, ZeroCopyOps};
 use super::map::BrandedRadixTrieMap;
+use crate::collections::{BrandedCollection, ZeroCopyOps};
+use crate::GhostToken;
 
 /// A high-performance Radix Trie Set optimized for branded usage.
 ///
@@ -44,7 +44,8 @@ impl<'brand, T> BrandedRadixTrieSet<'brand, T> {
     /// Iterates over all elements, passing the value (as slice) to the closure.
     /// This avoids allocating a new Vec for each value.
     pub fn for_each<F>(&self, token: &GhostToken<'brand>, mut f: F)
-    where F: FnMut(&[u8])
+    where
+        F: FnMut(&[u8]),
     {
         self.map.for_each(token, |k, _| f(k));
     }

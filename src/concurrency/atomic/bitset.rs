@@ -103,5 +103,3 @@ fn bit_word_mask(bit: usize) -> (usize, usize) {
         return (word, 1usize << shift);
     }
 }
-
-

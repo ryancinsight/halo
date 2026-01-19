@@ -3,9 +3,9 @@
 //! This implementation uses `BrandedVec` as the backing storage.
 //! It supports standard max-heap operations with token-gated access.
 
-use crate::GhostToken;
-use crate::collections::ZeroCopyOps;
 use crate::collections::vec::BrandedVec;
+use crate::collections::ZeroCopyOps;
+use crate::GhostToken;
 use core::cmp::Ord;
 use core::fmt;
 
@@ -114,9 +114,9 @@ impl<'brand, T: Ord> BrandedBinaryHeap<'brand, T> {
 
     // Helper to compare two elements in the heap
     fn less(&self, token: &GhostToken<'brand>, a: usize, b: usize) -> bool {
-         let val_a = self.data.borrow(token, a);
-         let val_b = self.data.borrow(token, b);
-         val_a < val_b
+        let val_a = self.data.borrow(token, a);
+        let val_b = self.data.borrow(token, b);
+        val_a < val_b
     }
 }
 

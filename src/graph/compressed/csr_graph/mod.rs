@@ -197,7 +197,6 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCsrGraph<'brand, EDGE_CHUNK> {
     }
 }
 
-mod traversal;
 #[cfg(test)]
 mod tests;
-
+mod traversal;

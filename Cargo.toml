@@ -138,5 +138,9 @@ name = "segment_tree_benchmark"
 harness = false
 
 [[bench]]
+name = "tripod_list_benchmark"
+harness = false
+
+[[bench]]
 name = "sync_benchmark"
 harness = false

@@ -78,9 +78,20 @@ pub fn with_write_scope<'env, 'brand, R, F>(
 ) -> (R, GhostToken<'brand>)
 where
     'brand: 'env,
-    F: for<'scope> FnOnce(GhostWriteScope<'scope, 'env, 'brand>, GhostToken<'brand>) -> (R, GhostToken<'brand>),
+    F: for<'scope> FnOnce(
+        GhostWriteScope<'scope, 'env, 'brand>,
+        GhostToken<'brand>,
+    ) -> (R, GhostToken<'brand>),
 {
-    std::thread::scope(|scope| f(GhostWriteScope { scope, _brand: core::marker::PhantomData }, token))
+    std::thread::scope(|scope| {
+        f(
+            GhostWriteScope {
+                scope,
+                _brand: core::marker::PhantomData,
+            },
+            token,
+        )
+    })
 }
 
 /// Runs a **lock-free** two-phase parallel pattern:
@@ -114,5 +125,3 @@ where
 
     commit(token, work)
 }
-
-

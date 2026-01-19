@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use halo::collections::{BrandedRadixTrieMap};
+use halo::collections::BrandedRadixTrieMap;
 use halo::GhostToken;
 use std::collections::{BTreeMap, HashMap};
 

@@ -2,13 +2,10 @@
 
 mod inner;
 
-use core::{
-    mem::MaybeUninit,
-    ptr,
-};
+use core::{mem::MaybeUninit, ptr};
 
-use crate::{GhostToken, GhostUnsafeCell};
 use crate::cell::raw::access::ghost_unsafe_cell as guc;
+use crate::{GhostToken, GhostUnsafeCell};
 use inner::Inner;
 
 /// A token-gated once cell: can be set once, then read many times.
@@ -123,5 +120,3 @@ impl<'brand, T> Drop for GhostOnceCell<'brand, T> {
 // SAFETY: token-gated aliasing reasoning; no implicit synchronization.
 unsafe impl<'brand, T: Send> Send for GhostOnceCell<'brand, T> {}
 unsafe impl<'brand, T: Sync> Sync for GhostOnceCell<'brand, T> {}
-
-

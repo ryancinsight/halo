@@ -24,9 +24,3 @@ fn parallel_read_then_commit_applies_updates() {
         assert_eq!(*b.borrow(&token), 10);
     });
 }
-
-
-
-
-
-

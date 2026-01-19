@@ -1,0 +1,1362 @@
+warning: unused import: `std::cmp::Ordering`
+  --> src/collections/btree/btree_map.rs:10:5
+   |
+10 | use std::cmp::Ordering;
+   |     ^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `GhostCell`
+ --> src/collections/btree/btree_set.rs:6:13
+  |
+6 | use crate::{GhostCell, GhostToken};
+  |             ^^^^^^^^^
+
+warning: unused import: `std::marker::PhantomData`
+  --> src/collections/hash/hash_map.rs:22:5
+   |
+22 | use std::marker::PhantomData;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `GhostCell`
+  --> src/collections/other/cow_strings.rs:54:13
+   |
+54 | use crate::{GhostCell, GhostToken};
+   |             ^^^^^^^^^
+
+warning: unused import: `std::mem::MaybeUninit`
+  --> src/collections/other/segment_tree.rs:11:5
+   |
+11 | use std::mem::MaybeUninit;
+   |     ^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `GhostCell`
+  --> src/collections/other/slot_map.rs:13:25
+   |
+13 | use crate::{BrandedVec, GhostCell, GhostToken};
+   |                         ^^^^^^^^^
+
+warning: unused import: `core::fmt`
+  --> src/collections/other/tripod_list.rs:13:5
+   |
+13 | use core::fmt;
+   |     ^^^^^^^^^
+
+warning: unused import: `core::cmp::min`
+ --> src/collections/trie/map.rs:1:5
+  |
+1 | use core::cmp::min;
+  |     ^^^^^^^^^^^^^^
+
+warning: unused import: `GhostCell`
+ --> src/collections/trie/map.rs:8:13
+  |
+8 | use crate::{GhostCell, GhostToken};
+  |             ^^^^^^^^^
+
+warning: unused import: `core::marker::PhantomData`
+ --> src/collections/trie/set.rs:1:5
+  |
+1 | use core::marker::PhantomData;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `MaybeUninit`
+ --> src/collections/vec/vec_deque.rs:9:23
+  |
+9 | use core::mem::{self, MaybeUninit};
+  |                       ^^^^^^^^^^^
+
+warning: unused import: `GhostCell`
+  --> src/graph/basic/pool_graph.rs:15:13
+   |
+15 | use crate::{GhostCell, GhostToken};
+   |             ^^^^^^^^^
+
+warning: unused import: `collections::ChunkedVec`
+  --> src/graph/compressed/compressed_graph/mod.rs:18:13
+   |
+18 | use crate::{collections::ChunkedVec, graph::access::visited::VisitedSet};
+   |             ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `core::sync::atomic::Ordering`
+  --> src/graph/compressed/csc_graph/mod.rs:11:5
+   |
+11 | use core::sync::atomic::Ordering;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `GhostChaseLevDeque` and `GhostTreiberStack`
+  --> src/graph/compressed/csc_graph/mod.rs:15:29
+   |
+15 |     concurrency::worklist::{GhostChaseLevDeque, GhostTreiberStack},
+   |                             ^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `GhostChaseLevDeque`, `GhostTreiberStack`, and `concurrency::atomic::GhostAtomicBitset`
+  --> src/graph/compressed/csr_graph/mod.rs:15:5
+   |
+15 |     concurrency::atomic::GhostAtomicBitset,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+16 |     concurrency::worklist::{GhostChaseLevDeque, GhostTreiberStack},
+   |                             ^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^
+
+warning: unused import: `core::marker::PhantomData`
+  --> src/token/mod.rs:14:5
+   |
+14 | use core::marker::PhantomData;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `GlobalAlloc`
+ --> src/alloc/heap.rs:8:19
+  |
+8 | use core::alloc::{GlobalAlloc, Layout};
+  |                   ^^^^^^^^^^^
+
+warning: unused import: `std::borrow::Borrow`
+ --> src/collections/btree/bplus_tree.rs:7:5
+  |
+7 | use std::borrow::Borrow;
+  |     ^^^^^^^^^^^^^^^^^^^
+
+warning: variable does not need to be mutable
+   --> src/alloc/arena.rs:419:13
+    |
+419 |         let mut state = self.state.borrow_mut(token);
+    |             ----^^^^^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+   --> src/alloc/arena.rs:567:13
+    |
+567 |         let mut state = self.state.borrow_mut(token);
+    |             ----^^^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> src/alloc/arena.rs:730:13
+    |
+730 |         let mut state = self.state.borrow_mut(token);
+    |             ----^^^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: unnecessary `unsafe` block
+  --> src/alloc/static_rc.rs:84:9
+   |
+84 |         unsafe {
+   |         ^^^^^^ unnecessary `unsafe` block
+   |
+   = note: `#[warn(unused_unsafe)]` (part of `#[warn(unused)]`) on by default
+
+warning: unnecessary `unsafe` block
+   --> src/alloc/static_rc.rs:110:9
+    |
+110 |         unsafe {
+    |         ^^^^^^ unnecessary `unsafe` block
+
+warning: unnecessary `unsafe` block
+   --> src/alloc/static_rc.rs:142:9
+    |
+142 |         unsafe {
+    |         ^^^^^^ unnecessary `unsafe` block
+
+warning: unnecessary `unsafe` block
+   --> src/collections/btree/bplus_tree.rs:534:29
+    |
+534 |                     let k = unsafe { self.get_node(token, node_idx).key_at(idx) };
+    |                             ^^^^^^ unnecessary `unsafe` block
+
+warning: variable does not need to be mutable
+   --> src/collections/other/doubly_linked_list.rs:575:13
+    |
+575 |         let mut node = unsafe { self.list.pool.take(token, curr_idx) };
+    |             ----^^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: unnecessary `unsafe` block
+   --> src/collections/other/segment_tree.rs:239:9
+    |
+239 |         unsafe {
+    |         ^^^^^^ unnecessary `unsafe` block
+
+warning: unused variable: `left_cell`
+   --> src/collections/other/segment_tree.rs:305:17
+    |
+305 |             let left_cell = &*self.ptr.add(left_child);
+    |                 ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_left_cell`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `token`
+  --> src/collections/trie/set.rs:95:34
+   |
+95 |     fn find_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<&'a T>
+   |                                  ^^^^^ help: if this is intentional, prefix it with an underscore: `_token`
+
+warning: unused variable: `f`
+  --> src/collections/trie/set.rs:95:65
+   |
+95 |     fn find_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<&'a T>
+   |                                                                 ^ help: if this is intentional, prefix it with an underscore: `_f`
+
+warning: unused variable: `token`
+   --> src/collections/trie/set.rs:102:26
+    |
+102 |     fn any_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    |                          ^^^^^ help: if this is intentional, prefix it with an underscore: `_token`
+
+warning: unused variable: `f`
+   --> src/collections/trie/set.rs:102:54
+    |
+102 |     fn any_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    |                                                      ^ help: if this is intentional, prefix it with an underscore: `_f`
+
+warning: unused variable: `token`
+   --> src/collections/trie/set.rs:109:26
+    |
+109 |     fn all_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    |                          ^^^^^ help: if this is intentional, prefix it with an underscore: `_token`
+
+warning: unused variable: `f`
+   --> src/collections/trie/set.rs:109:54
+    |
+109 |     fn all_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    |                                                      ^ help: if this is intentional, prefix it with an underscore: `_f`
+
+warning: variable does not need to be mutable
+   --> src/collections/vec/chunked_vec.rs:410:9
+    |
+410 |         mut f: impl FnMut(&T),
+    |         ----^
+    |         |
+    |         help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> src/collections/vec/chunked_vec.rs:434:9
+    |
+434 |         mut f: impl FnMut(&mut T),
+    |         ----^
+    |         |
+    |         help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> src/concurrency/atomic/usize.rs:106:9
+    |
+106 |         mut f: F,
+    |         ----^
+    |         |
+    |         help: remove this `mut`
+
+warning: variable does not need to be mutable
+  --> src/graph/compressed/ecc_graph/storage.rs:53:13
+   |
+53 |         let mut weights = Vec::new();
+   |             ----^^^^^^^
+   |             |
+   |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+  --> src/graph/compressed/ecc_graph/storage.rs:54:13
+   |
+54 |         let mut has_weights = false;
+   |             ----^^^^^^^^^^^
+   |             |
+   |             help: remove this `mut`
+
+warning: type `PoolSlot<T>` is more private than the item `BrandedPool::<'brand, T>::storage`
+   --> src/alloc/pool.rs:209:5
+    |
+209 | /     pub fn storage<'a>(
+210 | |         &'a self,
+211 | |         token: &'a GhostToken<'brand>,
+212 | |     ) -> &'a BrandedVec<'brand, PoolSlot<T>> {
+    | |____________________________________________^ method `BrandedPool::<'brand, T>::storage` is reachable at visibility `pub`
+    |
+note: but type `PoolSlot<T>` is only usable at visibility `pub(crate)`
+   --> src/alloc/pool.rs:18:1
+    |
+ 18 | pub(crate) enum PoolSlot<T> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: `#[warn(private_interfaces)]` on by default
+
+warning: type `PoolSlot<T>` is more private than the item `BrandedPool::<'brand, T>::as_slice`
+   --> src/alloc/pool.rs:218:5
+    |
+218 |     pub fn as_slice<'a>(&'a self, token: &'a GhostToken<'brand>) -> &'a [PoolSlot<T>] {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ method `BrandedPool::<'brand, T>::as_slice` is reachable at visibility `pub`
+    |
+note: but type `PoolSlot<T>` is only usable at visibility `pub(crate)`
+   --> src/alloc/pool.rs:18:1
+    |
+ 18 | pub(crate) enum PoolSlot<T> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `PoolSlot<T>` is more private than the item `BrandedPool::<'brand, T>::as_mut_slice`
+   --> src/alloc/pool.rs:224:5
+    |
+224 |     pub fn as_mut_slice<'a>(&'a self, token: &'a mut GhostToken<'brand>) -> &'a mut [PoolSlot<T>] {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ method `BrandedPool::<'brand, T>::as_mut_slice` is reachable at visibility `pub`
+    |
+note: but type `PoolSlot<T>` is only usable at visibility `pub(crate)`
+   --> src/alloc/pool.rs:18:1
+    |
+ 18 | pub(crate) enum PoolSlot<T> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: type `NodeRepresentation` is more private than the item `GhostAmtGraph::nodes`
+  --> src/graph/specialized/amt_graph/mod.rs:26:5
+   |
+26 |     pub(super) nodes: Vec<representation::NodeRepresentation>,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ field `GhostAmtGraph::nodes` is reachable at visibility `pub(in crate::graph::specialized)`
+   |
+note: but type `NodeRepresentation` is only usable at visibility `pub(in crate::graph::specialized::amt_graph)`
+  --> src/graph/specialized/amt_graph/representation.rs:9:1
+   |
+ 9 | pub(super) enum NodeRepresentation {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `MIN_LEN` is never used
+  --> src/collections/btree/btree_map.rs:17:7
+   |
+17 | const MIN_LEN: usize = B - 1;
+   |       ^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `len` is never read
+   --> src/collections/btree/btree_map.rs:920:5
+    |
+916 | pub struct Iter<'a, 'brand, K, V> {
+    |            ---- field in this struct
+...
+920 |     len: usize,
+    |     ^^^
+
+warning: field `len` is never read
+   --> src/collections/btree/btree_map.rs:972:5
+    |
+968 | pub struct Keys<'a, 'brand, K, V> {
+    |            ---- field in this struct
+...
+972 |     len: usize,
+    |     ^^^
+
+warning: field `token` is never read
+  --> src/collections/hash/active_set.rs:14:5
+   |
+12 | pub struct ActiveHashSet<'a, 'brand, K, S = RandomState> {
+   |            ------------- field in this struct
+13 |     set: &'a mut BrandedHashSet<'brand, K, S>,
+14 |     token: &'a mut GhostToken<'brand>,
+   |     ^^^^^
+
+warning: field `level` is never read
+  --> src/collections/skip_list/branded.rs:84:5
+   |
+80 | struct NodeData<'brand, K, V> {
+   |        -------- field in this struct
+...
+84 |     level: u8,
+   |     ^^^^^
+
+warning: method `get_next` is never used
+   --> src/collections/skip_list/branded.rs:299:8
+    |
+165 | / impl<'brand, K, V> BrandedSkipList<'brand, K, V>
+166 | | where
+167 | |     K: Ord,
+    | |___________- method in this implementation
+...
+299 |       fn get_next(
+    |          ^^^^^^^^
+
+warning: field `token` is never read
+  --> src/collections/vec/chunked_vec.rs:87:5
+   |
+80 | pub struct ChunkMutIter<'a, 'brand, T, const CHUNK: usize> {
+   |            ------------ field in this struct
+...
+87 |     token: *mut GhostToken<'brand>, // Raw pointer to avoid borrowing issues in iterator
+   |     ^^^^^
+
+warning: method `len` is never used
+  --> src/graph/access/visited.rs:28:19
+   |
+19 | impl<'brand> VisitedSet<'brand> {
+   | ------------------------------- method in this implementation
+...
+28 |     pub(crate) fn len(&self) -> usize {
+   |                   ^^^
+
+warning: method `len` is never used
+  --> src/graph/access/visited.rs:71:19
+   |
+64 | impl<'brand> VisitedFlags<'brand> {
+   | --------------------------------- method in this implementation
+...
+71 |     pub(crate) fn len(&self) -> usize {
+   |                   ^^^
+
+warning: function `bfs` is never used
+ --> src/graph/compressed/compressed_graph/traversal.rs:8:8
+  |
+8 | pub fn bfs<'brand, const EDGE_CHUNK: usize>(
+  |        ^^^
+
+warning: function `compression_stats` is never used
+  --> src/graph/compressed/compressed_graph/traversal.rs:38:8
+   |
+38 | pub fn compression_stats<'brand, const EDGE_CHUNK: usize>(
+   |        ^^^^^^^^^^^^^^^^^
+
+warning: struct `CompressionStats` is never constructed
+  --> src/graph/compressed/compressed_graph/traversal.rs:58:12
+   |
+58 | pub struct CompressionStats {
+   |            ^^^^^^^^^^^^^^^^
+
+warning: methods `compression_ratio` and `memory_savings_percent` are never used
+  --> src/graph/compressed/compressed_graph/traversal.rs:72:12
+   |
+69 | impl CompressionStats {
+   | --------------------- methods in this implementation
+...
+72 |     pub fn compression_ratio(&self) -> f64 {
+   |            ^^^^^^^^^^^^^^^^^
+...
+82 |     pub fn memory_savings_percent(&self) -> f64 {
+   |            ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `len` is never used
+  --> src/graph/specialized/lel_graph/edges.rs:47:12
+   |
+10 | impl DeltaEncodedEdges {
+   | ---------------------- method in this implementation
+...
+47 |     pub fn len(&self) -> usize {
+   |            ^^^
+
+warning: missing documentation for a module
+   --> src/lib.rs:106:1
+    |
+106 | pub mod alloc;
+    | ^^^^^^^^^^^^^
+    |
+note: the lint level is defined here
+   --> src/lib.rs:102:9
+    |
+102 | #![warn(missing_docs, clippy::all, clippy::pedantic)]
+    |         ^^^^^^^^^^^^
+
+warning: missing documentation for a module
+ --> src/alloc/mod.rs:1:1
+  |
+1 | pub mod allocator;
+  | ^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a module
+ --> src/alloc/mod.rs:3:1
+  |
+3 | pub mod bump;
+  | ^^^^^^^^^^^^
+
+warning: missing documentation for a module
+  --> src/alloc/mod.rs:10:1
+   |
+10 | pub mod branded;
+   | ^^^^^^^^^^^^^^^
+
+warning: missing documentation for a module
+  --> src/alloc/mod.rs:11:1
+   |
+11 | pub mod branded_box;
+   | ^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a module
+  --> src/alloc/mod.rs:13:1
+   |
+13 | pub mod static_rc;
+   | ^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/alloc/arena.rs:175:5
+    |
+175 |     pub fn index(self) -> usize {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a module
+ --> src/collections/mod.rs:9:1
+  |
+9 | pub mod btree;
+  | ^^^^^^^^^^^^^
+
+warning: missing documentation for a module
+  --> src/collections/mod.rs:12:1
+   |
+12 | pub mod skip_list;
+   | ^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a module
+  --> src/collections/mod.rs:13:1
+   |
+13 | pub mod string;
+   | ^^^^^^^^^^^^^^
+
+warning: missing documentation for a struct
+ --> src/collections/btree/active_bplus_tree.rs:6:1
+  |
+6 | pub struct ActiveBPlusTree<'a, 'brand, K, V> {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for an associated function
+  --> src/collections/btree/active_bplus_tree.rs:12:5
+   |
+12 | /     pub fn new(
+13 | |         tree: &'a mut BrandedBPlusTree<'brand, K, V>,
+14 | |         token: &'a mut GhostToken<'brand>,
+15 | |     ) -> Self {
+   | |_____________^
+
+warning: missing documentation for a method
+  --> src/collections/btree/active_bplus_tree.rs:19:5
+   |
+19 | /     pub fn insert(&mut self, key: K, value: V) -> Option<V>
+20 | |     where
+21 | |         K: Ord + Clone,
+   | |_______________________^
+
+warning: missing documentation for a method
+  --> src/collections/btree/active_bplus_tree.rs:26:5
+   |
+26 | /     pub fn get(&self, key: &K) -> Option<&V>
+27 | |     where
+28 | |         K: Ord,
+   | |_______________^
+
+warning: missing documentation for a method
+  --> src/collections/btree/active_bplus_tree.rs:33:5
+   |
+33 | /     pub fn get_mut(&mut self, key: &K) -> Option<&mut V>
+34 | |     where
+35 | |         K: Ord,
+   | |_______________^
+
+warning: missing documentation for a method
+  --> src/collections/btree/active_bplus_tree.rs:40:5
+   |
+40 |     pub fn len(&self) -> usize {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+  --> src/collections/btree/active_bplus_tree.rs:44:5
+   |
+44 |     pub fn is_empty(&self) -> bool {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+  --> src/collections/btree/active_bplus_tree.rs:48:5
+   |
+48 |     pub fn iter<'b>(&'b self) -> Iter<'b, 'brand, K, V> {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+  --> src/collections/btree/active_bplus_tree.rs:54:5
+   |
+54 | /     pub fn activate<'a>(
+55 | |         &'a mut self,
+56 | |         token: &'a mut GhostToken<'brand>,
+57 | |     ) -> ActiveBPlusTree<'a, 'brand, K, V> {
+   | |__________________________________________^
+
+warning: missing documentation for a constant
+ --> src/collections/btree/bplus_tree.rs:9:1
+  |
+9 | pub const B: usize = 6;
+  | ^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a constant
+  --> src/collections/btree/bplus_tree.rs:10:1
+   |
+10 | pub const MAX_KEYS: usize = 2 * B - 1;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a constant
+  --> src/collections/btree/bplus_tree.rs:11:1
+   |
+11 | pub const MAX_CHILDREN: usize = 2 * B;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for an enum
+  --> src/collections/btree/bplus_tree.rs:13:1
+   |
+13 | pub enum Node<'brand, K, V> {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a variant
+  --> src/collections/btree/bplus_tree.rs:14:5
+   |
+14 |     Internal {
+   |     ^^^^^^^^
+
+warning: missing documentation for a struct field
+  --> src/collections/btree/bplus_tree.rs:15:9
+   |
+15 |         len: u16,
+   |         ^^^^^^^^
+
+warning: missing documentation for a struct field
+  --> src/collections/btree/bplus_tree.rs:16:9
+   |
+16 |         keys: [MaybeUninit<K>; MAX_KEYS],
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a struct field
+  --> src/collections/btree/bplus_tree.rs:17:9
+   |
+17 |         children: [usize; MAX_CHILDREN],
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a variant
+  --> src/collections/btree/bplus_tree.rs:19:5
+   |
+19 |     Leaf {
+   |     ^^^^
+
+warning: missing documentation for a struct field
+  --> src/collections/btree/bplus_tree.rs:20:9
+   |
+20 |         len: u16,
+   |         ^^^^^^^^
+
+warning: missing documentation for a struct field
+  --> src/collections/btree/bplus_tree.rs:21:9
+   |
+21 |         keys: [MaybeUninit<K>; MAX_KEYS],
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a struct field
+  --> src/collections/btree/bplus_tree.rs:22:9
+   |
+22 |         vals: [MaybeUninit<GhostCell<'brand, V>>; MAX_KEYS],
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a struct field
+  --> src/collections/btree/bplus_tree.rs:23:9
+   |
+23 |         next: Option<usize>,
+   |         ^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for an associated function
+  --> src/collections/btree/bplus_tree.rs:28:5
+   |
+28 |     pub fn new_leaf() -> Self {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for an associated function
+  --> src/collections/btree/bplus_tree.rs:42:5
+   |
+42 |     pub fn new_internal() -> Self {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+  --> src/collections/btree/bplus_tree.rs:53:5
+   |
+53 |     pub fn is_leaf(&self) -> bool {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+  --> src/collections/btree/bplus_tree.rs:60:5
+   |
+60 |     pub fn len(&self) -> usize {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+  --> src/collections/btree/bplus_tree.rs:67:5
+   |
+67 |     pub fn is_full(&self) -> bool {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+  --> src/collections/btree/bplus_tree.rs:71:5
+   |
+71 |     pub fn leaf_insert(&mut self, idx: usize, key: K, val: GhostCell<'brand, V>) {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+  --> src/collections/btree/bplus_tree.rs:98:5
+   |
+98 |     pub fn internal_insert(&mut self, idx: usize, key: K, child: usize) {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/btree/bplus_tree.rs:128:5
+    |
+128 |     pub fn children_mut(&mut self) -> &mut [usize] {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/btree/bplus_tree.rs:136:5
+    |
+136 |     pub fn child_at(&self, idx: usize) -> usize {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/btree/bplus_tree.rs:144:5
+    |
+144 |     pub fn key_at(&self, idx: usize) -> &K {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a struct
+   --> src/collections/btree/bplus_tree.rs:152:1
+    |
+152 | pub struct BrandedBPlusTree<'brand, K, V> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for an associated function
+   --> src/collections/btree/bplus_tree.rs:159:5
+    |
+159 |     pub fn new() -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/btree/bplus_tree.rs:167:5
+    |
+167 |     pub fn len(&self) -> usize {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/btree/bplus_tree.rs:171:5
+    |
+171 |     pub fn is_empty(&self) -> bool {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/btree/bplus_tree.rs:193:5
+    |
+193 | /     pub fn get<'a>(&'a self, token: &'a GhostToken<'brand>, key: &K) -> Option<&'a V>
+194 | |     where
+195 | |         K: Ord,
+    | |_______________^
+
+warning: missing documentation for a method
+   --> src/collections/btree/bplus_tree.rs:244:5
+    |
+244 | /     pub fn get_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>, key: &K) -> Option<&'a mut V>
+245 | |     where
+246 | |         K: Ord,
+    | |_______________^
+
+warning: missing documentation for a method
+   --> src/collections/btree/bplus_tree.rs:308:5
+    |
+308 |     pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> Iter<'a, 'brand, K, V> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/btree/bplus_tree.rs:333:5
+    |
+333 | /     pub fn insert(&mut self, token: &mut GhostToken<'brand>, key: K, value: V) -> Option<V>
+334 | |     where
+335 | |         K: Ord + Clone,
+    | |_______________________^
+
+warning: missing documentation for a struct
+   --> src/collections/btree/bplus_tree.rs:554:1
+    |
+554 | pub struct Iter<'a, 'brand, K, V> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a struct
+   --> src/collections/btree/btree_map.rs:916:1
+    |
+916 | pub struct Iter<'a, 'brand, K, V> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a struct
+   --> src/collections/btree/btree_map.rs:968:1
+    |
+968 | pub struct Keys<'a, 'brand, K, V> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a struct
+    --> src/collections/btree/btree_map.rs:1019:1
+     |
+1019 | pub struct IntoIter<'brand, K, V> {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/hash_map.rs:145:5
+    |
+145 |     pub fn len(&self) -> usize {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/hash_map.rs:150:5
+    |
+150 |     pub fn is_empty(&self) -> bool {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/hash_map.rs:155:5
+    |
+155 |     pub fn capacity(&self) -> usize {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/hash_map.rs:268:5
+    |
+268 |     pub fn get<'a>(&'a self, token: &'a GhostToken<'brand>, key: &K) -> Option<&'a V> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/hash_map.rs:289:5
+    |
+289 |     pub fn get_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>, key: &K) -> Option<&'a mut V> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/hash_map.rs:310:5
+    |
+310 |     pub fn contains_key(&self, key: &K) -> bool {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/hash_map.rs:318:5
+    |
+318 |     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/hash_map.rs:362:5
+    |
+362 |     pub fn remove(&mut self, key: &K) -> Option<V> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/hash_map.rs:464:5
+    |
+464 |     pub fn clear(&mut self) {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/hash_map.rs:488:5
+    |
+488 |     pub fn reserve(&mut self, additional: usize) {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/hash_map.rs:500:5
+    |
+500 |     pub fn keys(&self) -> impl Iterator<Item = &K> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/hash_map.rs:514:5
+    |
+514 | /     pub fn values<'a>(
+515 | |         &'a self,
+516 | |         token: &'a GhostToken<'brand>,
+517 | |     ) -> impl Iterator<Item = &'a V> + use<'a, 'brand, K, V, S> {
+    | |_______________________________________________________________^
+
+warning: missing documentation for a struct
+   --> src/collections/hash/hash_map.rs:708:1
+    |
+708 | pub struct IntoIter<'brand, K, V> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for an associated function
+  --> src/collections/hash/index_map.rs:76:5
+   |
+76 |     pub fn with_capacity_and_hasher(capacity: usize, hash_builder: S) -> Self {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/index_map.rs:113:5
+    |
+113 |     pub fn len(&self) -> usize {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/index_map.rs:118:5
+    |
+118 |     pub fn is_empty(&self) -> bool {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/index_map.rs:123:5
+    |
+123 |     pub fn capacity(&self) -> usize {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a struct
+  --> src/collections/hash/linked_hash_map.rs:60:1
+   |
+60 | pub struct BrandedLinkedHashMap<'brand, K, V, S = RandomState> {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for an associated function
+  --> src/collections/hash/linked_hash_map.rs:82:5
+   |
+82 |     pub fn with_capacity_and_hasher(capacity: usize, hash_builder: S) -> Self {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for an associated function
+   --> src/collections/hash/linked_hash_map.rs:142:5
+    |
+142 |     pub fn new() -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for an associated function
+   --> src/collections/hash/linked_hash_map.rs:146:5
+    |
+146 |     pub fn with_capacity(capacity: usize) -> Self {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/linked_hash_map.rs:233:5
+    |
+233 |     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/linked_hash_map.rs:315:5
+    |
+315 |     pub fn remove(&mut self, key: &K) -> Option<V> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/linked_hash_map.rs:353:5
+    |
+353 |     pub fn get<'a>(&'a self, token: &'a GhostToken<'brand>, key: &K) -> Option<&'a V> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/linked_hash_map.rs:375:5
+    |
+375 |     pub fn get_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>, key: &K) -> Option<&'a mut V> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/hash/linked_hash_map.rs:549:5
+    |
+549 | /     pub fn iter<'a>(
+550 | |         &'a self,
+551 | |         token: &'a GhostToken<'brand>,
+552 | |     ) -> impl Iterator<Item = (&'a K, &'a V)> + use<'a, 'brand, K, V, S> {
+    | |________________________________________________________________________^
+
+warning: missing documentation for a struct
+   --> src/collections/hash/linked_hash_map.rs:561:1
+    |
+561 | pub struct Iter<'a, 'brand, K, V, S> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/other/active.rs:102:5
+    |
+102 | /     fn activate<'a>(
+103 | |         &'a mut self,
+104 | |         token: &'a mut GhostToken<'brand>,
+105 | |     ) -> ActiveDoublyLinkedList<'a, 'brand, T>;
+    | |_______________________________________________^
+
+warning: missing documentation for a method
+   --> src/collections/other/active.rs:175:5
+    |
+175 | /     fn activate<'a>(
+176 | |         &'a mut self,
+177 | |         token: &'a mut GhostToken<'brand>,
+178 | |     ) -> ActiveBinaryHeap<'a, 'brand, T>;
+    | |_________________________________________^
+
+warning: missing documentation for a method
+   --> src/collections/other/active.rs:289:5
+    |
+289 | /     fn activate<'a>(
+290 | |         &'a mut self,
+291 | |         token: &'a mut GhostToken<'brand>,
+292 | |     ) -> ActiveDeque<'a, 'brand, T, CAPACITY>;
+    | |______________________________________________^
+
+warning: missing documentation for a struct field
+  --> src/collections/other/interval_map.rs:19:5
+   |
+19 |     pub start: K,
+   |     ^^^^^^^^^^^^
+
+warning: missing documentation for a struct field
+  --> src/collections/other/interval_map.rs:20:5
+   |
+20 |     pub end: K,
+   |     ^^^^^^^^^^
+
+warning: missing documentation for a struct field
+  --> src/collections/other/interval_map.rs:21:5
+   |
+21 |     pub value: V,
+   |     ^^^^^^^^^^^^
+
+warning: missing documentation for a struct
+   --> src/collections/other/slot_map.rs:239:1
+    |
+239 | pub struct Iter<'a, 'brand, T> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/other/slot_map.rs:273:5
+    |
+273 |     pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> Iter<'a, 'brand, T> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+  --> src/collections/skip_list/active.rs:73:5
+   |
+73 | /     fn activate<'a>(
+74 | |         &'a mut self,
+75 | |         token: &'a mut GhostToken<'brand>,
+76 | |     ) -> ActiveSkipList<'a, 'brand, K, V>;
+   | |__________________________________________^
+
+warning: missing documentation for a method
+   --> src/collections/skip_list/branded.rs:243:5
+    |
+243 | /     pub fn get_mut<'a, Q: ?Sized>(
+244 | |         &'a self,
+245 | |         token: &'a mut GhostToken<'brand>,
+246 | |         key: &Q,
+...   |
+249 | |         K: Borrow<Q>,
+250 | |         Q: Ord,
+    | |_______________^
+
+warning: missing documentation for a struct
+   --> src/collections/skip_list/branded.rs:663:1
+    |
+663 | pub struct Iter<'a, 'brand, K, V> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a struct
+   --> src/collections/skip_list/branded.rs:694:1
+    |
+694 | pub struct IterMut<'a, 'brand, K, V> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/skip_list/branded.rs:734:5
+    |
+734 |     pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> Iter<'a, 'brand, K, V> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/skip_list/branded.rs:743:5
+    |
+743 |     pub fn iter_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>) -> IterMut<'a, 'brand, K, V> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a module
+ --> src/collections/trie/mod.rs:7:1
+  |
+7 | pub mod iter;
+  | ^^^^^^^^^^^^
+
+warning: missing documentation for a module
+ --> src/collections/trie/mod.rs:8:1
+  |
+8 | pub mod map;
+  | ^^^^^^^^^^^
+
+warning: missing documentation for a module
+ --> src/collections/trie/mod.rs:9:1
+  |
+9 | pub mod node;
+  | ^^^^^^^^^^^^
+
+warning: missing documentation for a module
+  --> src/collections/trie/mod.rs:10:1
+   |
+10 | pub mod set;
+   | ^^^^^^^^^^^
+
+warning: missing documentation for an associated function
+  --> src/collections/trie/iter.rs:18:5
+   |
+18 |     pub fn new(map: &'a BrandedRadixTrieMap<'brand, K, V>, token: &'a GhostToken<'brand>) -> Self {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a variant
+ --> src/collections/trie/node.rs:8:5
+  |
+8 |     Occupied(Node<V>),
+  |     ^^^^^^^^
+
+warning: missing documentation for a variant
+ --> src/collections/trie/node.rs:9:5
+  |
+9 |     Free(usize),
+  |     ^^^^
+
+warning: missing documentation for a method
+   --> src/collections/vec/active.rs:214:5
+    |
+214 | /     fn activate<'a>(
+215 | |         &'a mut self,
+216 | |         token: &'a mut GhostToken<'brand>,
+217 | |     ) -> ActiveVecDeque<'a, 'brand, T>;
+    | |_______________________________________^
+
+warning: missing documentation for an enum
+   --> src/collections/vec/small_vec.rs:260:1
+    |
+260 | pub enum BrandedSmallVecIntoIter<'brand, T, const N: usize> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a variant
+   --> src/collections/vec/small_vec.rs:261:5
+    |
+261 |     Inline {
+    |     ^^^^^^
+
+warning: missing documentation for a struct field
+   --> src/collections/vec/small_vec.rs:262:9
+    |
+262 |         data: [MaybeUninit<GhostCell<'brand, T>>; N],
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a struct field
+   --> src/collections/vec/small_vec.rs:263:9
+    |
+263 |         index: usize,
+    |         ^^^^^^^^^^^^
+
+warning: missing documentation for a struct field
+   --> src/collections/vec/small_vec.rs:264:9
+    |
+264 |         len: usize,
+    |         ^^^^^^^^^^
+
+warning: missing documentation for a variant
+   --> src/collections/vec/small_vec.rs:266:5
+    |
+266 |     Heap(<BrandedVec<'brand, T> as IntoIterator>::IntoIter),
+    |     ^^^^
+
+warning: missing documentation for a trait
+  --> src/collections/vec/vec.rs:22:1
+   |
+22 | pub trait IsTrue {}
+   | ^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/collections/vec/vec.rs:341:5
+    |
+341 | /     pub fn all_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+342 | |     where
+343 | |         F: Fn(&T) -> bool,
+    | |__________________________^
+
+warning: missing documentation for a struct
+   --> src/collections/vec/vec_deque.rs:424:1
+    |
+424 | pub struct IntoIter<'brand, T> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a module
+  --> src/concurrency/mod.rs:10:1
+   |
+10 | pub mod sync;
+   | ^^^^^^^^^^^^
+
+warning: missing documentation for a module
+ --> src/concurrency/sync/mod.rs:1:1
+  |
+1 | pub mod mpmc;
+  | ^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/graph/basic/dag.rs:726:5
+    |
+726 |     pub fn edge_count(&self) -> usize {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/graph/basic/dag.rs:731:5
+    |
+731 |     pub fn neighbors(&self, node: usize) -> impl Iterator<Item = usize> + '_ {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/graph/basic/dag.rs:736:5
+    |
+736 |     pub fn degree(&self, node: usize) -> usize {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+  --> src/graph/basic/pool_graph.rs:30:5
+   |
+30 |     pub fn index(self) -> usize {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for an associated function
+  --> src/graph/compressed/compressed_graph/iter.rs:12:5
+   |
+12 |     pub fn new(edges: &'a [usize], start: usize, end: usize) -> Self {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for an associated function
+  --> src/graph/compressed/ecc_graph/storage.rs:16:5
+   |
+16 |     pub fn new(source: usize, target: usize) -> Self {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for an associated function
+  --> src/graph/compressed/ecc_graph/storage.rs:25:5
+   |
+25 |     pub fn with_weight(source: usize, target: usize, weight: i32) -> Self {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a variant
+ --> src/graph/specialized/amt_graph/iter.rs:3:5
+  |
+3 |     Sparse(std::slice::Iter<'a, usize>),
+  |     ^^^^^^
+
+warning: missing documentation for a variant
+ --> src/graph/specialized/amt_graph/iter.rs:4:5
+  |
+4 |     Dense {
+  |     ^^^^^
+
+warning: missing documentation for a struct field
+ --> src/graph/specialized/amt_graph/iter.rs:5:9
+  |
+5 |         bitset: &'a [u64],
+  |         ^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a struct field
+ --> src/graph/specialized/amt_graph/iter.rs:6:9
+  |
+6 |         index: usize,
+  |         ^^^^^^^^^^^^
+
+warning: missing documentation for a struct field
+ --> src/graph/specialized/amt_graph/iter.rs:7:9
+  |
+7 |         len: usize,
+  |         ^^^^^^^^^^
+
+warning: missing documentation for a variant
+ --> src/graph/specialized/amt_graph/iter.rs:9:5
+  |
+9 |     Sorted(std::slice::Iter<'a, usize>),
+  |     ^^^^^^
+
+warning: missing documentation for a method
+  --> src/graph/specialized/lel_graph/mod.rs:59:5
+   |
+59 |     pub fn node_count(&self) -> usize {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+  --> src/graph/specialized/lel_graph/mod.rs:64:5
+   |
+64 |     pub fn edge_count(&self) -> usize {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+  --> src/graph/specialized/lel_graph/mod.rs:69:5
+   |
+69 |     pub fn degree(&self, node: usize) -> usize {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+  --> src/graph/specialized/lel_graph/mod.rs:75:5
+   |
+75 |     pub fn neighbors(&self, node: usize) -> LelNeighborIter<'_> {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+  --> src/graph/specialized/lel_graph/mod.rs:81:5
+   |
+81 |     pub fn has_edge(&self, from: usize, to: usize) -> bool {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+  --> src/graph/specialized/lel_graph/mod.rs:89:5
+   |
+89 |     pub fn clear_visited(&self) {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+  --> src/graph/specialized/lel_graph/mod.rs:94:5
+   |
+94 |     pub fn try_visit(&self, node: usize) -> bool {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/graph/specialized/lel_graph/mod.rs:100:5
+    |
+100 |     pub fn bfs(&self, start: usize) -> Vec<usize> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/graph/specialized/lel_graph/mod.rs:124:5
+    |
+124 |     pub fn compression_stats(&self) -> LelCompressionStats {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a struct field
+   --> src/graph/specialized/lel_graph/mod.rs:142:5
+    |
+142 |     pub original_size: usize,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a struct field
+   --> src/graph/specialized/lel_graph/mod.rs:143:5
+    |
+143 |     pub compressed_size: usize,
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a struct field
+   --> src/graph/specialized/lel_graph/mod.rs:144:5
+    |
+144 |     pub node_count: usize,
+    |     ^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a struct field
+   --> src/graph/specialized/lel_graph/mod.rs:145:5
+    |
+145 |     pub edge_count: usize,
+    |     ^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/graph/specialized/lel_graph/mod.rs:150:5
+    |
+150 |     pub fn compression_ratio(&self) -> f64 {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a method
+   --> src/graph/specialized/lel_graph/mod.rs:159:5
+    |
+159 |     pub fn memory_savings_percent(&self) -> f64 {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: missing documentation for a module
+  --> src/token/mod.rs:16:1
+   |
+16 | pub mod invariant;
+   | ^^^^^^^^^^^^^^^^^
+
+warning: `halo` (lib) generated 201 warnings (run `cargo fix --lib -p halo` to apply 26 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.10s
+     Running tests/sync_test.rs (target/debug/deps/sync_test-bbfaf8e212033499)
+
+running 3 tests
+test test_ring_buffer_basic ... ok
+test test_ring_buffer_full ... ok
+test test_ring_buffer_concurrent ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

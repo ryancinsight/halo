@@ -1,11 +1,11 @@
-use core::marker::PhantomData;
-use core::ptr::{self, NonNull};
-use core::alloc::Layout;
-use std::alloc::{alloc, dealloc, handle_alloc_error};
-use crate::GhostToken;
 use super::static_rc::StaticRc;
 use crate::cell::GhostCell;
 use crate::token::InvariantLifetime;
+use crate::GhostToken;
+use core::alloc::Layout;
+use core::marker::PhantomData;
+use core::ptr::{self, NonNull};
+use std::alloc::{alloc, dealloc, handle_alloc_error};
 
 /// A uniquely owned heap allocation that is tied to a specific type-level brand.
 ///
@@ -25,13 +25,13 @@ impl<'id, T> BrandedBox<'id, T> {
         let layout = Layout::new::<T>();
         // SAFETY: T is Sized, layout is valid.
         let raw = if layout.size() == 0 {
-             NonNull::dangling().as_ptr()
+            NonNull::dangling().as_ptr()
         } else {
-             unsafe { alloc(layout) as *mut T }
+            unsafe { alloc(layout) as *mut T }
         };
 
         if raw.is_null() {
-             handle_alloc_error(layout);
+            handle_alloc_error(layout);
         }
 
         // SAFETY: raw is non-null.
@@ -78,9 +78,7 @@ impl<'id, T> BrandedBox<'id, T> {
         // 1. ptr is a valid heap allocation of T.
         // 2. We transferred ownership from `self` (consumed) to `StaticRc`.
         // 3. The allocation was created via `std::alloc::alloc`, which is compatible with `StaticRc::drop` (dealloc).
-        unsafe {
-             StaticRc::from_raw(NonNull::new_unchecked(cell_ptr))
-        }
+        unsafe { StaticRc::from_raw(NonNull::new_unchecked(cell_ptr)) }
     }
 }
 

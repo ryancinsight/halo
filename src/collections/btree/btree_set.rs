@@ -2,8 +2,8 @@
 //!
 //! Implemented as a wrapper around `BrandedBTreeMap`.
 
-use crate::{GhostCell, GhostToken};
 use super::btree_map::BrandedBTreeMap;
+use crate::{GhostCell, GhostToken};
 use std::borrow::Borrow;
 
 /// A B-Tree set.
@@ -60,7 +60,10 @@ where
     }
 
     /// Returns an iterator over the values in the set.
-    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> super::btree_map::Keys<'a, 'brand, T, ()> {
+    pub fn iter<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+    ) -> super::btree_map::Keys<'a, 'brand, T, ()> {
         self.map.keys(token)
     }
 }

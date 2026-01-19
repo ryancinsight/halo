@@ -4,9 +4,7 @@
 //! This module provides *scoped* patterns for sending/sharing the token across
 //! threads with minimal overhead and without locking the data itself.
 
-pub mod scoped;
 pub mod atomic;
+pub mod scoped;
 pub mod worklist;
 pub mod sync;
-
-

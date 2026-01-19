@@ -13,5 +13,3 @@ mod ops_copy;
 mod ops_functional;
 
 pub use ghost_cell::GhostCell;
-
-

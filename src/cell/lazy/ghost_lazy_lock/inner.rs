@@ -17,12 +17,3 @@ pub(super) struct Inner<T, F> {
     pub(super) slot: Slot<T, F>,
     pub(super) state: State,
 }
-
-
-
-
-
-
-
-
-

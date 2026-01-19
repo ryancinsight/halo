@@ -14,9 +14,9 @@ use core::{
     sync::atomic::{AtomicIsize, Ordering},
 };
 
-use crate::{GhostToken, GhostUnsafeCell};
-use crate::cell::raw::access::maybe_uninit as mu;
 use crate::cell::raw::access::ghost_unsafe_cell as guc;
+use crate::cell::raw::access::maybe_uninit as mu;
+use crate::{GhostToken, GhostUnsafeCell};
 
 /// A runtime borrow-checked cell branded by a ghost token.
 #[repr(align(64))] // Cache line alignment for multi-threaded performance
@@ -72,7 +72,10 @@ impl<'brand, T> GhostRefCell<'brand, T> {
     /// Panics if the value is currently borrowed.
     #[inline(always)]
     pub fn borrow_mut<'a>(&'a self, _token: &'a mut GhostToken<'brand>) -> RefMut<'brand, 'a, T> {
-        match self.borrow.compare_exchange(0, -1, Ordering::AcqRel, Ordering::Acquire) {
+        match self
+            .borrow
+            .compare_exchange(0, -1, Ordering::AcqRel, Ordering::Acquire)
+        {
             Ok(_) => RefMut { cell: self },
             Err(_) => panic!("already borrowed"),
         }
@@ -80,10 +83,7 @@ impl<'brand, T> GhostRefCell<'brand, T> {
 
     /// Attempts to immutably borrow the wrapped value.
     #[inline(always)]
-    pub fn try_borrow<'a>(
-        &'a self,
-        _token: &'a GhostToken<'brand>,
-    ) -> Option<Ref<'brand, 'a, T>> {
+    pub fn try_borrow<'a>(&'a self, _token: &'a GhostToken<'brand>) -> Option<Ref<'brand, 'a, T>> {
         let mut current = self.borrow.load(Ordering::Acquire);
         loop {
             if current < 0 {
@@ -107,7 +107,10 @@ impl<'brand, T> GhostRefCell<'brand, T> {
         &'a self,
         _token: &'a mut GhostToken<'brand>,
     ) -> Option<RefMut<'brand, 'a, T>> {
-        match self.borrow.compare_exchange(0, -1, Ordering::AcqRel, Ordering::Acquire) {
+        match self
+            .borrow
+            .compare_exchange(0, -1, Ordering::AcqRel, Ordering::Acquire)
+        {
             Ok(_) => Some(RefMut { cell: self }),
             Err(_) => None,
         }
@@ -119,7 +122,10 @@ impl<'brand, T> GhostRefCell<'brand, T> {
     /// Panics if the value is currently borrowed.
     #[inline(always)]
     pub fn replace(&self, _token: &mut GhostToken<'brand>, value: T) -> T {
-        match self.borrow.compare_exchange(0, -1, Ordering::AcqRel, Ordering::Acquire) {
+        match self
+            .borrow
+            .compare_exchange(0, -1, Ordering::AcqRel, Ordering::Acquire)
+        {
             Ok(_) => {
                 let slot = unsafe { guc::as_mut_ptr_unchecked(&self.value) };
                 let old = unsafe { mu::read_ptr(slot) };
@@ -141,7 +147,10 @@ impl<'brand, T> GhostRefCell<'brand, T> {
     where
         F: FnOnce(&mut T) -> T,
     {
-        match self.borrow.compare_exchange(0, -1, Ordering::AcqRel, Ordering::Acquire) {
+        match self
+            .borrow
+            .compare_exchange(0, -1, Ordering::AcqRel, Ordering::Acquire)
+        {
             Ok(_) => {
                 let slot = unsafe { guc::as_mut_ptr_unchecked(&self.value) };
                 let cur = unsafe { mu::assume_init_mut(&mut *slot) };
@@ -163,8 +172,11 @@ impl<'brand, T> GhostRefCell<'brand, T> {
     #[inline(always)]
     pub fn swap(&self, _token: &mut GhostToken<'brand>, other: &Self) {
         match (
-            self.borrow.compare_exchange(0, -1, Ordering::AcqRel, Ordering::Acquire),
-            other.borrow.compare_exchange(0, -1, Ordering::AcqRel, Ordering::Acquire),
+            self.borrow
+                .compare_exchange(0, -1, Ordering::AcqRel, Ordering::Acquire),
+            other
+                .borrow
+                .compare_exchange(0, -1, Ordering::AcqRel, Ordering::Acquire),
         ) {
             (Ok(_), Ok(_)) => {
                 let a = unsafe { guc::as_mut_ptr_unchecked(&self.value) };
@@ -186,7 +198,10 @@ impl<'brand, T> GhostRefCell<'brand, T> {
     where
         T: Default,
     {
-        match self.borrow.compare_exchange(0, -1, Ordering::AcqRel, Ordering::Acquire) {
+        match self
+            .borrow
+            .compare_exchange(0, -1, Ordering::AcqRel, Ordering::Acquire)
+        {
             Ok(_) => {
                 let slot = unsafe { guc::as_mut_ptr_unchecked(&self.value) };
                 let old = unsafe { mu::read_ptr(slot) };
@@ -237,5 +252,3 @@ impl<'brand, T: core::fmt::Debug> core::fmt::Debug for GhostRefCell<'brand, T> {
             .finish()
     }
 }
-
-

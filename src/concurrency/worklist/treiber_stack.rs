@@ -119,5 +119,3 @@ impl<'brand> GhostTreiberStack<'brand> {
         }
     }
 }
-
-

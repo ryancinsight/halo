@@ -15,13 +15,10 @@
 
 use core::sync::atomic::Ordering;
 
-use crate::{
-    collections::ChunkedVec,
-    graph::access::visited::VisitedSet,
-};
+use crate::{collections::ChunkedVec, graph::access::visited::VisitedSet};
 
-pub use offsets::CompressedOffsets;
 pub use iter::CompressedNeighborIter;
+pub use offsets::CompressedOffsets;
 
 /// Compressed CSR graph with run-length encoding.
 ///
@@ -131,8 +128,8 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCompressedGraph<'brand, EDGE_CHUNK> {
     }
 }
 
-mod offsets;
-mod traversal;
 mod iter;
+mod offsets;
 #[cfg(test)]
 mod tests;
+mod traversal;

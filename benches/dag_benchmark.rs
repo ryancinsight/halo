@@ -73,19 +73,9 @@ impl StdDag {
 fn create_test_graphs() -> Vec<Vec<Vec<usize>>> {
     vec![
         // Small chain: 0 -> 1 -> 2 -> 3
-        vec![
-            vec![1],
-            vec![2],
-            vec![3],
-            vec![],
-        ],
+        vec![vec![1], vec![2], vec![3], vec![]],
         // Diamond: 0 -> 1, 0 -> 2, 1 -> 3, 2 -> 3
-        vec![
-            vec![1, 2],
-            vec![3],
-            vec![3],
-            vec![],
-        ],
+        vec![vec![1, 2], vec![3], vec![3], vec![]],
         // Tree: 0 -> 1,2,3; 1 -> 4,5; 2 -> 6
         vec![
             vec![1, 2, 3],

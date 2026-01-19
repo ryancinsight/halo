@@ -10,8 +10,8 @@ use core::{
     ptr,
 };
 
-use crate::{GhostToken, GhostUnsafeCell};
 use crate::cell::raw::access::ghost_unsafe_cell as guc;
+use crate::{GhostToken, GhostUnsafeCell};
 use inner::Inner;
 
 /// A token-gated recomputable lazy cell.
@@ -113,5 +113,3 @@ impl<'brand, T, F> Drop for GhostLazyCell<'brand, T, F> {
 // SAFETY: token-gated aliasing reasoning; no implicit synchronization.
 unsafe impl<'brand, T: Send, F: Send> Send for GhostLazyCell<'brand, T, F> {}
 unsafe impl<'brand, T: Sync, F: Sync> Sync for GhostLazyCell<'brand, T, F> {}
-
-

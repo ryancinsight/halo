@@ -249,7 +249,8 @@ fn bench_comprehensive_stdlib_comparison(c: &mut Criterion) {
     group.bench_function("stdlib_vec_random_access", |b| {
         b.iter(|| {
             let mut sum = 0;
-            for i in (0..10000).step_by(37) { // Pseudo-random access pattern
+            for i in (0..10000).step_by(37) {
+                // Pseudo-random access pattern
                 sum += std_vec[i];
             }
             black_box(sum);

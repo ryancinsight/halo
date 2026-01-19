@@ -39,8 +39,8 @@ pub fn compression_stats<'brand, const EDGE_CHUNK: usize>(
     graph: &super::GhostCompressedGraph<'brand, EDGE_CHUNK>,
 ) -> CompressionStats {
     let original_offsets_size = (graph.node_count + 1) * std::mem::size_of::<usize>();
-    let compressed_offsets_size = graph.offsets.values_len() * std::mem::size_of::<usize>() +
-                                graph.offsets.runs_len() * std::mem::size_of::<usize>();
+    let compressed_offsets_size = graph.offsets.values_len() * std::mem::size_of::<usize>()
+        + graph.offsets.runs_len() * std::mem::size_of::<usize>();
 
     let original_edges_size = graph.edge_count * std::mem::size_of::<usize>();
     let compressed_edges_size = graph.edges.len() * std::mem::size_of::<usize>(); // Edges uncompressed

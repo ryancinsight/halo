@@ -1,6 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use halo::{GhostToken, BrandedHashMap};
 use halo::collections::hash::ActivateHashMap;
+use halo::{BrandedHashMap, GhostToken};
 use std::collections::HashMap;
 
 fn bench_insert(c: &mut Criterion) {
@@ -29,7 +29,7 @@ fn bench_insert(c: &mut Criterion) {
 
     group.bench_function("ActiveHashMap", |b| {
         b.iter(|| {
-             GhostToken::new(|mut token| {
+            GhostToken::new(|mut token| {
                 let mut map = BrandedHashMap::new();
                 {
                     let mut active = map.activate(&mut token);
@@ -80,7 +80,7 @@ fn bench_get(c: &mut Criterion) {
                 // Activate inside the loop to simulate usage scope
                 let active = branded_map.activate(&mut token);
                 for i in 0..size {
-                     black_box(active.get(&i));
+                    black_box(active.get(&i));
                 }
             })
         });
@@ -108,14 +108,14 @@ fn bench_get_mut(c: &mut Criterion) {
         })
     });
 
-     GhostToken::new(|mut token| {
+    GhostToken::new(|mut token| {
         let mut branded_map = BrandedHashMap::new();
         for i in 0..size {
             branded_map.insert(i, i);
         }
 
         group.bench_function("BrandedHashMap", |b| {
-             b.iter(|| {
+            b.iter(|| {
                 for i in 0..size {
                     if let Some(x) = branded_map.get_mut(&mut token, &i) {
                         *x += 1;
@@ -125,7 +125,7 @@ fn bench_get_mut(c: &mut Criterion) {
         });
 
         group.bench_function("ActiveHashMap", |b| {
-             b.iter(|| {
+            b.iter(|| {
                 let mut active = branded_map.activate(&mut token);
                 for i in 0..size {
                     if let Some(x) = active.get_mut(&i) {
@@ -134,7 +134,7 @@ fn bench_get_mut(c: &mut Criterion) {
                 }
             })
         });
-     });
+    });
 
     group.finish();
 }

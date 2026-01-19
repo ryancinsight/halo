@@ -1,9 +1,9 @@
-use core::ptr::{self, NonNull};
+use crate::token::InvariantLifetime;
 use core::alloc::Layout;
-use std::alloc::{dealloc, handle_alloc_error};
 use core::mem;
 use core::ops::Deref;
-use crate::token::InvariantLifetime;
+use core::ptr::{self, NonNull};
+use std::alloc::{dealloc, handle_alloc_error};
 
 /// A compile-time reference-counted pointer that tracks ownership fractions.
 ///
@@ -29,13 +29,13 @@ impl<'id, T, const N: usize, const D: usize> StaticRc<'id, T, N, D> {
         let layout = Layout::new::<T>();
         // SAFETY: T is Sized, layout is valid.
         let raw = if layout.size() == 0 {
-             NonNull::dangling().as_ptr()
+            NonNull::dangling().as_ptr()
         } else {
-             unsafe { std::alloc::alloc(layout) as *mut T }
+            unsafe { std::alloc::alloc(layout) as *mut T }
         };
 
         if raw.is_null() {
-             handle_alloc_error(layout);
+            handle_alloc_error(layout);
         }
 
         // SAFETY: raw is non-null.
@@ -72,7 +72,9 @@ impl<'id, T, const N: usize, const D: usize> StaticRc<'id, T, N, D> {
     /// # Panics
     ///
     /// Panics if `M + R != N`.
-    pub fn split<const M: usize, const R: usize>(self) -> (StaticRc<'id, T, M, D>, StaticRc<'id, T, R, D>) {
+    pub fn split<const M: usize, const R: usize>(
+        self,
+    ) -> (StaticRc<'id, T, M, D>, StaticRc<'id, T, R, D>) {
         assert_eq!(M + R, N, "Split amounts must sum to current shares");
         // We are consuming self, so we don't drop it.
         let ptr = self.ptr;
@@ -81,8 +83,14 @@ impl<'id, T, const N: usize, const D: usize> StaticRc<'id, T, N, D> {
         // SAFETY: We are just splitting ownership, ptr remains valid.
         unsafe {
             (
-                StaticRc { ptr, _brand: InvariantLifetime::default() },
-                StaticRc { ptr, _brand: InvariantLifetime::default() },
+                StaticRc {
+                    ptr,
+                    _brand: InvariantLifetime::default(),
+                },
+                StaticRc {
+                    ptr,
+                    _brand: InvariantLifetime::default(),
+                },
             )
         }
     }
@@ -97,9 +105,14 @@ impl<'id, T, const N: usize, const D: usize> StaticRc<'id, T, N, D> {
     pub fn adjust<const NEW_N: usize, const NEW_D: usize>(self) -> StaticRc<'id, T, NEW_N, NEW_D> {
         // Check if fraction is equivalent: N/D == NEW_N/NEW_D => N * NEW_D == NEW_N * D
         assert_eq!(N * NEW_D, NEW_N * D, "Ownership fraction must be preserved");
-         let ptr = self.ptr;
+        let ptr = self.ptr;
         mem::forget(self);
-        unsafe { StaticRc { ptr, _brand: InvariantLifetime::default() } }
+        unsafe {
+            StaticRc {
+                ptr,
+                _brand: InvariantLifetime::default(),
+            }
+        }
     }
 
     /// Joins two instances back together.
@@ -112,15 +125,26 @@ impl<'id, T, const N: usize, const D: usize> StaticRc<'id, T, N, D> {
     /// # Panics
     ///
     /// Panics if the two instances point to different allocations, or if `N + M != SUM`.
-    pub fn join<const M: usize, const SUM: usize>(self, other: StaticRc<'id, T, M, D>) -> StaticRc<'id, T, SUM, D> {
-        assert_eq!(self.ptr, other.ptr, "Cannot join StaticRc pointing to different allocations");
+    pub fn join<const M: usize, const SUM: usize>(
+        self,
+        other: StaticRc<'id, T, M, D>,
+    ) -> StaticRc<'id, T, SUM, D> {
+        assert_eq!(
+            self.ptr, other.ptr,
+            "Cannot join StaticRc pointing to different allocations"
+        );
         assert_eq!(N + M, SUM, "Join result amount must equal sum of shares");
 
         let ptr = self.ptr;
         mem::forget(self);
         mem::forget(other);
 
-        unsafe { StaticRc { ptr, _brand: InvariantLifetime::default() } }
+        unsafe {
+            StaticRc {
+                ptr,
+                _brand: InvariantLifetime::default(),
+            }
+        }
     }
 
     /// Returns a reference to the inner value.
@@ -142,12 +166,12 @@ impl<'id, T, const N: usize, const D: usize> Drop for StaticRc<'id, T, N, D> {
                 }
             }
         } else {
-             #[cfg(debug_assertions)]
-             {
-                 if !std::thread::panicking() {
-                     panic!("StaticRc dropped with N != D (N={}, D={})", N, D);
-                 }
-             }
+            #[cfg(debug_assertions)]
+            {
+                if !std::thread::panicking() {
+                    panic!("StaticRc dropped with N != D (N={}, D={})", N, D);
+                }
+            }
         }
     }
 }
