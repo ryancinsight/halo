@@ -113,10 +113,6 @@ fn matrix_split_benchmark(c: &mut Criterion) {
                 let (tl, tr, bl, br) = view.split_quadrants(rows/2, cols/2);
 
                 // Simulate partial work on quadrants
-                let mut work = 0;
-                // Just check one element from each to simulate access
-                // Note: we can't easily iterate all efficiently without iterators on view yet
-                // But we can check bounds overhead
                 black_box(tl.rows());
                 black_box(tr.rows());
                 black_box(bl.rows());
@@ -143,5 +139,62 @@ fn matrix_split_benchmark(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, matrix_access_benchmark, matrix_iteration_benchmark, matrix_split_benchmark);
+fn matrix_fill_benchmark(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Matrix Fill");
+    let rows = 1000;
+    let cols = 1000;
+
+    // 1. BrandedMatrix::fill (new optimization)
+    group.bench_function("BrandedMatrix::view_mut().fill()", |b| {
+        GhostToken::new(|mut token| {
+            let mut mat = BrandedMatrix::<i32>::new(rows, cols);
+            b.iter(|| {
+                let mut view = mat.view_mut();
+                view.fill(42);
+                black_box(());
+            });
+        });
+    });
+
+     // 2. BrandedMatrix manual loop
+    group.bench_function("BrandedMatrix::for_each_mut", |b| {
+        GhostToken::new(|mut token| {
+            let mut mat = BrandedMatrix::<i32>::new(rows, cols);
+            b.iter(|| {
+                let view = mat.view_mut();
+                view.for_each_mut(|_, _, val| *val = 42);
+                black_box(());
+            });
+        });
+    });
+
+    // 3. Vec<Vec<T>> manual loop
+    group.bench_function("Vec<Vec<T>>::iter_mut_fill", |b| {
+        let mut vec = Vec::with_capacity(rows);
+        for _ in 0..rows {
+            vec.push(vec![0; cols]);
+        }
+        b.iter(|| {
+             for row in &mut vec {
+                 for val in row {
+                     *val = 42;
+                 }
+             }
+            black_box(());
+        });
+    });
+
+    // 4. Flattened Vec<T> fill
+    group.bench_function("Vec<T>::fill", |b| {
+        let mut vec = vec![0; rows * cols];
+        b.iter(|| {
+            vec.fill(42);
+            black_box(());
+        });
+    });
+
+    group.finish();
+}
+
+criterion_group!(benches, matrix_access_benchmark, matrix_iteration_benchmark, matrix_split_benchmark, matrix_fill_benchmark);
 criterion_main!(benches);
