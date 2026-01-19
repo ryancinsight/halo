@@ -15,8 +15,8 @@ pub mod string;
 
 // Re-export commonly used types from submodules
 pub use vec::{
-    BrandedVec, BrandedVecDeque, BrandedChunkedVec, ChunkedVec, BrandedSmallVec,
-    ActiveVec, ActivateVec, BrandedSlice, BrandedSliceMut
+    BrandedVec, BrandedArray, BrandedVecDeque, BrandedChunkedVec, ChunkedVec, BrandedSmallVec,
+    ActiveVec, ActivateVec, BrandedSlice, BrandedSliceMut, BrandedMatrix, BrandedMatrixViewMut
 };
 pub use hash::{BrandedHashMap, BrandedHashSet, BrandedIndexMap};
 pub use btree::{BrandedBTreeMap, BrandedBTreeSet};

@@ -114,6 +114,7 @@ pub use alloc::BrandedArena;
 pub use cell::{GhostCell, GhostLazyCell, GhostLazyLock, GhostOnceCell, GhostUnsafeCell, RawGhostCell, GhostRefCell};
 pub use collections::{
     BrandedVec,
+    BrandedArray,
     BrandedVecDeque,
     BrandedHashMap,
     BrandedHashSet,
@@ -125,6 +126,8 @@ pub use collections::{
     ActiveVec,
     BrandedSlice,
     BrandedSliceMut,
+    BrandedMatrix,
+    BrandedMatrixViewMut,
 };
 pub use graph::{GhostAdjacencyGraph, GhostBipartiteGraph, GhostCscGraph, GhostCsrGraph, GhostDag};
 pub use token::{GhostToken, SharedGhostToken};
