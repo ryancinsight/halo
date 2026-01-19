@@ -1,31 +1,37 @@
 //! `BrandedVecDeque` — a growable ring buffer deque with token-gated access.
 //!
 //! This provides a growable double-ended queue using the `GhostCell` pattern.
-//! It is implemented from scratch using a `Vec` of `MaybeUninit` cells to allow
-//! efficient ring buffer management and zero-cost token access.
+//! It is implemented from scratch using raw allocation to allow efficient ring
+//! buffer management and zero-cost token access, avoiding `std::vec::Vec`.
 
-use core::mem::MaybeUninit;
+use core::mem::{self, MaybeUninit};
+use core::ptr::{self, NonNull};
+use std::alloc::{alloc, dealloc, handle_alloc_error, Layout};
 use crate::{GhostCell, GhostToken};
 use crate::collections::ZeroCopyOps;
-use std::vec::Vec;
-use std::ptr;
 
 /// A double-ended queue of token-gated elements.
 pub struct BrandedVecDeque<'brand, T> {
-    /// The backing storage. Elements are stored in a ring buffer fashion.
-    /// We use MaybeUninit to manage initialization manually.
-    buffer: Vec<MaybeUninit<GhostCell<'brand, T>>>,
+    /// Pointer to the allocated memory.
+    ptr: NonNull<GhostCell<'brand, T>>,
+    /// Capacity of the allocation.
+    cap: usize,
     /// The index of the first element.
     head: usize,
     /// The number of elements in the deque.
     len: usize,
 }
 
+// Safety: BrandedVecDeque owns the memory and the data.
+unsafe impl<'brand, T: Send> Send for BrandedVecDeque<'brand, T> {}
+unsafe impl<'brand, T: Sync> Sync for BrandedVecDeque<'brand, T> {}
+
 impl<'brand, T> BrandedVecDeque<'brand, T> {
     /// Creates an empty deque.
     pub fn new() -> Self {
         Self {
-            buffer: Vec::new(),
+            ptr: NonNull::dangling(),
+            cap: 0,
             head: 0,
             len: 0,
         }
@@ -33,11 +39,26 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
 
     /// Creates an empty deque with the specified capacity.
     pub fn with_capacity(capacity: usize) -> Self {
-        let mut buffer = Vec::with_capacity(capacity);
-        // SAFETY: MaybeUninit allows uninitialized memory.
-        unsafe { buffer.set_len(capacity); }
+        if capacity == 0 {
+            return Self::new();
+        }
+        let layout = Layout::array::<GhostCell<'brand, T>>(capacity).unwrap();
+        // Ensure layout size > 0 if capacity > 0 (T could be ZST)
+        let ptr = if layout.size() > 0 {
+            unsafe {
+                let p = alloc(layout);
+                if p.is_null() {
+                    handle_alloc_error(layout);
+                }
+                NonNull::new_unchecked(p as *mut GhostCell<'brand, T>)
+            }
+        } else {
+            NonNull::dangling()
+        };
+
         Self {
-            buffer,
+            ptr,
+            cap: capacity,
             head: 0,
             len: 0,
         }
@@ -58,73 +79,83 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
     /// Current capacity.
     #[inline(always)]
     pub fn capacity(&self) -> usize {
-        self.buffer.capacity()
+        self.cap
     }
 
     /// Returns the index of the tail (where the next element will be pushed).
     #[inline(always)]
     fn tail(&self) -> usize {
-        if self.capacity() == 0 {
+        if self.cap == 0 {
             0
         } else {
-            (self.head + self.len) % self.capacity()
+            (self.head + self.len) % self.cap
         }
     }
 
     /// Internal helper to grow the buffer.
     fn grow(&mut self) {
-        let old_cap = self.capacity();
-        // If empty, just reserve.
-        if old_cap == 0 {
-            self.buffer.reserve(4);
-            // SAFETY: MaybeUninit allows uninitialized memory.
-            unsafe { self.buffer.set_len(self.buffer.capacity()); }
+        let old_cap = self.cap;
+        let new_cap = if old_cap == 0 { 4 } else { old_cap * 2 };
+
+        let old_layout = if old_cap > 0 {
+            Some(Layout::array::<GhostCell<'brand, T>>(old_cap).unwrap())
+        } else {
+            None
+        };
+
+        let new_layout = Layout::array::<GhostCell<'brand, T>>(new_cap).unwrap();
+
+        // ZST check
+        if new_layout.size() == 0 {
+            self.cap = usize::MAX;
             return;
         }
 
-        let new_cap = old_cap * 2;
-        self.buffer.reserve(new_cap - old_cap);
-
-        // Safety: We are extending with uninitialized memory which is valid for MaybeUninit.
-        // We set the vector length to the new capacity so we can index into it.
         unsafe {
-            self.buffer.set_len(self.buffer.capacity());
-        }
-
-        let cap = self.buffer.len(); // Actual new capacity
-
-        // Rearrange elements if needed (unwrap the ring)
-        if self.head + self.len > old_cap {
-            let head_len = old_cap - self.head;
-            let new_head = cap - head_len;
-
-            unsafe {
-                let ptr = self.buffer.as_mut_ptr();
-                ptr::copy_nonoverlapping(
-                    ptr.add(self.head),
-                    ptr.add(new_head),
-                    head_len
-                );
+            let new_ptr = alloc(new_layout);
+            if new_ptr.is_null() {
+                handle_alloc_error(new_layout);
             }
-            self.head = new_head;
+            let new_ptr = new_ptr as *mut GhostCell<'brand, T>;
+
+            // Copy elements to new buffer
+            // We align head to 0 in the new buffer for simplicity
+            if old_cap > 0 {
+                let ptr = self.ptr.as_ptr();
+                let head = self.head;
+                let len = self.len;
+
+                // Amount of data from head to end of allocation
+                let upper_len = old_cap - head;
+                // Actual size of first chunk
+                let head_len = if len <= upper_len { len } else { upper_len };
+                // Size of second chunk
+                let tail_len = len - head_len;
+
+                // Copy head part
+                ptr::copy_nonoverlapping(ptr.add(head), new_ptr, head_len);
+
+                // Copy tail part if any
+                if tail_len > 0 {
+                    ptr::copy_nonoverlapping(ptr, new_ptr.add(head_len), tail_len);
+                }
+
+                // Deallocate old
+                if let Some(layout) = old_layout {
+                    dealloc(ptr as *mut u8, layout);
+                }
+            }
+
+            self.ptr = NonNull::new_unchecked(new_ptr);
+            self.cap = new_cap;
+            self.head = 0;
         }
     }
 
     /// Ensure capacity for one more element.
     fn ensure_capacity(&mut self) {
-        if self.len == self.capacity() {
-            // First time setup if capacity is 0 but buffer len is 0.
-            if self.buffer.len() < self.buffer.capacity() {
-                unsafe { self.buffer.set_len(self.buffer.capacity()); }
-            }
-
-            if self.len == self.buffer.len() {
-                self.grow();
-                // Ensure len is set after grow (grow sets it)
-                if self.buffer.len() < self.buffer.capacity() {
-                     unsafe { self.buffer.set_len(self.buffer.capacity()); }
-                }
-            }
+        if self.len == self.cap {
+            self.grow();
         }
     }
 
@@ -133,7 +164,7 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
         self.ensure_capacity();
         let tail = self.tail();
         unsafe {
-            let ptr = self.buffer.get_unchecked_mut(tail).as_mut_ptr();
+            let ptr = self.ptr.as_ptr().add(tail);
             ptr.write(GhostCell::new(value));
         }
         self.len += 1;
@@ -142,9 +173,9 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
     /// Pushes an element to the front.
     pub fn push_front(&mut self, value: T) {
         self.ensure_capacity();
-        self.head = if self.head == 0 { self.capacity() - 1 } else { self.head - 1 };
+        self.head = if self.head == 0 { self.cap - 1 } else { self.head - 1 };
         unsafe {
-            let ptr = self.buffer.get_unchecked_mut(self.head).as_mut_ptr();
+            let ptr = self.ptr.as_ptr().add(self.head);
             ptr.write(GhostCell::new(value));
         }
         self.len += 1;
@@ -155,10 +186,10 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
         if self.is_empty() {
             return None;
         }
-        let tail = if self.tail() == 0 { self.capacity() - 1 } else { self.tail() - 1 };
+        let tail_idx = if self.tail() == 0 { self.cap - 1 } else { self.tail() - 1 };
         self.len -= 1;
         unsafe {
-            let ptr = self.buffer.get_unchecked(tail).as_ptr();
+            let ptr = self.ptr.as_ptr().add(tail_idx);
             Some(ptr::read(ptr))
         }
     }
@@ -168,11 +199,11 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
         if self.is_empty() {
             return None;
         }
-        let head = self.head;
-        self.head = (self.head + 1) % self.capacity();
+        let head_idx = self.head;
+        self.head = (self.head + 1) % self.cap;
         self.len -= 1;
         unsafe {
-            let ptr = self.buffer.get_unchecked(head).as_ptr();
+            let ptr = self.ptr.as_ptr().add(head_idx);
             Some(ptr::read(ptr))
         }
     }
@@ -188,9 +219,9 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
         if idx >= self.len {
             return None;
         }
-        let actual_idx = (self.head + idx) % self.capacity();
+        let actual_idx = (self.head + idx) % self.cap;
         unsafe {
-            let ptr = self.buffer.get_unchecked(actual_idx).as_ptr();
+            let ptr = self.ptr.as_ptr().add(actual_idx);
             Some((&*ptr).borrow(token))
         }
     }
@@ -201,12 +232,10 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
         if idx >= self.len {
             return None;
         }
-        let actual_idx = (self.head + idx) % self.capacity();
+        let actual_idx = (self.head + idx) % self.cap;
         unsafe {
-            let ptr = self.buffer.get_unchecked(actual_idx).as_ptr();
-            // We need mutable pointer to GhostCell
-            let cell_ptr = ptr as *mut GhostCell<'brand, T>;
-            Some((&mut *cell_ptr).borrow_mut(token))
+            let ptr = self.ptr.as_ptr().add(actual_idx);
+            Some((&mut *ptr).borrow_mut(token))
         }
     }
 
@@ -225,10 +254,9 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
     /// Exclusive iteration via callback.
     pub fn for_each_mut(&self, token: &mut GhostToken<'brand>, mut f: impl FnMut(&mut T)) {
         for i in 0..self.len {
-             // Optimize: avoid repeatedly calling get_mut which calculates index
-             let actual_idx = (self.head + i) % self.capacity();
+             let actual_idx = (self.head + i) % self.cap;
              unsafe {
-                let ptr = self.buffer.get_unchecked(actual_idx).as_ptr() as *mut GhostCell<'brand, T>;
+                let ptr = self.ptr.as_ptr().add(actual_idx);
                 let item = (&mut *ptr).borrow_mut(token);
                 f(item);
              }
@@ -238,9 +266,9 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
     /// Shared iteration via callback.
     pub fn for_each(&self, token: &GhostToken<'brand>, mut f: impl FnMut(&T)) {
         for i in 0..self.len {
-             let actual_idx = (self.head + i) % self.capacity();
+             let actual_idx = (self.head + i) % self.cap;
              unsafe {
-                let ptr = self.buffer.get_unchecked(actual_idx).as_ptr();
+                let ptr = self.ptr.as_ptr().add(actual_idx);
                 let item = (&*ptr).borrow(token);
                 f(item);
              }
@@ -249,58 +277,48 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
 
     /// Returns a pair of slices representing the deque contents.
     pub fn as_slices<'a>(&'a self, _token: &'a GhostToken<'brand>) -> (&'a [T], &'a [T]) {
-        if self.len == 0 || self.capacity() == 0 {
+        if self.len == 0 {
              return (&[], &[]);
         }
-        let tail = self.tail();
-        let (s1, s2) = if self.head < tail {
-            // Contiguous
-            (&self.buffer[self.head..tail], &self.buffer[0..0]) // Empty second slice
-        } else {
-            // Wrapped (or full where tail == head)
-            (&self.buffer[self.head..], &self.buffer[0..tail])
-        };
+        let ptr = self.ptr.as_ptr();
+        let head = self.head;
+        let cap = self.cap;
 
         unsafe {
-            (
-                std::slice::from_raw_parts(s1.as_ptr() as *const T, s1.len()),
-                std::slice::from_raw_parts(s2.as_ptr() as *const T, s2.len()),
-            )
+            if head + self.len <= cap {
+                // Contiguous
+                let s1 = std::slice::from_raw_parts(ptr.add(head) as *const T, self.len);
+                (s1, &[])
+            } else {
+                // Wrapped
+                let len1 = cap - head;
+                let len2 = self.len - len1;
+                let s1 = std::slice::from_raw_parts(ptr.add(head) as *const T, len1);
+                let s2 = std::slice::from_raw_parts(ptr as *const T, len2);
+                (s1, s2)
+            }
         }
     }
 
     /// Returns a pair of mutable slices representing the deque contents.
     pub fn as_mut_slices<'a>(&'a self, _token: &'a mut GhostToken<'brand>) -> (&'a mut [T], &'a mut [T]) {
-        if self.len == 0 || self.capacity() == 0 {
+        if self.len == 0 {
              return (&mut [], &mut []);
         }
-        // Note: We need unsafe access to the buffer via &self
-        let ptr = self.buffer.as_ptr() as *mut MaybeUninit<GhostCell<'brand, T>>;
-        let cap = self.buffer.capacity();
-
-        // Reconstruct slices manually based on head/tail logic
-        // We know we hold &mut GhostToken, so we have exclusive access to contents.
-        // We hold &self, so buffer is stable.
-
-        let tail = self.tail();
+        let ptr = self.ptr.as_ptr();
+        let head = self.head;
+        let cap = self.cap;
 
         unsafe {
-            if self.head < tail {
-                 let s1_ptr = ptr.add(self.head);
-                 let s1_len = tail - self.head;
-                 (
-                     std::slice::from_raw_parts_mut(s1_ptr as *mut T, s1_len),
-                     std::slice::from_raw_parts_mut(ptr as *mut T, 0)
-                 )
+            if head + self.len <= cap {
+                let s1 = std::slice::from_raw_parts_mut(ptr.add(head) as *mut T, self.len);
+                (s1, &mut [])
             } else {
-                 let s1_ptr = ptr.add(self.head);
-                 let s1_len = cap - self.head;
-                 let s2_ptr = ptr;
-                 let s2_len = tail;
-                 (
-                     std::slice::from_raw_parts_mut(s1_ptr as *mut T, s1_len),
-                     std::slice::from_raw_parts_mut(s2_ptr as *mut T, s2_len)
-                 )
+                let len1 = cap - head;
+                let len2 = self.len - len1;
+                let s1 = std::slice::from_raw_parts_mut(ptr.add(head) as *mut T, len1);
+                let s2 = std::slice::from_raw_parts_mut(ptr as *mut T, len2);
+                (s1, s2)
             }
         }
     }
@@ -312,8 +330,6 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
     }
 
     /// Iterates over the elements (mutable).
-    /// Note: This consumes `&mut token`. If you need to mutate in a loop,
-    /// consider `for_each_mut` or `as_mut_slices`.
     pub fn iter_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>) -> impl Iterator<Item = &'a mut T> + 'a {
         let (s1, s2) = self.as_mut_slices(token);
         s1.iter_mut().chain(s2.iter_mut())
@@ -329,6 +345,12 @@ impl<'brand, T> Default for BrandedVecDeque<'brand, T> {
 impl<'brand, T> Drop for BrandedVecDeque<'brand, T> {
     fn drop(&mut self) {
         self.clear();
+        if self.cap > 0 && mem::size_of::<T>() > 0 {
+            unsafe {
+                let layout = Layout::array::<GhostCell<'brand, T>>(self.cap).unwrap();
+                dealloc(self.ptr.as_ptr() as *mut u8, layout);
+            }
+        }
     }
 }
 
@@ -355,6 +377,93 @@ impl<'brand, T> ZeroCopyOps<'brand, T> for BrandedVecDeque<'brand, T> {
         F: Fn(&T) -> bool,
     {
         self.iter(token).all(|item| f(item))
+    }
+}
+
+impl<'brand, T> FromIterator<T> for BrandedVecDeque<'brand, T> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        let iter = iter.into_iter();
+        let (lower, _upper) = iter.size_hint();
+        let mut deque = Self::with_capacity(lower);
+        deque.extend(iter);
+        deque
+    }
+}
+
+impl<'brand, T> IntoIterator for BrandedVecDeque<'brand, T> {
+    type Item = T;
+    type IntoIter = IntoIter<'brand, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        IntoIter { deque: self }
+    }
+}
+
+pub struct IntoIter<'brand, T> {
+    deque: BrandedVecDeque<'brand, T>,
+}
+
+impl<'brand, T> Iterator for IntoIter<'brand, T> {
+    type Item = T;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.deque.pop_front().map(|cell| cell.into_inner())
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.deque.len(), Some(self.deque.len()))
+    }
+}
+
+impl<'brand, T> ExactSizeIterator for IntoIter<'brand, T> {}
+
+impl<'brand, T> Extend<T> for BrandedVecDeque<'brand, T> {
+    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        for item in iter {
+            self.push_back(item);
+        }
+    }
+}
+
+impl<'brand, T> BrandedVecDeque<'brand, T> {
+    /// Creates a draining iterator that removes the specified range in the deque
+    /// and yields the removed items.
+    pub fn drain<R>(&mut self, range: R) -> std::vec::IntoIter<T>
+    where
+        R: std::ops::RangeBounds<usize>,
+    {
+        let len = self.len();
+        let start = match range.start_bound() {
+            std::ops::Bound::Included(&n) => n,
+            std::ops::Bound::Excluded(&n) => n + 1,
+            std::ops::Bound::Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            std::ops::Bound::Included(&n) => n + 1,
+            std::ops::Bound::Excluded(&n) => n,
+            std::ops::Bound::Unbounded => len,
+        };
+
+        if start >= end || start >= len {
+            return Vec::new().into_iter();
+        }
+        let end = std::cmp::min(end, len);
+        let count = end - start;
+
+        let mut new_dq = Self::with_capacity(self.cap);
+        let mut drain_items = Vec::with_capacity(count);
+
+        // We can iterate efficiently using index
+        for i in 0..len {
+            let item = self.pop_front().unwrap().into_inner();
+            if i >= start && i < end {
+                drain_items.push(item);
+            } else {
+                new_dq.push_back(item);
+            }
+        }
+
+        *self = new_dq;
+        drain_items.into_iter()
     }
 }
 
@@ -461,133 +570,5 @@ mod tests {
             assert_eq!(s1, &[2, 3, 4]);
             assert_eq!(s2, &[5]);
         });
-    }
-}
-
-impl<'brand, T> FromIterator<T> for BrandedVecDeque<'brand, T> {
-    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        let mut buffer: Vec<MaybeUninit<GhostCell<'brand, T>>> = Vec::new();
-        for item in iter {
-             buffer.push(MaybeUninit::new(GhostCell::new(item)));
-        }
-        let len = buffer.len();
-        Self {
-            buffer,
-            head: 0,
-            len,
-        }
-    }
-}
-
-impl<'brand, T> IntoIterator for BrandedVecDeque<'brand, T> {
-    type Item = T;
-    type IntoIter = IntoIter<'brand, T>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        IntoIter { deque: self }
-    }
-}
-
-pub struct IntoIter<'brand, T> {
-    deque: BrandedVecDeque<'brand, T>,
-}
-
-impl<'brand, T> Iterator for IntoIter<'brand, T> {
-    type Item = T;
-    fn next(&mut self) -> Option<Self::Item> {
-        self.deque.pop_front().map(|cell| cell.into_inner())
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.deque.len(), Some(self.deque.len()))
-    }
-}
-
-impl<'brand, T> ExactSizeIterator for IntoIter<'brand, T> {}
-
-impl<'brand, T> Extend<T> for BrandedVecDeque<'brand, T> {
-    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
-        for item in iter {
-            self.push_back(item);
-        }
-    }
-}
-
-impl<'brand, T> BrandedVecDeque<'brand, T> {
-    /// Creates a draining iterator that removes the specified range in the deque
-    /// and yields the removed items.
-    ///
-    /// Note: This simple implementation collects into a Vec and returns its iterator.
-    /// This is not as efficient as a lazy iterator but satisfies the API.
-    pub fn drain<R>(&mut self, range: R) -> std::vec::IntoIter<T>
-    where
-        R: std::ops::RangeBounds<usize>,
-    {
-        // Simple inefficient implementation:
-        // 1. Identify indices to remove.
-        // 2. Extract them.
-        // 3. Close the gap.
-
-        let len = self.len();
-        let start = match range.start_bound() {
-            std::ops::Bound::Included(&n) => n,
-            std::ops::Bound::Excluded(&n) => n + 1,
-            std::ops::Bound::Unbounded => 0,
-        };
-        let end = match range.end_bound() {
-            std::ops::Bound::Included(&n) => n + 1,
-            std::ops::Bound::Excluded(&n) => n,
-            std::ops::Bound::Unbounded => len,
-        };
-
-        if start >= end || start >= len {
-            return Vec::new().into_iter();
-        }
-        let end = std::cmp::min(end, len);
-        let count = end - start;
-
-        // We will rotate the deque so that the range is at the front or back?
-        // Or just move elements one by one?
-        // Since we need to return an iterator, we can extract to a Vec.
-
-        // This is tricky to do efficiently in-place without a custom iterator.
-        // I'll implement a naive remove-in-loop approach.
-        // But removing from middle is O(N). Doing it 'count' times is O(count * N).
-        // Since this is "drain", users expect linear time total.
-
-        // Optimization:
-        // 1. Rotate so start is at 0? No, `head` moves.
-        // 2. Move elements from 0..start to tail?
-
-        // Let's rely on standard logic:
-        // Move elements after `end` to `start`.
-        // The elements at `start..end` are "overwritten" or moved out.
-
-        // Because of ring buffer, this is complex.
-        // Fallback:
-        // Reconstruct the deque.
-        // Create new deque.
-        // Push 0..start.
-        // Push end..len.
-        // Return start..end.
-
-        let mut new_dq = Self::with_capacity(self.capacity());
-        let mut drain_items = Vec::with_capacity(count);
-
-        // We can iterate efficiently using index
-        for i in 0..len {
-            // We need to extract the element.
-            // But we can't easily extract from random index without moving.
-            // But we are rebuilding, so we can pop_front everything.
-            let item = self.pop_front().unwrap().into_inner();
-            if i >= start && i < end {
-                drain_items.push(item);
-            } else {
-                new_dq.push_back(item);
-            }
-        }
-
-        *self = new_dq;
-        drain_items.into_iter()
     }
 }
