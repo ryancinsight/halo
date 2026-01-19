@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use halo::collections::{BrandedSlotMap, BrandedHashMap};
+use halo::collections::{BrandedHashMap, BrandedSlotMap};
 use halo::GhostToken;
 
 fn bench_slot_map(c: &mut Criterion) {

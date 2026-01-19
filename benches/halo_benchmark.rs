@@ -3,9 +3,9 @@
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 use halo::*;
 use std::cell::{Cell, RefCell, UnsafeCell};
-use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::atomic::AtomicBool;
-use std::sync::{RwLock, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+use std::sync::{Mutex, RwLock};
 use std::thread;
 
 // Keep these micro-benchmarks out of the "ps-level noise" regime.
@@ -46,7 +46,10 @@ unsafe fn unsafe_cell_inc(cell: &UnsafeCell<u64>) -> u64 {
 }
 
 #[inline(always)]
-fn ghost_unsafe_cell_inc<'brand>(cell: &GhostUnsafeCell<'brand, u64>, token: &mut GhostToken<'brand>) -> u64 {
+fn ghost_unsafe_cell_inc<'brand>(
+    cell: &GhostUnsafeCell<'brand, u64>,
+    token: &mut GhostToken<'brand>,
+) -> u64 {
     let p = cell.as_mut_ptr(token);
     for _ in 0..INC_REPS {
         // SAFETY: `token` is a linear capability, so this benchmark has exclusive access.
@@ -154,10 +157,7 @@ fn bench_iterator_performance(c: &mut Criterion) {
 
     c.bench_function("standard_iterator_map", |b| {
         b.iter(|| {
-            let result: Vec<i32> = data
-                .iter()
-                .map(|&x| black_box(x * 2))
-                .collect();
+            let result: Vec<i32> = data.iter().map(|&x| black_box(x * 2)).collect();
             black_box(result);
         });
     });
@@ -218,29 +218,20 @@ fn bench_cow_operations(c: &mut Criterion) {
 fn bench_memory_overhead(c: &mut Criterion) {
     c.bench_function("ghostcell_memory_usage", |b| {
         GhostToken::new(|token| {
-            let cells: Vec<GhostCell<i32>> = (0..10000)
-                .map(|i| GhostCell::new(black_box(i)))
-                .collect();
+            let cells: Vec<GhostCell<i32>> =
+                (0..10000).map(|i| GhostCell::new(black_box(i))).collect();
 
             b.iter(|| {
-                let _sum: i32 = cells
-                    .iter()
-                    .map(|cell| *cell.borrow(&token))
-                    .sum();
+                let _sum: i32 = cells.iter().map(|cell| *cell.borrow(&token)).sum();
             });
         });
     });
 
     c.bench_function("refcell_memory_usage", |b| {
-        let cells: Vec<RefCell<i32>> = (0..10000)
-            .map(|i| RefCell::new(black_box(i)))
-            .collect();
+        let cells: Vec<RefCell<i32>> = (0..10000).map(|i| RefCell::new(black_box(i))).collect();
 
         b.iter(|| {
-            let _sum: i32 = cells
-                .iter()
-                .map(|cell| *cell.borrow())
-                .sum();
+            let _sum: i32 = cells.iter().map(|cell| *cell.borrow()).sum();
         });
     });
 }
@@ -358,7 +349,9 @@ fn std_parallel_reachable_mutex_worklist(
                     let mut w = work.lock().unwrap();
                     w.pop()
                 };
-                let Some(u) = u else { break; };
+                let Some(u) = u else {
+                    break;
+                };
                 count.fetch_add(1, AtomicOrdering::Relaxed);
 
                 let start_i = offsets[u];
@@ -402,12 +395,7 @@ fn bench_parallel_graph_traversal(c: &mut Criterion) {
         let work = Mutex::new(Vec::<usize>::with_capacity(N));
         b.iter(|| {
             black_box(std_parallel_reachable_mutex_worklist(
-                &offsets,
-                &edges,
-                0,
-                THREADS,
-                &visited,
-                &work,
+                &offsets, &edges, 0, THREADS, &visited, &work,
             ))
         });
     });
@@ -426,26 +414,29 @@ fn bench_parallel_graph_traversal(c: &mut Criterion) {
             let g = halo::GhostCsrGraph::<1024>::from_csr_parts(offsets.clone(), edges.clone());
             let stack: halo::concurrency::worklist::GhostTreiberStack<'_> =
                 halo::concurrency::worklist::GhostTreiberStack::new(N);
-            b.iter(|| black_box(g.parallel_reachable_count_batched_with_stack(0, THREADS, &stack, BATCH)));
+            b.iter(|| {
+                black_box(g.parallel_reachable_count_batched_with_stack(0, THREADS, &stack, BATCH))
+            });
         });
     });
 
-    c.bench_function("ghost_parallel_reachable_lockfree_worklist_batched_bitset", |b| {
-        GhostToken::new(|_token| {
-            let g = halo::GhostCsrGraph::<1024>::from_csr_parts(offsets.clone(), edges.clone());
-            let stack: halo::concurrency::worklist::GhostTreiberStack<'_> =
-                halo::concurrency::worklist::GhostTreiberStack::new(N);
-            let visited: halo::concurrency::atomic::GhostAtomicBitset<'_> =
-                halo::concurrency::atomic::GhostAtomicBitset::new(N);
-            b.iter(|| black_box(g.parallel_reachable_count_batched_with_stack_bitset(
-                0,
-                THREADS,
-                &stack,
-                BATCH,
-                &visited,
-            )));
-        });
-    });
+    c.bench_function(
+        "ghost_parallel_reachable_lockfree_worklist_batched_bitset",
+        |b| {
+            GhostToken::new(|_token| {
+                let g = halo::GhostCsrGraph::<1024>::from_csr_parts(offsets.clone(), edges.clone());
+                let stack: halo::concurrency::worklist::GhostTreiberStack<'_> =
+                    halo::concurrency::worklist::GhostTreiberStack::new(N);
+                let visited: halo::concurrency::atomic::GhostAtomicBitset<'_> =
+                    halo::concurrency::atomic::GhostAtomicBitset::new(N);
+                b.iter(|| {
+                    black_box(g.parallel_reachable_count_batched_with_stack_bitset(
+                        0, THREADS, &stack, BATCH, &visited,
+                    ))
+                });
+            });
+        },
+    );
 }
 
 fn bench_parallel_graph_traversal_high_contention(c: &mut Criterion) {
@@ -467,21 +458,29 @@ fn bench_parallel_graph_traversal_high_contention(c: &mut Criterion) {
         }
     }
 
-    c.bench_function("ghost_parallel_reachable_lockfree_worklist_batched_hi", |b| {
-        GhostToken::new(|_token| {
-            let g = halo::GhostCsrGraph::<1024>::from_csr_parts(offsets.clone(), edges.clone());
-            let stack: halo::concurrency::worklist::GhostTreiberStack<'_> =
-                halo::concurrency::worklist::GhostTreiberStack::new(N);
-            b.iter(|| black_box(g.parallel_reachable_count_batched_with_stack(0, THREADS, &stack, BATCH)));
-        });
-    });
+    c.bench_function(
+        "ghost_parallel_reachable_lockfree_worklist_batched_hi",
+        |b| {
+            GhostToken::new(|_token| {
+                let g = halo::GhostCsrGraph::<1024>::from_csr_parts(offsets.clone(), edges.clone());
+                let stack: halo::concurrency::worklist::GhostTreiberStack<'_> =
+                    halo::concurrency::worklist::GhostTreiberStack::new(N);
+                b.iter(|| {
+                    black_box(
+                        g.parallel_reachable_count_batched_with_stack(0, THREADS, &stack, BATCH),
+                    )
+                });
+            });
+        },
+    );
 
     c.bench_function("ghost_parallel_reachable_workstealing_deque_hi", |b| {
         GhostToken::new(|_token| {
             let g = halo::GhostCsrGraph::<1024>::from_csr_parts(offsets.clone(), edges.clone());
             let cap = N.next_power_of_two();
-            let deques: Vec<halo::concurrency::worklist::GhostChaseLevDeque<'_>> =
-                (0..THREADS).map(|_| halo::concurrency::worklist::GhostChaseLevDeque::new(cap)).collect();
+            let deques: Vec<halo::concurrency::worklist::GhostChaseLevDeque<'_>> = (0..THREADS)
+                .map(|_| halo::concurrency::worklist::GhostChaseLevDeque::new(cap))
+                .collect();
             b.iter(|| black_box(g.parallel_reachable_count_workstealing_with_deques(0, &deques)));
         });
     });
@@ -627,7 +626,12 @@ fn bench_chunked_vec(c: &mut Criterion) {
 }
 
 #[inline(never)]
-fn std_csr_dfs_u8_visited(offsets: &[usize], edges: &[usize], start: usize, visited: &mut [u8]) -> usize {
+fn std_csr_dfs_u8_visited(
+    offsets: &[usize],
+    edges: &[usize],
+    start: usize,
+    visited: &mut [u8],
+) -> usize {
     let mut stack = Vec::new();
     let mut count = 0usize;
 
@@ -703,22 +707,23 @@ fn bench_dfs_csr(c: &mut Criterion) {
     c.bench_function("std_csr_dfs_u8_visited", |b| {
         b.iter_batched(
             || vec![0u8; N],
-            |mut visited| {
-                black_box(std_csr_dfs_u8_visited(&offsets, &edges, 0, &mut visited))
-            },
+            |mut visited| black_box(std_csr_dfs_u8_visited(&offsets, &edges, 0, &mut visited)),
             BatchSize::SmallInput,
         );
     });
 
     c.bench_function("std_csr_dfs_atomicbool_visited", |b| {
-        let visited: Vec<std::sync::atomic::AtomicBool> =
-            (0..N).map(|_| std::sync::atomic::AtomicBool::new(false)).collect();
+        let visited: Vec<std::sync::atomic::AtomicBool> = (0..N)
+            .map(|_| std::sync::atomic::AtomicBool::new(false))
+            .collect();
 
         b.iter(|| {
             for f in &visited {
                 f.store(false, AtomicOrdering::Relaxed);
             }
-            black_box(std_csr_dfs_atomicbool_visited(&offsets, &edges, 0, &visited))
+            black_box(std_csr_dfs_atomicbool_visited(
+                &offsets, &edges, 0, &visited,
+            ))
         });
     });
 
@@ -820,7 +825,8 @@ fn bench_scoped_parallel_patterns(c: &mut Criterion) {
                             let mut acc = 0u64;
                             for _ in 0..REPS {
                                 for j in 0..CELLS {
-                                    acc = acc.wrapping_add(*cells[(tid + j) & (CELLS - 1)].borrow(t));
+                                    acc =
+                                        acc.wrapping_add(*cells[(tid + j) & (CELLS - 1)].borrow(t));
                                 }
                             }
                             black_box(acc);
@@ -950,9 +956,9 @@ fn bench_scoped_parallel_patterns(c: &mut Criterion) {
     });
 }
 
+use halo::collections::{BrandedArena, BrandedHashMap, BrandedVec, BrandedVecDeque};
+use halo::{GhostRefCell, GhostToken, RawGhostCell};
 use std::collections::{BTreeMap, HashMap, VecDeque};
-use halo::collections::{BrandedVec, BrandedVecDeque, BrandedHashMap, BrandedArena};
-use halo::{RawGhostCell, GhostRefCell, GhostToken};
 
 fn bench_branded_vec(c: &mut Criterion) {
     const N: usize = 1000;
@@ -1119,7 +1125,8 @@ fn bench_branded_arena(c: &mut Criterion) {
         GhostToken::new(|mut token| {
             let mut arena = BrandedArena::<u64>::new();
             // Pre-populate
-            for i in 0..N/10 { // Smaller dataset for maintenance
+            for i in 0..N / 10 {
+                // Smaller dataset for maintenance
                 arena.alloc(&mut token, i as u64);
             }
 
@@ -1134,7 +1141,8 @@ fn bench_branded_arena(c: &mut Criterion) {
         b.iter(|| {
             GhostToken::new(|mut token| {
                 let mut arena = BrandedArena::<u64>::new();
-                for i in 0..100 { // Smaller inner loop for epoch measurement
+                for i in 0..100 {
+                    // Smaller inner loop for epoch measurement
                     arena.alloc(&mut token, i as u64);
                     black_box(arena.current_epoch(&token));
                 }
@@ -1147,7 +1155,8 @@ fn bench_branded_arena(c: &mut Criterion) {
         b.iter(|| {
             GhostToken::new(|mut token| {
                 let mut arena: BrandedArena<u64, 32> = BrandedArena::new(); // Small chunks
-                for i in 0..N/4 { // Fewer allocations due to smaller N
+                for i in 0..N / 4 {
+                    // Fewer allocations due to smaller N
                     arena.alloc(&mut token, i as u64);
                 }
             })
@@ -1158,7 +1167,7 @@ fn bench_branded_arena(c: &mut Criterion) {
         b.iter(|| {
             GhostToken::new(|mut token| {
                 let mut arena: BrandedArena<u64, 1024> = BrandedArena::new(); // Large chunks
-                for i in 0..N/4 {
+                for i in 0..N / 4 {
                     arena.alloc(&mut token, i as u64);
                 }
             })

@@ -1,5 +1,5 @@
-pub mod branded;
 pub mod active;
+pub mod branded;
 
+pub use active::{ActivateString, ActiveString};
 pub use branded::BrandedString;
-pub use active::{ActiveString, ActivateString};

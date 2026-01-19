@@ -4,8 +4,8 @@
 //! in a single scope. By holding the token exclusively, it can expose a standard `String`-like
 //! API without requiring the token as an argument for every call.
 
-use crate::GhostToken;
 use super::BrandedString;
+use crate::GhostToken;
 use std::fmt;
 use std::str::Chars;
 
@@ -156,7 +156,7 @@ mod tests {
 
     #[test]
     fn test_active_string_iterators() {
-         GhostToken::new(|mut token| {
+        GhostToken::new(|mut token| {
             let mut s = BrandedString::from("ABC");
             let active = s.activate(&mut token);
 

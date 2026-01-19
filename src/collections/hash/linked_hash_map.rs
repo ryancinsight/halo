@@ -9,13 +9,13 @@
 //! - **Stable Indices**: Uses a free list for storage, so indices are stable (unlike `swap_remove`).
 //! - **SoA Layout**: Separate arrays for keys, values, prev, next, to improve cache locality for lookups.
 
-use core::hash::{Hash, Hasher, BuildHasher};
-use core::mem::MaybeUninit;
-use std::collections::hash_map::RandomState;
-use crate::{GhostCell, GhostToken};
-use std::alloc::{self, Layout};
-use std::ptr::NonNull;
 use crate::collections::{BrandedCollection, ZeroCopyMapOps};
+use crate::{GhostCell, GhostToken};
+use core::hash::{BuildHasher, Hash, Hasher};
+use core::mem::MaybeUninit;
+use std::alloc::{self, Layout};
+use std::collections::hash_map::RandomState;
+use std::ptr::NonNull;
 
 // Control byte constants
 const EMPTY: u8 = 0xFF;
@@ -210,11 +210,11 @@ where
             }
 
             if first_deleted.is_none() {
-                 let deleted_mask = match_byte(group_word, DELETED);
-                 if deleted_mask != 0 {
-                     let trailing = deleted_mask.trailing_zeros() / 8;
-                     first_deleted = Some((idx + trailing as usize) & mask);
-                 }
+                let deleted_mask = match_byte(group_word, DELETED);
+                if deleted_mask != 0 {
+                    let trailing = deleted_mask.trailing_zeros() / 8;
+                    first_deleted = Some((idx + trailing as usize) & mask);
+                }
             }
 
             idx = (idx + step) & mask;
@@ -222,16 +222,19 @@ where
             probes += 1;
 
             if probes > self.capacity {
-                 return match first_deleted {
-                     Some(d) => (d, false),
-                     None => (0, false),
-                 };
+                return match first_deleted {
+                    Some(d) => (d, false),
+                    None => (0, false),
+                };
             }
         }
     }
 
     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
-        if self.capacity == 0 || self.items_count >= self.capacity * 7 / 8 || self.len == self.capacity {
+        if self.capacity == 0
+            || self.items_count >= self.capacity * 7 / 8
+            || self.len == self.capacity
+        {
             let new_cap = (self.capacity * 2).max(8);
             self.grow(new_cap);
         }
@@ -254,7 +257,9 @@ where
 
             unsafe {
                 self.keys.get_unchecked_mut(storage_idx).write(key);
-                self.values.get_unchecked_mut(storage_idx).write(GhostCell::new(value));
+                self.values
+                    .get_unchecked_mut(storage_idx)
+                    .write(GhostCell::new(value));
 
                 let ctrl_byte = *self.ctrl.get_unchecked(slot_idx);
                 let was_deleted = ctrl_byte == DELETED;
@@ -308,7 +313,9 @@ where
     }
 
     pub fn remove(&mut self, key: &K) -> Option<V> {
-        if self.capacity == 0 { return None; }
+        if self.capacity == 0 {
+            return None;
+        }
         let (h1, h2) = self.hash(key);
         let (slot_idx, found) = self.find_slot(key, h1, h2);
 
@@ -331,7 +338,10 @@ where
 
                 // Drop key, move out value
                 self.keys.get_unchecked_mut(storage_idx).assume_init_drop();
-                let val_cell = self.values.get_unchecked_mut(storage_idx).assume_init_read();
+                let val_cell = self
+                    .values
+                    .get_unchecked_mut(storage_idx)
+                    .assume_init_read();
 
                 Some(val_cell.into_inner())
             }
@@ -341,14 +351,21 @@ where
     }
 
     pub fn get<'a>(&'a self, token: &'a GhostToken<'brand>, key: &K) -> Option<&'a V> {
-        if self.capacity == 0 { return None; }
+        if self.capacity == 0 {
+            return None;
+        }
         let (h1, h2) = self.hash(key);
         let (slot_idx, found) = self.find_slot(key, h1, h2);
 
         if found {
             unsafe {
                 let storage_idx = *self.slots.get_unchecked(slot_idx);
-                Some(self.values.get_unchecked(storage_idx).assume_init_ref().borrow(token))
+                Some(
+                    self.values
+                        .get_unchecked(storage_idx)
+                        .assume_init_ref()
+                        .borrow(token),
+                )
             }
         } else {
             None
@@ -356,14 +373,21 @@ where
     }
 
     pub fn get_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>, key: &K) -> Option<&'a mut V> {
-        if self.capacity == 0 { return None; }
+        if self.capacity == 0 {
+            return None;
+        }
         let (h1, h2) = self.hash(key);
         let (slot_idx, found) = self.find_slot(key, h1, h2);
 
         if found {
             unsafe {
                 let storage_idx = *self.slots.get_unchecked(slot_idx);
-                Some(self.values.get_unchecked(storage_idx).assume_init_ref().borrow_mut(token))
+                Some(
+                    self.values
+                        .get_unchecked(storage_idx)
+                        .assume_init_ref()
+                        .borrow_mut(token),
+                )
             }
         } else {
             None
@@ -373,7 +397,9 @@ where
     /// Moves the element associated with `key` to the front of the list (LRU -> MRU usually implies back, but depends on definition).
     /// Here we move to tail (MRU).
     pub fn move_to_back(&mut self, key: &K) {
-        if self.capacity == 0 { return; }
+        if self.capacity == 0 {
+            return;
+        }
         let (h1, h2) = self.hash(key);
         let (slot_idx, found) = self.find_slot(key, h1, h2);
 
@@ -390,7 +416,9 @@ where
 
     /// Moves the element to the front (LRU position?).
     pub fn move_to_front(&mut self, key: &K) {
-        if self.capacity == 0 { return; }
+        if self.capacity == 0 {
+            return;
+        }
         let (h1, h2) = self.hash(key);
         let (slot_idx, found) = self.find_slot(key, h1, h2);
 
@@ -450,7 +478,11 @@ where
             self.len -= 1;
 
             let key = self.keys.get_unchecked_mut(idx).assume_init_read();
-            let val = self.values.get_unchecked_mut(idx).assume_init_read().into_inner();
+            let val = self
+                .values
+                .get_unchecked_mut(idx)
+                .assume_init_read()
+                .into_inner();
 
             Some((key, val))
         }
@@ -491,7 +523,10 @@ where
         while curr != END_OF_LIST {
             unsafe {
                 let key = old_keys.get_unchecked(curr).assume_init_read();
-                let val = old_values.get_unchecked(curr).assume_init_read().into_inner();
+                let val = old_values
+                    .get_unchecked(curr)
+                    .assume_init_read()
+                    .into_inner();
                 // We must use `insert` to populate hash table correctly
                 // This is O(N)
                 self.insert(key, val);
@@ -511,7 +546,10 @@ where
 
     // Iterators
 
-    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> impl Iterator<Item = (&'a K, &'a V)> + use<'a, 'brand, K, V, S> {
+    pub fn iter<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+    ) -> impl Iterator<Item = (&'a K, &'a V)> + use<'a, 'brand, K, V, S> {
         Iter {
             map: self,
             token,
@@ -535,7 +573,12 @@ impl<'a, 'brand, K, V, S> Iterator for Iter<'a, 'brand, K, V, S> {
         }
         unsafe {
             let key = self.map.keys.get_unchecked(self.curr).assume_init_ref();
-            let val = self.map.values.get_unchecked(self.curr).assume_init_ref().borrow(self.token);
+            let val = self
+                .map
+                .values
+                .get_unchecked(self.curr)
+                .assume_init_ref()
+                .borrow(self.token);
             self.curr = self.map.next[self.curr];
             Some((key, val))
         }
@@ -552,20 +595,28 @@ impl<'brand, K, V, S> BrandedCollection<'brand> for BrandedLinkedHashMap<'brand,
 }
 
 impl<'brand, K, V, S> ZeroCopyMapOps<'brand, K, V> for BrandedLinkedHashMap<'brand, K, V, S>
-where K: Eq + Hash, S: BuildHasher
+where
+    K: Eq + Hash,
+    S: BuildHasher,
 {
     fn find_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<(&'a K, &'a V)>
-    where F: Fn(&K, &V) -> bool {
+    where
+        F: Fn(&K, &V) -> bool,
+    {
         self.iter(token).find(|(k, v)| f(k, v))
     }
 
     fn any_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
-    where F: Fn(&K, &V) -> bool {
+    where
+        F: Fn(&K, &V) -> bool,
+    {
         self.iter(token).any(|(k, v)| f(k, v))
     }
 
     fn all_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
-    where F: Fn(&K, &V) -> bool {
+    where
+        F: Fn(&K, &V) -> bool,
+    {
         self.iter(token).all(|(k, v)| f(k, v))
     }
 }
@@ -584,7 +635,9 @@ impl<'brand, K, V, S> Drop for BrandedLinkedHashMap<'brand, K, V, S> {
 }
 
 impl<'brand, K, V, S> Default for BrandedLinkedHashMap<'brand, K, V, S>
-where K: Eq + Hash, S: BuildHasher + Default
+where
+    K: Eq + Hash,
+    S: BuildHasher + Default,
 {
     fn default() -> Self {
         Self::with_capacity_and_hasher(0, S::default())
@@ -639,7 +692,7 @@ mod tests {
 
             map.move_to_front(&"c");
             // Order: c, b, a
-             let vec: Vec<_> = map.iter(&token).map(|(k, _)| *k).collect();
+            let vec: Vec<_> = map.iter(&token).map(|(k, _)| *k).collect();
             assert_eq!(vec, vec!["c", "b", "a"]);
         });
     }

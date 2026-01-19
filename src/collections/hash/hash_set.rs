@@ -5,10 +5,10 @@
 //! protect membership tests or similar. Here we implement it as a thin
 //! wrapper over `BrandedHashMap<K, ()>`.
 
-use std::hash::{Hash, BuildHasher};
-use std::collections::hash_map::RandomState;
 use super::hash_map::BrandedHashMap;
 use crate::GhostToken;
+use std::collections::hash_map::RandomState;
+use std::hash::{BuildHasher, Hash};
 
 /// A hash set with branded membership.
 #[repr(transparent)]
@@ -123,4 +123,3 @@ mod tests {
         });
     }
 }
-

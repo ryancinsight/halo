@@ -4,11 +4,11 @@
 //! It is implemented from scratch using raw allocation to allow efficient ring
 //! buffer management and zero-cost token access, avoiding `std::vec::Vec`.
 
+use crate::collections::ZeroCopyOps;
+use crate::{GhostCell, GhostToken};
 use core::mem::{self, MaybeUninit};
 use core::ptr::{self, NonNull};
 use std::alloc::{alloc, dealloc, handle_alloc_error, Layout};
-use crate::{GhostCell, GhostToken};
-use crate::collections::ZeroCopyOps;
 
 /// A double-ended queue of token-gated elements.
 pub struct BrandedVecDeque<'brand, T> {
@@ -173,7 +173,11 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
     /// Pushes an element to the front.
     pub fn push_front(&mut self, value: T) {
         self.ensure_capacity();
-        self.head = if self.head == 0 { self.cap - 1 } else { self.head - 1 };
+        self.head = if self.head == 0 {
+            self.cap - 1
+        } else {
+            self.head - 1
+        };
         unsafe {
             let ptr = self.ptr.as_ptr().add(self.head);
             ptr.write(GhostCell::new(value));
@@ -186,7 +190,11 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
         if self.is_empty() {
             return None;
         }
-        let tail_idx = if self.tail() == 0 { self.cap - 1 } else { self.tail() - 1 };
+        let tail_idx = if self.tail() == 0 {
+            self.cap - 1
+        } else {
+            self.tail() - 1
+        };
         self.len -= 1;
         unsafe {
             let ptr = self.ptr.as_ptr().add(tail_idx);
@@ -228,7 +236,11 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
 
     /// Returns an exclusive reference to the element at `idx`, if in bounds.
     #[inline]
-    pub fn get_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>, idx: usize) -> Option<&'a mut T> {
+    pub fn get_mut<'a>(
+        &'a self,
+        token: &'a mut GhostToken<'brand>,
+        idx: usize,
+    ) -> Option<&'a mut T> {
         if idx >= self.len {
             return None;
         }
@@ -248,37 +260,41 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
     /// Returns a shared reference to the back element.
     #[inline]
     pub fn back<'a>(&'a self, token: &'a GhostToken<'brand>) -> Option<&'a T> {
-        if self.len == 0 { None } else { self.get(token, self.len - 1) }
+        if self.len == 0 {
+            None
+        } else {
+            self.get(token, self.len - 1)
+        }
     }
 
     /// Exclusive iteration via callback.
     pub fn for_each_mut(&self, token: &mut GhostToken<'brand>, mut f: impl FnMut(&mut T)) {
         for i in 0..self.len {
-             let actual_idx = (self.head + i) % self.cap;
-             unsafe {
+            let actual_idx = (self.head + i) % self.cap;
+            unsafe {
                 let ptr = self.ptr.as_ptr().add(actual_idx);
                 let item = (&mut *ptr).borrow_mut(token);
                 f(item);
-             }
+            }
         }
     }
 
     /// Shared iteration via callback.
     pub fn for_each(&self, token: &GhostToken<'brand>, mut f: impl FnMut(&T)) {
         for i in 0..self.len {
-             let actual_idx = (self.head + i) % self.cap;
-             unsafe {
+            let actual_idx = (self.head + i) % self.cap;
+            unsafe {
                 let ptr = self.ptr.as_ptr().add(actual_idx);
                 let item = (&*ptr).borrow(token);
                 f(item);
-             }
+            }
         }
     }
 
     /// Returns a pair of slices representing the deque contents.
     pub fn as_slices<'a>(&'a self, _token: &'a GhostToken<'brand>) -> (&'a [T], &'a [T]) {
         if self.len == 0 {
-             return (&[], &[]);
+            return (&[], &[]);
         }
         let ptr = self.ptr.as_ptr();
         let head = self.head;
@@ -301,9 +317,12 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
     }
 
     /// Returns a pair of mutable slices representing the deque contents.
-    pub fn as_mut_slices<'a>(&'a self, _token: &'a mut GhostToken<'brand>) -> (&'a mut [T], &'a mut [T]) {
+    pub fn as_mut_slices<'a>(
+        &'a self,
+        _token: &'a mut GhostToken<'brand>,
+    ) -> (&'a mut [T], &'a mut [T]) {
         if self.len == 0 {
-             return (&mut [], &mut []);
+            return (&mut [], &mut []);
         }
         let ptr = self.ptr.as_ptr();
         let head = self.head;
@@ -330,7 +349,10 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
     }
 
     /// Iterates over the elements (mutable).
-    pub fn iter_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>) -> impl Iterator<Item = &'a mut T> + 'a {
+    pub fn iter_mut<'a>(
+        &'a self,
+        token: &'a mut GhostToken<'brand>,
+    ) -> impl Iterator<Item = &'a mut T> + 'a {
         let (s1, s2) = self.as_mut_slices(token);
         s1.iter_mut().chain(s2.iter_mut())
     }
@@ -471,8 +493,8 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
 mod tests {
     use super::*;
     use crate::GhostToken;
-    use std::rc::Rc;
     use std::cell::RefCell;
+    use std::rc::Rc;
 
     #[test]
     fn branded_vec_deque_basic() {
@@ -505,7 +527,7 @@ mod tests {
 
     #[test]
     fn branded_vec_deque_wrap_growth() {
-         GhostToken::new(|mut token| {
+        GhostToken::new(|mut token| {
             let mut dq = BrandedVecDeque::with_capacity(4);
             dq.push_back(1);
             dq.push_back(2);
@@ -513,8 +535,8 @@ mod tests {
             dq.pop_front(); // Remove 1. head=1, len=2.
             dq.push_back(4);
             dq.push_back(5); // Should trigger growth?
-            // cap=4. elements: [5, 2, 3, 4] (wrapped if implemented that way)
-            // If we push one more:
+                             // cap=4. elements: [5, 2, 3, 4] (wrapped if implemented that way)
+                             // If we push one more:
             dq.push_back(6);
 
             // Should be sorted 2,3,4,5,6

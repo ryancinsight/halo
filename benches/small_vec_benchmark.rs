@@ -57,26 +57,26 @@ fn bench_small_vec_spill(c: &mut Criterion) {
     // Push exceeding inline capacity (N=8, push 16)
     group.bench_function("branded_small_vec_spill", |b| {
         b.iter(|| {
-             GhostToken::new(|_token| {
+            GhostToken::new(|_token| {
                 let mut vec: BrandedSmallVec<'_, i32, 8> = BrandedSmallVec::new();
                 for i in 0..16 {
                     vec.push(black_box(i));
                 }
                 black_box(vec);
-             });
+            });
         });
     });
 
     group.bench_function("branded_vec_resize", |b| {
         b.iter(|| {
-             GhostToken::new(|_token| {
+            GhostToken::new(|_token| {
                 // Start with small capacity and grow
                 let mut vec = BrandedVec::with_capacity(8);
                 for i in 0..16 {
                     vec.push(black_box(i));
                 }
                 black_box(vec);
-             });
+            });
         });
     });
 

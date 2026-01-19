@@ -1,6 +1,6 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use halo::{GhostToken, BrandedVec};
-use halo::collections::vec::ActivateVec; // Import trait
+use halo::collections::vec::ActivateVec;
+use halo::{BrandedVec, GhostToken}; // Import trait
 
 fn bench_branded_slice_mut_iter(c: &mut Criterion) {
     c.bench_function("BrandedSliceMut::iter_mut (10k)", |b| {
@@ -43,14 +43,14 @@ fn bench_active_vec_push(c: &mut Criterion) {
         // For push, we start with empty.
         GhostToken::new(|mut token| {
             b.iter(|| {
-                 // We have to allocate a new vec inside loop if we want to measure push from scratch.
-                 // This includes allocation cost.
-                 // std::Vec benchmark should do the same for fairness.
-                 let mut vec = BrandedVec::new();
-                 let mut active = vec.activate(&mut token);
-                 for i in 0..1000 {
-                     active.push(i);
-                 }
+                // We have to allocate a new vec inside loop if we want to measure push from scratch.
+                // This includes allocation cost.
+                // std::Vec benchmark should do the same for fairness.
+                let mut vec = BrandedVec::new();
+                let mut active = vec.activate(&mut token);
+                for i in 0..1000 {
+                    active.push(i);
+                }
             })
         })
     });
@@ -59,32 +59,34 @@ fn bench_active_vec_push(c: &mut Criterion) {
 fn bench_branded_vec_push_manual(c: &mut Criterion) {
     c.bench_function("BrandedVec::push (1k)", |b| {
         GhostToken::new(|mut token| {
-             b.iter(|| {
-                 let mut vec = BrandedVec::new();
-                 for i in 0..1000 {
-                     vec.push(i);
-                     // Note: BrandedVec::push doesn't need token, just &mut self.
-                     // But we put it here for symmetry.
-                 }
-                 // prevent opt
-                 std::hint::black_box(&vec);
-             })
+            b.iter(|| {
+                let mut vec = BrandedVec::new();
+                for i in 0..1000 {
+                    vec.push(i);
+                    // Note: BrandedVec::push doesn't need token, just &mut self.
+                    // But we put it here for symmetry.
+                }
+                // prevent opt
+                std::hint::black_box(&vec);
+            })
         })
     });
 }
 
 fn bench_active_vec_get_mut(c: &mut Criterion) {
-     c.bench_function("ActiveVec::get_mut (1k)", |b| {
+    c.bench_function("ActiveVec::get_mut (1k)", |b| {
         GhostToken::new(|mut token| {
             let mut vec = BrandedVec::new();
-            for i in 0..1000 { vec.push(i); }
+            for i in 0..1000 {
+                vec.push(i);
+            }
 
             b.iter(|| {
                 let mut active = vec.activate(&mut token);
                 for i in 0..1000 {
-                     if let Some(x) = active.get_mut(i) {
-                         *x += 1;
-                     }
+                    if let Some(x) = active.get_mut(i) {
+                        *x += 1;
+                    }
                 }
             })
         })
@@ -92,16 +94,18 @@ fn bench_active_vec_get_mut(c: &mut Criterion) {
 }
 
 fn bench_branded_vec_get_mut_manual(c: &mut Criterion) {
-     c.bench_function("BrandedVec::get_mut (1k)", |b| {
+    c.bench_function("BrandedVec::get_mut (1k)", |b| {
         GhostToken::new(|mut token| {
             let mut vec = BrandedVec::new();
-            for i in 0..1000 { vec.push(i); }
+            for i in 0..1000 {
+                vec.push(i);
+            }
 
             b.iter(|| {
                 for i in 0..1000 {
-                     if let Some(x) = vec.get_mut(&mut token, i) {
-                         *x += 1;
-                     }
+                    if let Some(x) = vec.get_mut(&mut token, i) {
+                        *x += 1;
+                    }
                 }
             })
         })

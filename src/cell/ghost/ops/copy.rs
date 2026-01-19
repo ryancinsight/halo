@@ -1,5 +1,5 @@
-use crate::GhostToken;
 use super::super::GhostCell;
+use crate::GhostToken;
 
 impl<'brand, T: Copy> GhostCell<'brand, T> {
     /// Copies the contained value.
@@ -14,10 +14,3 @@ impl<'brand, T: Copy> GhostCell<'brand, T> {
         *self.borrow_mut(token) = value;
     }
 }
-
-
-
-
-
-
-

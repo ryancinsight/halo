@@ -9,10 +9,10 @@
 //! - Keys are branded to prevent misuse across different maps.
 //! - Generation counters prevent ABA problems when slots are reused.
 
-use crate::{GhostCell, GhostToken, BrandedVec};
+use crate::collections::BrandedCollection;
+use crate::{BrandedVec, GhostCell, GhostToken};
 use core::marker::PhantomData;
 use core::mem::ManuallyDrop;
-use crate::collections::BrandedCollection;
 
 /// A key for accessing a `BrandedSlotMap`.
 ///
@@ -106,7 +106,9 @@ impl<'brand, T> BrandedSlotMap<'brand, T> {
 
             let entry = Entry {
                 generation,
-                data: SlotData { value: ManuallyDrop::new(value) },
+                data: SlotData {
+                    value: ManuallyDrop::new(value),
+                },
             };
 
             self.slots.push(entry);
@@ -134,7 +136,11 @@ impl<'brand, T> BrandedSlotMap<'brand, T> {
     }
 
     /// Returns a mutable reference to the value associated with the key.
-    pub fn get_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>, key: SlotKey<'brand>) -> Option<&'a mut T> {
+    pub fn get_mut<'a>(
+        &'a self,
+        token: &'a mut GhostToken<'brand>,
+        key: SlotKey<'brand>,
+    ) -> Option<&'a mut T> {
         let idx = key.index as usize;
 
         if let Some(entry) = self.slots.get_mut(token, idx) {
@@ -187,14 +193,15 @@ impl<'brand, T> BrandedSlotMap<'brand, T> {
 
         // Iterate and drop occupied slots
         for idx in 0..self.slots.len() {
-             let entry = unsafe { self.slots.get_unchecked_mut(token, idx) };
-             if entry.generation % 2 == 0 { // Occupied (Even)
-                 unsafe {
-                     ManuallyDrop::drop(&mut entry.data.value);
-                 }
-                 // Mark free (Odd)
-                 entry.generation = entry.generation.wrapping_add(1);
-             }
+            let entry = unsafe { self.slots.get_unchecked_mut(token, idx) };
+            if entry.generation % 2 == 0 {
+                // Occupied (Even)
+                unsafe {
+                    ManuallyDrop::drop(&mut entry.data.value);
+                }
+                // Mark free (Odd)
+                entry.generation = entry.generation.wrapping_add(1);
+            }
         }
 
         // Rebuild free list
@@ -324,7 +331,7 @@ mod tests {
 
     #[test]
     fn test_slot_map_iter() {
-         GhostToken::new(|mut token| {
+        GhostToken::new(|mut token| {
             let mut map = BrandedSlotMap::new();
             let mut keys = Vec::new();
             for i in 0..10 {
@@ -338,12 +345,12 @@ mod tests {
                 count += 1;
             }
             assert_eq!(count, 10);
-         });
+        });
     }
 
     #[test]
     fn test_slot_map_clear() {
-         GhostToken::new(|mut token| {
+        GhostToken::new(|mut token| {
             let mut map = BrandedSlotMap::new();
             for i in 0..10 {
                 map.insert(&mut token, i);
@@ -358,6 +365,6 @@ mod tests {
                 map.insert(&mut token, i + 100);
             }
             assert_eq!(map.len(), 5);
-         });
+        });
     }
 }

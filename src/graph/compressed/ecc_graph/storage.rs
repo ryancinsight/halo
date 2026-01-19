@@ -108,9 +108,7 @@ impl EdgeCentricStorage {
     #[inline]
     pub fn has_edge(&self, source: usize, target: usize) -> bool {
         let edges = self.edges_from(source);
-        edges
-            .binary_search_by_key(&target, |e| e.target)
-            .is_ok()
+        edges.binary_search_by_key(&target, |e| e.target).is_ok()
     }
 
     /// Iterator over all edges

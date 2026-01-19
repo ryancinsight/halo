@@ -5,17 +5,11 @@
 //! - `compressed`: Memory-efficient compressed formats
 //! - `specialized`: Advanced representations for specific use cases
 
+pub(crate) mod access;
 pub mod basic;
 pub mod compressed;
 pub mod specialized;
-pub(crate) mod access;
 
 // Re-export commonly used types from submodules
-pub use basic::{GhostAdjacencyGraph, GhostBipartiteGraph, GhostDag, BrandedPoolGraph};
+pub use basic::{BrandedPoolGraph, GhostAdjacencyGraph, GhostBipartiteGraph, GhostDag};
 pub use compressed::{GhostCscGraph, GhostCsrGraph};
-
-
-
-
-
-

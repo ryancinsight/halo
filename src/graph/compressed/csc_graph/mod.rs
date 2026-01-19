@@ -109,7 +109,10 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCscGraph<'brand, EDGE_CHUNK> {
             assert!(w[0] <= w[1], "col_offsets must be monotone");
         }
         let m = *col_offsets.last().expect("col_offsets non-empty");
-        assert!(m == row_indices.len(), "col_offsets last must equal row_indices length");
+        assert!(
+            m == row_indices.len(),
+            "col_offsets last must equal row_indices length"
+        );
         for &u in &row_indices {
             assert!(u < n, "row index {u} out of bounds for n={n}");
         }
@@ -179,7 +182,6 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCscGraph<'brand, EDGE_CHUNK> {
     }
 }
 
-mod traversal;
 #[cfg(test)]
 mod tests;
-
+mod traversal;

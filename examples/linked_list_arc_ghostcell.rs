@@ -17,7 +17,10 @@ struct Node<'brand> {
 fn main() {
     GhostToken::new(|mut token| {
         // Build a 3-node list: 1 -> 2 -> 3
-        let n3: Arc<GhostCell<'_, Node<'_>>> = Arc::new(GhostCell::new(Node { value: 3, next: None }));
+        let n3: Arc<GhostCell<'_, Node<'_>>> = Arc::new(GhostCell::new(Node {
+            value: 3,
+            next: None,
+        }));
         let n2: Arc<GhostCell<'_, Node<'_>>> = Arc::new(GhostCell::new(Node {
             value: 2,
             next: Some(Arc::clone(&n3)),
@@ -49,5 +52,3 @@ fn main() {
         assert_eq!(n3.borrow(&token).value, 30);
     });
 }
-
-

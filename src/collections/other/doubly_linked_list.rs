@@ -4,10 +4,10 @@
 //! allowing safe index-based pointers with the `GhostCell` pattern.
 //! It supports O(1) insertion and removal at arbitrary positions via Cursors.
 
-use crate::GhostToken;
+use crate::alloc::pool::PoolSlot;
 use crate::alloc::BrandedPool;
 use crate::collections::ZeroCopyOps;
-use crate::alloc::pool::PoolSlot;
+use crate::GhostToken;
 use core::fmt;
 use core::marker::PhantomData;
 
@@ -127,9 +127,9 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
         let old_head = self.head;
 
         if let Some(head_idx) = old_head {
-             if let Some(node) = self.pool.get_mut(token, head_idx) {
-                 node.prev = Some(new_idx);
-             }
+            if let Some(node) = self.pool.get_mut(token, head_idx) {
+                node.prev = Some(new_idx);
+            }
         } else {
             self.tail = Some(new_idx);
         }
@@ -172,13 +172,13 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
         let next_idx = node.next;
 
         if let Some(next) = next_idx {
-             if let Some(next_node) = self.pool.get_mut(token, next) {
-                 next_node.prev = None;
-             }
-             self.head = Some(next);
+            if let Some(next_node) = self.pool.get_mut(token, next) {
+                next_node.prev = None;
+            }
+            self.head = Some(next);
         } else {
-             self.head = None;
-             self.tail = None;
+            self.head = None;
+            self.tail = None;
         }
 
         self.len -= 1;
@@ -227,13 +227,20 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
     }
 
     /// Returns a mutable reference to the element at the given index.
-    pub fn get_mut<'a>(&'a mut self, token: &'a mut GhostToken<'brand>, index: usize) -> Option<&'a mut T> {
+    pub fn get_mut<'a>(
+        &'a mut self,
+        token: &'a mut GhostToken<'brand>,
+        index: usize,
+    ) -> Option<&'a mut T> {
         let node = self.pool.get_mut(token, index)?;
         Some(&mut node.value)
     }
 
     /// Iterates over the list elements.
-    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> BrandedDoublyLinkedListIter<'a, 'brand, T> {
+    pub fn iter<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+    ) -> BrandedDoublyLinkedListIter<'a, 'brand, T> {
         BrandedDoublyLinkedListIter {
             storage: self.pool.as_slice(token),
             current: self.head,
@@ -242,7 +249,10 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
     }
 
     /// Iterates over the list elements (mutable).
-    pub fn iter_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>) -> BrandedDoublyLinkedListIterMut<'a, 'brand, T> {
+    pub fn iter_mut<'a>(
+        &'a self,
+        token: &'a mut GhostToken<'brand>,
+    ) -> BrandedDoublyLinkedListIterMut<'a, 'brand, T> {
         BrandedDoublyLinkedListIterMut {
             storage: self.pool.as_mut_slice(token),
             current: self.head,
@@ -266,19 +276,25 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
 
         // Detach
         if let Some(prev) = prev_idx {
-            if let Some(node) = self.pool.get_mut(token, prev) { node.next = next_idx; }
+            if let Some(node) = self.pool.get_mut(token, prev) {
+                node.next = next_idx;
+            }
         }
 
         if let Some(next) = next_idx {
-            if let Some(node) = self.pool.get_mut(token, next) { node.prev = prev_idx; }
+            if let Some(node) = self.pool.get_mut(token, next) {
+                node.prev = prev_idx;
+            }
         } else {
-             self.tail = prev_idx;
+            self.tail = prev_idx;
         }
 
         // Attach
         let old_head = self.head;
         if let Some(head_idx) = old_head {
-             if let Some(node) = self.pool.get_mut(token, head_idx) { node.prev = Some(index); }
+            if let Some(node) = self.pool.get_mut(token, head_idx) {
+                node.prev = Some(index);
+            }
         }
 
         if let Some(node_mut) = self.pool.get_mut(token, index) {
@@ -288,7 +304,7 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
 
         self.head = Some(index);
         if self.tail.is_none() {
-             self.tail = Some(index);
+            self.tail = Some(index);
         }
     }
 
@@ -308,19 +324,25 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
 
         // Detach
         if let Some(prev) = prev_idx {
-            if let Some(node) = self.pool.get_mut(token, prev) { node.next = next_idx; }
+            if let Some(node) = self.pool.get_mut(token, prev) {
+                node.next = next_idx;
+            }
         } else {
             self.head = next_idx;
         }
 
         if let Some(next) = next_idx {
-            if let Some(node) = self.pool.get_mut(token, next) { node.prev = prev_idx; }
+            if let Some(node) = self.pool.get_mut(token, next) {
+                node.prev = prev_idx;
+            }
         }
 
         // Attach
         let old_tail = self.tail;
         if let Some(tail_idx) = old_tail {
-             if let Some(node) = self.pool.get_mut(token, tail_idx) { node.next = Some(index); }
+            if let Some(node) = self.pool.get_mut(token, tail_idx) {
+                node.next = Some(index);
+            }
         }
 
         if let Some(node_mut) = self.pool.get_mut(token, index) {
@@ -449,8 +471,8 @@ impl<'a, 'brand, T> CursorMut<'a, 'brand, T> {
                 }
             }
         } else {
-             self.current = self.list.head;
-             self.index = 0;
+            self.current = self.list.head;
+            self.index = 0;
         }
     }
 
@@ -483,11 +505,15 @@ impl<'a, 'brand, T> CursorMut<'a, 'brand, T> {
             let new_idx = self.list.pool.alloc(token, node);
 
             // Update current's next
-            if let Some(node) = self.list.pool.get_mut(token, curr_idx) { node.next = Some(new_idx); }
+            if let Some(node) = self.list.pool.get_mut(token, curr_idx) {
+                node.next = Some(new_idx);
+            }
 
             // Update next's prev or tail
             if let Some(next) = next_idx {
-                if let Some(node) = self.list.pool.get_mut(token, next) { node.prev = Some(new_idx); }
+                if let Some(node) = self.list.pool.get_mut(token, next) {
+                    node.prev = Some(new_idx);
+                }
             } else {
                 self.list.tail = Some(new_idx);
             }
@@ -499,13 +525,13 @@ impl<'a, 'brand, T> CursorMut<'a, 'brand, T> {
             self.current = self.list.head;
             new_idx
         } else {
-             panic!("Cannot insert after None cursor on non-empty list");
+            panic!("Cannot insert after None cursor on non-empty list");
         }
     }
 
     /// Inserts a new element before the current element.
     pub fn insert_before(&mut self, token: &mut GhostToken<'brand>, value: T) -> usize {
-         if let Some(curr_idx) = self.current {
+        if let Some(curr_idx) = self.current {
             // Read prev_idx
             let prev_idx = self.list.pool.get(token, curr_idx).unwrap().prev;
 
@@ -517,11 +543,15 @@ impl<'a, 'brand, T> CursorMut<'a, 'brand, T> {
             let new_idx = self.list.pool.alloc(token, node);
 
             // Update current's prev
-            if let Some(node) = self.list.pool.get_mut(token, curr_idx) { node.prev = Some(new_idx); }
+            if let Some(node) = self.list.pool.get_mut(token, curr_idx) {
+                node.prev = Some(new_idx);
+            }
 
             // Update prev's next or head
             if let Some(prev) = prev_idx {
-                if let Some(node) = self.list.pool.get_mut(token, prev) { node.next = Some(new_idx); }
+                if let Some(node) = self.list.pool.get_mut(token, prev) {
+                    node.next = Some(new_idx);
+                }
             } else {
                 self.list.head = Some(new_idx);
             }
@@ -548,14 +578,18 @@ impl<'a, 'brand, T> CursorMut<'a, 'brand, T> {
 
         // Update prev node or head
         if let Some(prev) = prev_idx {
-            if let Some(node) = self.list.pool.get_mut(token, prev) { node.next = next_idx; }
+            if let Some(node) = self.list.pool.get_mut(token, prev) {
+                node.next = next_idx;
+            }
         } else {
             self.list.head = next_idx;
         }
 
         // Update next node or tail
         if let Some(next) = next_idx {
-            if let Some(node) = self.list.pool.get_mut(token, next) { node.prev = prev_idx; }
+            if let Some(node) = self.list.pool.get_mut(token, next) {
+                node.prev = prev_idx;
+            }
         } else {
             self.list.tail = prev_idx;
         }
@@ -675,8 +709,8 @@ mod tests {
             assert_eq!(cursor.current(&token), Some(&1));
 
             cursor.remove_current(&mut token); // Remove 1
-            // List should be 2, 3
-            // Cursor moves to next: 2
+                                               // List should be 2, 3
+                                               // Cursor moves to next: 2
             assert_eq!(cursor.current(&token), Some(&2));
             assert_eq!(list.len(), 2);
 

@@ -3,8 +3,8 @@ use core::marker::PhantomData;
 use core::ptr::{self, NonNull};
 use std::alloc::{alloc, dealloc, handle_alloc_error};
 
+use crate::alloc::allocator::{AllocError, GhostAlloc};
 use crate::{GhostCell, GhostToken, GhostUnsafeCell};
-use crate::alloc::allocator::{GhostAlloc, AllocError};
 
 /// A chunk of memory in the bump allocator.
 struct Chunk {
@@ -98,7 +98,11 @@ impl<'brand> BrandedBumpAllocator<'brand> {
     }
 
     /// Allocates a value wrapped in a `GhostCell`.
-    pub fn alloc_cell<'a, T>(&'a self, value: T, token: &mut GhostToken<'brand>) -> &'a GhostCell<'brand, T> {
+    pub fn alloc_cell<'a, T>(
+        &'a self,
+        value: T,
+        token: &mut GhostToken<'brand>,
+    ) -> &'a GhostCell<'brand, T> {
         let ptr = self.alloc(GhostCell::new(value), token);
         &*ptr
     }
@@ -115,7 +119,11 @@ impl<'brand> BrandedBumpAllocator<'brand> {
     }
 
     /// Allocates a copy of a slice.
-    pub fn alloc_slice_copy<'a, T: Copy>(&'a self, slice: &[T], token: &mut GhostToken<'brand>) -> &'a [T] {
+    pub fn alloc_slice_copy<'a, T: Copy>(
+        &'a self,
+        slice: &[T],
+        token: &mut GhostToken<'brand>,
+    ) -> &'a [T] {
         let layout = Layout::for_value(slice);
         let ptr = self.alloc_layout(layout, token);
         unsafe {
@@ -138,7 +146,9 @@ impl<'brand> BrandedBumpAllocator<'brand> {
             } else {
                 // No current chunk, create initial one
                 let mut new_chunk = Chunk::new(1024);
-                let ptr = new_chunk.try_alloc(layout).expect("Initial allocation failed");
+                let ptr = new_chunk
+                    .try_alloc(layout)
+                    .expect("Initial allocation failed");
                 *current_slot = Some(new_chunk);
                 return ptr;
             }
@@ -152,7 +162,9 @@ impl<'brand> BrandedBumpAllocator<'brand> {
 
         // Create and set new chunk
         let mut new_chunk = Chunk::new(next_size);
-        let ptr = new_chunk.try_alloc(layout).expect("Allocation failed even in new chunk");
+        let ptr = new_chunk
+            .try_alloc(layout)
+            .expect("Allocation failed even in new chunk");
         *self.current.get_mut(token) = Some(new_chunk);
 
         ptr
@@ -185,7 +197,11 @@ unsafe impl<'brand> Send for BrandedBumpAllocator<'brand> {}
 // Not Sync because it uses GhostUnsafeCell without synchronization.
 
 impl<'brand> GhostAlloc<'brand> for BrandedBumpAllocator<'brand> {
-    fn allocate(&self, token: &mut GhostToken<'brand>, layout: Layout) -> Result<NonNull<u8>, AllocError> {
+    fn allocate(
+        &self,
+        token: &mut GhostToken<'brand>,
+        layout: Layout,
+    ) -> Result<NonNull<u8>, AllocError> {
         Ok(self.alloc_layout(layout, token))
     }
 

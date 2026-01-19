@@ -8,6 +8,3 @@
 pub(crate) fn math_assert_msg(condition: bool, message: &str) {
     debug_assert!(condition, "Mathematical invariant violated: {}", message);
 }
-
-
-

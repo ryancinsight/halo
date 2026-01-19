@@ -6,12 +6,3 @@ pub(super) struct Inner<T, F> {
     pub(super) value: MaybeUninit<T>,
     pub(super) is_init: bool,
 }
-
-
-
-
-
-
-
-
-

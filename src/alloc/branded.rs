@@ -1,8 +1,8 @@
+use super::allocator::{AllocError, GhostAlloc};
+use super::heap::BrandedHeap;
+use crate::GhostToken;
 use core::alloc::Layout;
 use core::ptr::NonNull;
-use crate::GhostToken;
-use super::allocator::{GhostAlloc, AllocError};
-use super::heap::BrandedHeap;
 
 /// A simple implementation of `GhostAlloc` that delegates to `BrandedHeap`.
 ///
@@ -28,7 +28,11 @@ impl<'brand> Default for BrandedAllocator<'brand> {
 }
 
 impl<'brand> GhostAlloc<'brand> for BrandedAllocator<'brand> {
-    fn allocate(&self, token: &mut GhostToken<'brand>, layout: Layout) -> Result<NonNull<u8>, AllocError> {
+    fn allocate(
+        &self,
+        token: &mut GhostToken<'brand>,
+        layout: Layout,
+    ) -> Result<NonNull<u8>, AllocError> {
         let ptr = unsafe { self.heap.alloc(token, layout) };
         NonNull::new(ptr).ok_or(AllocError)
     }

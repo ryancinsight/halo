@@ -23,6 +23,3 @@ impl<'a> Iterator for LelNeighborIter<'a> {
         Some(e.target)
     }
 }
-
-
-

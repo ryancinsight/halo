@@ -143,10 +143,10 @@ impl<'brand> super::GhostEccGraph<'brand> {
 
     /// Returns compression and structure statistics.
     pub fn graph_stats(&self) -> EccGraphStats {
-        let memory_usage = std::mem::size_of::<super::storage::EdgeCentricStorage>() +
-                         self.storage.sorted_edges_len() * std::mem::size_of::<EccEdge>() +
-                         self.storage.source_indices_len() * std::mem::size_of::<usize>() +
-                         self.storage.degrees_len() * std::mem::size_of::<usize>();
+        let memory_usage = std::mem::size_of::<super::storage::EdgeCentricStorage>()
+            + self.storage.sorted_edges_len() * std::mem::size_of::<EccEdge>()
+            + self.storage.source_indices_len() * std::mem::size_of::<usize>()
+            + self.storage.degrees_len() * std::mem::size_of::<usize>();
 
         // Estimate traditional CSR size
         let traditional_size = self.node_count * std::mem::size_of::<usize>() + // offsets

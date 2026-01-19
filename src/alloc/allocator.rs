@@ -1,6 +1,6 @@
+use crate::GhostToken;
 use core::alloc::Layout;
 use core::ptr::NonNull;
-use crate::GhostToken;
 
 /// A trait for branded memory allocators.
 ///
@@ -11,7 +11,11 @@ pub trait GhostAlloc<'brand> {
     ///
     /// # Errors
     /// Returns `AllocError` if allocation fails.
-    fn allocate(&self, token: &mut GhostToken<'brand>, layout: Layout) -> Result<NonNull<u8>, AllocError>;
+    fn allocate(
+        &self,
+        token: &mut GhostToken<'brand>,
+        layout: Layout,
+    ) -> Result<NonNull<u8>, AllocError>;
 
     /// Deallocates memory.
     ///

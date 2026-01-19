@@ -4,10 +4,10 @@
 //! It serves as a replacement for `std::alloc` within the branded ecosystem, ensuring
 //! that memory operations are tied to a specific brand/session.
 
+use crate::GhostToken;
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr::NonNull;
-use crate::GhostToken;
-use std::alloc::{alloc, dealloc, realloc, handle_alloc_error};
+use std::alloc::{alloc, dealloc, handle_alloc_error, realloc};
 
 /// A token-gated heap allocator.
 ///
@@ -58,7 +58,13 @@ impl<'brand> BrandedHeap<'brand> {
     ///
     /// # Safety
     /// See `std::alloc::realloc`.
-    pub unsafe fn realloc(&self, _token: &mut GhostToken<'brand>, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+    pub unsafe fn realloc(
+        &self,
+        _token: &mut GhostToken<'brand>,
+        ptr: *mut u8,
+        layout: Layout,
+        new_size: usize,
+    ) -> *mut u8 {
         let new_ptr = realloc(ptr, layout, new_size);
         if new_ptr.is_null() {
             // Layout for realloc error handling is tricky, std handles it usually.

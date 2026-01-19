@@ -1,5 +1,5 @@
-use halo::alloc::{StaticRc, BrandedBox};
-use halo::{GhostToken, GhostCell};
+use halo::alloc::{BrandedBox, StaticRc};
+use halo::{GhostCell, GhostToken};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -98,7 +98,7 @@ fn test_branded_box_zst_drop() {
     struct MyZst;
     impl Drop for MyZst {
         fn drop(&mut self) {
-             DROP_COUNT.with(|c| *c.borrow_mut() += 1);
+            DROP_COUNT.with(|c| *c.borrow_mut() += 1);
         }
     }
 

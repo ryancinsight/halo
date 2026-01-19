@@ -59,7 +59,8 @@ impl<'brand> GhostAtomicBool<'brand> {
         success: Ordering,
         failure: Ordering,
     ) -> Result<bool, bool> {
-        self.inner.compare_exchange_weak(current, new, success, failure)
+        self.inner
+            .compare_exchange_weak(current, new, success, failure)
     }
 
     /// Performs a compare-exchange operation with automatic ordering selection.
@@ -85,7 +86,8 @@ impl<'brand> GhostAtomicBool<'brand> {
     /// Returns `true` if the value was set, `false` if it was already `true`.
     #[inline]
     pub fn test_and_set(&self, order: Ordering) -> bool {
-        self.compare_exchange(false, true, order, Ordering::Relaxed).is_ok()
+        self.compare_exchange(false, true, order, Ordering::Relaxed)
+            .is_ok()
     }
 
     /// Atomically loads and conditionally updates the value.
@@ -100,5 +102,3 @@ impl<'brand> GhostAtomicBool<'brand> {
 
 unsafe impl<'brand> Send for GhostAtomicBool<'brand> {}
 unsafe impl<'brand> Sync for GhostAtomicBool<'brand> {}
-
-

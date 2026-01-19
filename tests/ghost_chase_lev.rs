@@ -50,5 +50,3 @@ fn chase_lev_steal_from_other_thread() {
         });
     });
 }
-
-

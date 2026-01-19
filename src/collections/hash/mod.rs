@@ -10,8 +10,8 @@ pub mod hash_set;
 pub mod index_map;
 pub mod linked_hash_map;
 
-pub use active::{ActiveHashMap, ActivateHashMap};
-pub use active_set::{ActiveHashSet, ActivateHashSet};
+pub use active::{ActivateHashMap, ActiveHashMap};
+pub use active_set::{ActivateHashSet, ActiveHashSet};
 pub use hash_map::BrandedHashMap;
 pub use hash_set::BrandedHashSet;
 pub use index_map::BrandedIndexMap;

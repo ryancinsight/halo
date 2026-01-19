@@ -1,5 +1,7 @@
-use halo::collections::{BrandedVecDeque, BrandedHashMap, BrandedHashSet, BrandedArena, BrandedChunkedVec, BrandedDeque};
-use halo::{GhostToken, BrandedVec, RawGhostCell, GhostRefCell};
+use halo::collections::{
+    BrandedArena, BrandedChunkedVec, BrandedDeque, BrandedHashMap, BrandedHashSet, BrandedVecDeque,
+};
+use halo::{BrandedVec, GhostRefCell, GhostToken, RawGhostCell};
 
 #[test]
 fn test_branded_vec_deque_ops() {
@@ -169,7 +171,9 @@ fn test_branded_arena_adaptive_thresholds() {
         let _original_threshold = arena2.generation_threshold(&token);
         arena2.adapt_threshold(&mut token);
         // Threshold might change due to the adaptive algorithm, just ensure it's within bounds
-        assert!(arena2.generation_threshold(&token) >= 2 && arena2.generation_threshold(&token) <= 1600);
+        assert!(
+            arena2.generation_threshold(&token) >= 2 && arena2.generation_threshold(&token) <= 1600
+        );
 
         // Add mature objects to create low efficiency
         for i in 0..50 {
@@ -179,7 +183,9 @@ fn test_branded_arena_adaptive_thresholds() {
         arena2.adapt_threshold(&mut token);
         // The algorithm should adjust the threshold based on the efficiency ratio
         // Just verify it's within reasonable bounds and has changed
-        assert!(arena2.generation_threshold(&token) >= 2 && arena2.generation_threshold(&token) <= 128);
+        assert!(
+            arena2.generation_threshold(&token) >= 2 && arena2.generation_threshold(&token) <= 128
+        );
     });
 }
 
@@ -253,7 +259,10 @@ fn test_branded_arena_fragmentation_stats() {
         // Check stats after allocation
         let stats_after = arena.memory_stats(&token);
         assert_eq!(stats_after.total_elements, 10);
-        assert!(stats_after.total_elements == stats_after.nursery_elements + stats_after.mature_elements);
+        assert!(
+            stats_after.total_elements
+                == stats_after.nursery_elements + stats_after.mature_elements
+        );
 
         // Fragmentation should be between 0 and 1
         let frag = stats_after.fragmentation_ratio();
@@ -274,7 +283,7 @@ fn test_branded_arena_memory_stats() {
         let stats = arena.memory_stats(&token);
         assert_eq!(stats.total_elements, 10);
         assert_eq!(stats.nursery_elements, 4); // First 4 in nursery
-        assert_eq!(stats.mature_elements, 6);  // Next 6 in mature
+        assert_eq!(stats.mature_elements, 6); // Next 6 in mature
         assert_eq!(stats.chunk_size, 8);
         assert!(stats.nursery_chunks >= 1); // At least 1 chunk for nursery
         assert!(stats.mature_chunks >= 1); // At least 1 chunk for mature

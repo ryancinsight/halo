@@ -1,11 +1,11 @@
-use std::vec::Vec;
-use std::boxed::Box;
-use core::marker::PhantomData;
 use core::cmp::min;
+use core::marker::PhantomData;
+use std::boxed::Box;
+use std::vec::Vec;
 
-use crate::{GhostToken, GhostCell};
-use crate::collections::{BrandedVec, BrandedCollection, ZeroCopyMapOps};
 use super::node::{Node, NodeSlot};
+use crate::collections::{BrandedCollection, BrandedVec, ZeroCopyMapOps};
+use crate::{GhostCell, GhostToken};
 
 /// A high-performance Radix Trie Map (Prefix Tree) optimized for branded usage.
 ///
@@ -84,7 +84,11 @@ impl<'brand, K, V> BrandedRadixTrieMap<'brand, K, V> {
                 }
             };
 
-            self.free_head = if next_free == usize::MAX { None } else { Some(next_free) };
+            self.free_head = if next_free == usize::MAX {
+                None
+            } else {
+                Some(next_free)
+            };
 
             unsafe {
                 let slot_ptr = self.nodes.inner.as_mut_ptr().add(idx) as *mut NodeSlot<V>;
@@ -104,15 +108,22 @@ impl<'brand, K, V> BrandedRadixTrieMap<'brand, K, V> {
         self.free_head = Some(idx);
 
         unsafe {
-             let slot_ptr = self.nodes.inner.as_mut_ptr().add(idx) as *mut NodeSlot<V>;
-             *slot_ptr = NodeSlot::Free(next);
+            let slot_ptr = self.nodes.inner.as_mut_ptr().add(idx) as *mut NodeSlot<V>;
+            *slot_ptr = NodeSlot::Free(next);
         }
     }
 
     /// Internal DFS traversal that passes constructed keys to a callback.
     /// Returns false if traversal was stopped by callback (callback returned false).
-    fn traverse_dfs<F>(&self, token: &GhostToken<'brand>, node_idx: usize, key_buf: &mut Vec<u8>, f: &mut F) -> bool
-    where F: FnMut(&[u8], &V) -> bool
+    fn traverse_dfs<F>(
+        &self,
+        token: &GhostToken<'brand>,
+        node_idx: usize,
+        key_buf: &mut Vec<u8>,
+        f: &mut F,
+    ) -> bool
+    where
+        F: FnMut(&[u8], &V) -> bool,
     {
         let slot = self.nodes.get(token, node_idx).expect("Corrupted");
         if let NodeSlot::Occupied(node) = slot {
@@ -120,10 +131,10 @@ impl<'brand, K, V> BrandedRadixTrieMap<'brand, K, V> {
 
             // Process value
             if let Some(val) = &node.value {
-                 if !f(key_buf, val) {
-                     key_buf.truncate(key_buf.len() - node.prefix.len());
-                     return false;
-                 }
+                if !f(key_buf, val) {
+                    key_buf.truncate(key_buf.len() - node.prefix.len());
+                    return false;
+                }
             }
 
             // Process children
@@ -144,11 +155,15 @@ impl<'brand, K, V> BrandedRadixTrieMap<'brand, K, V> {
     /// Iterates over all elements, passing the key (as slice) and value to the closure.
     /// This avoids allocating a new Vec for each key.
     pub fn for_each<F>(&self, token: &GhostToken<'brand>, mut f: F)
-    where F: FnMut(&[u8], &V)
+    where
+        F: FnMut(&[u8], &V),
     {
         if let Some(root) = self.root {
             let mut key_buf: Vec<u8> = Vec::new();
-            let mut wrapper = |k: &[u8], v: &V| { f(k, v); true };
+            let mut wrapper = |k: &[u8], v: &V| {
+                f(k, v);
+                true
+            };
             self.traverse_dfs(token, root, &mut key_buf, &mut wrapper);
         }
     }
@@ -176,7 +191,10 @@ where
         loop {
             // Peek at the node
             let (common_len, prefix_len) = {
-                let slot = self.nodes.get(token, curr_idx).expect("Node index out of bounds");
+                let slot = self
+                    .nodes
+                    .get(token, curr_idx)
+                    .expect("Node index out of bounds");
                 if let NodeSlot::Occupied(node) = slot {
                     let common = common_prefix_len(&key_bytes[key_offset..], &node.prefix);
                     (common, node.prefix.len())
@@ -190,8 +208,14 @@ where
                 let (old_value, old_children, old_prefix) = {
                     let slot = self.nodes.get_mut(token, curr_idx).unwrap();
                     if let NodeSlot::Occupied(node) = slot {
-                        (node.value.take(), core::mem::take(&mut node.children), core::mem::take(&mut node.prefix))
-                    } else { unreachable!() }
+                        (
+                            node.value.take(),
+                            core::mem::take(&mut node.children),
+                            core::mem::take(&mut node.prefix),
+                        )
+                    } else {
+                        unreachable!()
+                    }
                 };
 
                 let suffix = &old_prefix[common_len..];
@@ -210,14 +234,16 @@ where
 
                     let remaining_key_len = key_bytes.len() - key_offset;
                     if common_len == remaining_key_len {
-                         let old = node.value.replace(value);
-                         if old.is_none() { self.len += 1; }
-                         return old;
+                        let old = node.value.replace(value);
+                        if old.is_none() {
+                            self.len += 1;
+                        }
+                        return old;
                     }
                 }
 
                 // Add leaf
-                let rest_of_key = &key_bytes[key_offset + common_len ..];
+                let rest_of_key = &key_bytes[key_offset + common_len..];
                 let mut leaf = Node::new_with_value(value);
                 leaf.prefix = Box::from(rest_of_key);
                 let leaf_idx = self.alloc_node(leaf);
@@ -228,13 +254,14 @@ where
                 }
                 self.len += 1;
                 return None;
-
             } else if key_offset + common_len == key_bytes.len() {
                 // Match
                 let slot = self.nodes.get_mut(token, curr_idx).unwrap();
                 if let NodeSlot::Occupied(node) = slot {
                     let old = node.value.replace(value);
-                    if old.is_none() { self.len += 1; }
+                    if old.is_none() {
+                        self.len += 1;
+                    }
                     return old;
                 }
             } else {
@@ -244,7 +271,9 @@ where
                     let slot = self.nodes.get(token, curr_idx).unwrap();
                     if let NodeSlot::Occupied(node) = slot {
                         node.get_child(next_byte)
-                    } else { unreachable!() }
+                    } else {
+                        unreachable!()
+                    }
                 };
 
                 if let Some(child_idx) = child_idx_opt {
@@ -252,7 +281,7 @@ where
                     key_offset += common_len;
                     continue;
                 } else {
-                    let rest_of_key = &key_bytes[key_offset + common_len ..];
+                    let rest_of_key = &key_bytes[key_offset + common_len..];
                     let mut leaf = Node::new_with_value(value);
                     leaf.prefix = Box::from(rest_of_key);
                     let leaf_idx = self.alloc_node(leaf);
@@ -279,8 +308,12 @@ where
                 if let NodeSlot::Occupied(node) = slot {
                     let prefix_len = node.prefix.len();
 
-                    if key_bytes.len() - key_offset < prefix_len { return None; }
-                    if &key_bytes[key_offset..key_offset + prefix_len] != &*node.prefix { return None; }
+                    if key_bytes.len() - key_offset < prefix_len {
+                        return None;
+                    }
+                    if &key_bytes[key_offset..key_offset + prefix_len] != &*node.prefix {
+                        return None;
+                    }
 
                     key_offset += prefix_len;
 
@@ -317,26 +350,33 @@ where
                 // If we return, we return a borrow linked to 'token' (lifetime 'a), which is valid.
                 let iter_token = unsafe { &mut *token_ptr };
 
-                let slot = self.nodes.get_mut(iter_token, curr_idx).expect("Corrupted Trie");
+                let slot = self
+                    .nodes
+                    .get_mut(iter_token, curr_idx)
+                    .expect("Corrupted Trie");
 
                 if let NodeSlot::Occupied(node) = slot {
                     let p_len = node.prefix.len();
 
-                    if key_bytes.len() - key_offset < p_len { return None; }
-                    if &key_bytes[key_offset..key_offset + p_len] != &*node.prefix { return None; }
+                    if key_bytes.len() - key_offset < p_len {
+                        return None;
+                    }
+                    if &key_bytes[key_offset..key_offset + p_len] != &*node.prefix {
+                        return None;
+                    }
 
                     let next_offset = key_offset + p_len;
                     if next_offset == key_bytes.len() {
                         return node.value.as_mut();
                     } else {
-                         let next_byte = key_bytes[next_offset];
-                         if let Some(next_idx) = node.get_child(next_byte) {
-                             curr_idx = next_idx;
-                             key_offset += p_len;
-                             continue;
-                         } else {
-                             return None;
-                         }
+                        let next_byte = key_bytes[next_offset];
+                        if let Some(next_idx) = node.get_child(next_byte) {
+                            curr_idx = next_idx;
+                            key_offset += p_len;
+                            continue;
+                        } else {
+                            return None;
+                        }
                     }
                 } else {
                     return None;
@@ -349,7 +389,9 @@ where
     /// Removes a key from the map.
     pub fn remove(&mut self, token: &mut GhostToken<'brand>, key: K) -> Option<V> {
         let key_bytes = key.as_ref();
-        if self.root.is_none() { return None; }
+        if self.root.is_none() {
+            return None;
+        }
 
         let mut path = Vec::new();
         let mut curr_idx = self.root.unwrap();
@@ -360,7 +402,9 @@ where
             if let NodeSlot::Occupied(node) = slot {
                 let p_len = node.prefix.len();
 
-                if key_bytes.len() - key_offset < p_len || &key_bytes[key_offset..key_offset+p_len] != &*node.prefix {
+                if key_bytes.len() - key_offset < p_len
+                    || &key_bytes[key_offset..key_offset + p_len] != &*node.prefix
+                {
                     return None;
                 }
 
@@ -377,7 +421,9 @@ where
                 } else {
                     return None;
                 }
-            } else { return None; }
+            } else {
+                return None;
+            }
         };
 
         let target_idx = found_idx?;
@@ -386,10 +432,14 @@ where
             let slot = self.nodes.get_mut(token, target_idx).unwrap();
             if let NodeSlot::Occupied(node) = slot {
                 node.value.take()
-            } else { None }
+            } else {
+                None
+            }
         };
 
-        if old_val.is_none() { return None; }
+        if old_val.is_none() {
+            return None;
+        }
         self.len -= 1;
 
         let mut child_to_remove = target_idx;
@@ -398,7 +448,9 @@ where
             let slot = self.nodes.get(token, child_to_remove).unwrap();
             if let NodeSlot::Occupied(node) = slot {
                 node.value.is_none() && node.children.is_empty()
-            } else { false }
+            } else {
+                false
+            }
         };
 
         if is_empty_leaf {
@@ -419,17 +471,19 @@ where
         }
 
         while !path.is_empty() {
-             let is_empty_leaf = {
+            let is_empty_leaf = {
                 let slot = self.nodes.get(token, child_to_remove).unwrap();
                 if let NodeSlot::Occupied(node) = slot {
                     node.value.is_none() && node.children.is_empty()
-                } else { false }
+                } else {
+                    false
+                }
             };
 
             if is_empty_leaf {
-                 self.free_node(child_to_remove);
+                self.free_node(child_to_remove);
 
-                 if let Some((parent_idx, byte)) = path.pop() {
+                if let Some((parent_idx, byte)) = path.pop() {
                     let slot = self.nodes.get_mut(token, parent_idx).unwrap();
                     if let NodeSlot::Occupied(parent) = slot {
                         parent.remove_child(byte);
@@ -466,24 +520,25 @@ impl<'brand, K, V> BrandedCollection<'brand> for BrandedRadixTrieMap<'brand, K, 
 }
 
 impl<'brand, K, V> ZeroCopyMapOps<'brand, K, V> for BrandedRadixTrieMap<'brand, K, V>
-where K: AsRef<[u8]>,
+where
+    K: AsRef<[u8]>,
 {
     fn find_ref<'a, F>(&'a self, _token: &'a GhostToken<'brand>, _f: F) -> Option<(&'a K, &'a V)>
     where
-        F: Fn(&K, &V) -> bool
+        F: Fn(&K, &V) -> bool,
     {
-         None
+        None
     }
 
     fn any_ref<F>(&self, _token: &GhostToken<'brand>, _f: F) -> bool
     where
-        F: Fn(&K, &V) -> bool
+        F: Fn(&K, &V) -> bool,
     {
         if let Some(_root) = self.root {
-             // Best effort: traverse but we can't invoke f because we can't construct &K
-             // So we return false.
-             // Ideally we should panic or documentation should say "Not supported for Trie".
-             false
+            // Best effort: traverse but we can't invoke f because we can't construct &K
+            // So we return false.
+            // Ideally we should panic or documentation should say "Not supported for Trie".
+            false
         } else {
             false
         }
@@ -491,7 +546,7 @@ where K: AsRef<[u8]>,
 
     fn all_ref<F>(&self, _token: &GhostToken<'brand>, _f: F) -> bool
     where
-        F: Fn(&K, &V) -> bool
+        F: Fn(&K, &V) -> bool,
     {
         true
     }
@@ -531,7 +586,7 @@ mod tests {
 
     #[test]
     fn test_branded_trie_split() {
-         GhostToken::new(|mut token| {
+        GhostToken::new(|mut token| {
             let mut map = BrandedRadixTrieMap::new();
             map.insert(&mut token, "a", 1);
             map.insert(&mut token, "ab", 2);
@@ -548,8 +603,8 @@ mod tests {
 
     #[test]
     fn test_branded_trie_iterator() {
-         use crate::collections::trie::iter::Iter;
-         GhostToken::new(|mut token| {
+        use crate::collections::trie::iter::Iter;
+        GhostToken::new(|mut token| {
             let mut map = BrandedRadixTrieMap::new();
             map.insert(&mut token, "apple", 1);
             map.insert(&mut token, "app", 2);

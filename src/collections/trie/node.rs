@@ -1,5 +1,5 @@
-use std::vec::Vec;
 use std::boxed::Box;
+use std::vec::Vec;
 
 /// A slot in the Trie arena.
 /// Can be either an occupied node or a pointer to the next free slot.
@@ -58,7 +58,8 @@ impl<V> Node<V> {
 
     /// Finds the child index for a given byte.
     pub fn get_child(&self, byte: u8) -> Option<usize> {
-        self.children.binary_search_by_key(&byte, |&(b, _)| b)
+        self.children
+            .binary_search_by_key(&byte, |&(b, _)| b)
             .ok()
             .map(|pos| self.children[pos].1)
     }
