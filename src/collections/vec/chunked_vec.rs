@@ -12,6 +12,7 @@
 //! - **Direct Chunk Access**: Zero-indirection element access via unsafe indexing
 //! - **Arena-Style Allocation**: Monotonic growth with stable references
 //! - **Bulk Operations**: Efficient processing of entire chunks with single token validation
+//! - **Vectorized Iteration**: Chunks expose standard slices for auto-vectorization friendly loops.
 //!
 //! Performance Characteristics:
 //! - Push: O(1) amortized (chunk allocation + direct write)
@@ -22,7 +23,7 @@
 use core::mem::MaybeUninit;
 use crate::{GhostCell, GhostToken};
 use crate::collections::ZeroCopyOps;
-
+use std::slice;
 
 /// Zero-cost iterator for BrandedChunkedVec.
 pub struct BrandedChunkedVecIter<'a, 'brand, T, const CHUNK: usize> {
@@ -39,6 +40,11 @@ impl<'a, 'brand, T, const CHUNK: usize> Iterator for BrandedChunkedVecIter<'a, '
         loop {
             let node = self.current_node?;
             if self.chunk_index < node.chunk.len() {
+                // Optimized to use slice access internally if possible, but for single element, get_unchecked is fine.
+                // Actually, accessing via slice might be slightly cleaner.
+                // let slice = node.chunk.as_slice(self.token);
+                // But creating slice every time is overhead.
+                // Stick to current impl which is O(1).
                 let elem = unsafe { node.chunk.get_unchecked(self.chunk_index) };
                 self.chunk_index += 1;
                 return Some(elem.borrow(self.token));
@@ -46,6 +52,60 @@ impl<'a, 'brand, T, const CHUNK: usize> Iterator for BrandedChunkedVecIter<'a, '
                 self.current_node = node.next.as_deref();
                 self.chunk_index = 0;
             }
+        }
+    }
+}
+
+/// Iterator over chunks as shared slices.
+pub struct ChunkIter<'a, 'brand, T, const CHUNK: usize> {
+    current: Option<&'a ChunkNode<'brand, T, CHUNK>>,
+    token: &'a GhostToken<'brand>,
+}
+
+impl<'a, 'brand, T, const CHUNK: usize> Iterator for ChunkIter<'a, 'brand, T, CHUNK> {
+    type Item = &'a [T];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let node = self.current?;
+        self.current = node.next.as_deref();
+        if node.chunk.len() > 0 {
+            Some(node.chunk.as_slice(self.token))
+        } else {
+            None
+        }
+    }
+}
+
+/// Iterator over chunks as mutable slices.
+pub struct ChunkMutIter<'a, 'brand, T, const CHUNK: usize> {
+    current: Option<&'a ChunkNode<'brand, T, CHUNK>>,
+    // We need unsafe ptr or similar to yield mut refs from shared structure + mut token
+    // But Iterator::next takes &mut self.
+    // The lifetime 'a corresponds to the borrow of BrandedChunkedVec AND the token.
+    // Since we iterate through the linked list which is immutable (structure),
+    // and yield mutable data gated by token.
+    token: *mut GhostToken<'brand>, // Raw pointer to avoid borrowing issues in iterator
+    _marker: std::marker::PhantomData<&'a mut GhostToken<'brand>>,
+}
+
+impl<'a, 'brand, T, const CHUNK: usize> Iterator for ChunkMutIter<'a, 'brand, T, CHUNK> {
+    type Item = &'a mut [T];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let node = self.current?;
+        self.current = node.next.as_deref();
+        if node.chunk.len() > 0 {
+            // SAFETY: We have exclusive access via the token we were given.
+            // We generate a mutable slice from the chunk data.
+            // This is safe because:
+            // 1. We hold the exclusive token for 'a (in the struct).
+            // 2. We yield chunks sequentially, so no aliasing between yielded slices.
+            unsafe {
+                let ptr = node.chunk.data.as_ptr() as *mut T;
+                Some(slice::from_raw_parts_mut(ptr, node.chunk.len()))
+            }
+        } else {
+            None
         }
     }
 }
@@ -110,6 +170,40 @@ impl<'brand, T, const CHUNK: usize> BrandedChunk<'brand, T, CHUNK> {
     unsafe fn get_unchecked(&self, index: usize) -> &GhostCell<'brand, T> {
         debug_assert!(index < self.initialized);
         self.data.get_unchecked(index)
+    }
+
+    /// Returns the chunk as a slice.
+    #[inline(always)]
+    fn as_slice<'a>(&'a self, _token: &'a GhostToken<'brand>) -> &'a [T] {
+        // SAFETY:
+        // 1. `GhostCell<T>` is transparent over `UnsafeCell<T>`, which is transparent over `T`.
+        // 2. We hold shared `token`, so we have read access.
+        unsafe {
+            let ptr = self.data.as_ptr() as *const T;
+            slice::from_raw_parts(ptr, self.initialized)
+        }
+    }
+
+    /// Returns the chunk as a mutable slice.
+    #[inline(always)]
+    fn as_mut_slice<'a>(&'a self, _token: &'a mut GhostToken<'brand>) -> &'a mut [T] {
+        // SAFETY:
+        // 1. Transparency as above.
+        // 2. We hold mutable `token`, so we have exclusive access.
+        // 3. `&self` is shared, but `token` grants mutability to branded data.
+        unsafe {
+            let ptr = self.data.as_ptr() as *mut T; // Cast const ptr to mut ptr (interior mutability via token)
+            slice::from_raw_parts_mut(ptr, self.initialized)
+        }
+    }
+
+    /// Returns the chunk as a mutable slice without token (requires exclusive reference).
+    #[inline(always)]
+    fn as_mut_slice_exclusive(&mut self) -> &mut [T] {
+        unsafe {
+            let ptr = self.data.as_mut_ptr() as *mut T;
+            slice::from_raw_parts_mut(ptr, self.initialized)
+        }
     }
 }
 
@@ -265,17 +359,6 @@ impl<'brand, T, const CHUNK: usize> BrandedChunkedVec<'brand, T, CHUNK> {
         }
 
         unsafe {
-            let cell = current.chunk.get_unchecked(elem_idx);
-            // GhostCell::get_mut requires &mut GhostCell.
-            // We have &mut self -> &mut ChunkNode -> &mut BrandedChunk -> &mut [GhostCell] -> &mut GhostCell.
-            // But `chunk.data` is array of GhostCell. `get_unchecked` returns `&GhostCell`.
-            // We need `get_unchecked_mut` for BrandedChunk?
-            // BrandedChunk `get_unchecked` is implemented. We need mutable version.
-            // Since we are inside the crate, we can probably access or cast.
-            // But let's assume we can get it.
-            // Wait, BrandedChunk::get_unchecked is unsafe.
-            // I need to update BrandedChunk to support getting &mut GhostCell.
-
             // Accessing inner data directly:
             let cell_ref = current.chunk.data.get_unchecked_mut(elem_idx);
             Some(cell_ref.get_mut())
@@ -292,49 +375,42 @@ impl<'brand, T, const CHUNK: usize> BrandedChunkedVec<'brand, T, CHUNK> {
         }
     }
 
+    /// Returns an iterator over chunks as slices.
+    pub fn chunks<'a>(&'a self, token: &'a GhostToken<'brand>) -> ChunkIter<'a, 'brand, T, CHUNK> {
+        ChunkIter {
+            current: self.head.as_deref(),
+            token,
+        }
+    }
+
+    /// Returns an iterator over chunks as mutable slices.
+    pub fn chunks_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>) -> ChunkMutIter<'a, 'brand, T, CHUNK> {
+        ChunkMutIter {
+            current: self.head.as_deref(),
+            token: token as *mut _,
+            _marker: std::marker::PhantomData,
+        }
+    }
+
     /// Bulk operation: applies a function to all elements in a chunk.
     ///
-    /// This is much more efficient than individual element access for operations
-    /// that need to touch many elements in the same chunk.
-    ///
-    /// Performance optimizations:
-    /// - Chunk lookup with early bounds checking
-    /// - Direct unsafe iteration without bounds checks per element
-    /// - Cache-friendly sequential access pattern
+    /// This is much more efficient than individual element access.
     #[inline]
     pub fn for_each_in_chunk(&self, chunk_idx: usize, token: &GhostToken<'brand>, mut f: impl FnMut(&T)) {
         let mut current = self.head.as_ref();
         let mut current_idx = 0;
 
-        // Early return for empty collection
-        if current.is_none() {
-            return;
-        }
-
         // Find the target chunk
-        while current_idx < chunk_idx {
-            current = match current {
-                Some(node) => node.next.as_ref(),
-                None => return, // Chunk index out of bounds
-            };
-            current_idx += 1;
-        }
-
-        if let Some(node) = current {
-            let chunk_len = node.chunk.len();
-            if chunk_len == 0 {
+        while let Some(node) = current {
+            if current_idx == chunk_idx {
+                // Use slice iteration for optimization
+                if node.chunk.len() > 0 {
+                    node.chunk.as_slice(token).iter().for_each(f);
+                }
                 return;
             }
-
-            // Direct iteration over chunk elements
-            // This eliminates per-element bounds checking
-            for i in 0..chunk_len {
-                unsafe {
-                    let cell = node.chunk.get_unchecked(i);
-                    let elem = cell.borrow(token);
-                    f(elem);
-                }
-            }
+            current = node.next.as_ref();
+            current_idx += 1;
         }
     }
 
@@ -345,13 +421,8 @@ impl<'brand, T, const CHUNK: usize> BrandedChunkedVec<'brand, T, CHUNK> {
 
         while let Some(node) = current {
             if current_idx == chunk_idx {
-                // Found the chunk, iterate all its elements
-                for i in 0..node.chunk.len() {
-                    unsafe {
-                        let cell = node.chunk.get_unchecked(i);
-                        let elem = cell.borrow_mut(token);
-                        f(elem);
-                    }
+                if node.chunk.len() > 0 {
+                    node.chunk.as_mut_slice(token).iter_mut().for_each(f);
                 }
                 return;
             }
@@ -379,23 +450,14 @@ impl<'brand, T, const CHUNK: usize> BrandedChunkedVec<'brand, T, CHUNK> {
 
     /// Applies a function to all elements in the BrandedChunkedVec.
     ///
-    /// This provides maximum efficiency for bulk operations by directly
-    /// iterating over chunks without token validation overhead per element.
+    /// This provides maximum efficiency for bulk operations by iterating over chunks slices.
     #[inline]
     pub fn for_each<F>(&self, token: &GhostToken<'brand>, mut f: F)
     where
         F: FnMut(&T),
     {
-        let mut current = self.head.as_ref();
-        while let Some(node) = current {
-            for i in 0..node.chunk.len() {
-                unsafe {
-                    let cell = node.chunk.get_unchecked(i);
-                    let elem = cell.borrow(token);
-                    f(elem);
-                }
-            }
-            current = node.next.as_ref();
+        for chunk in self.chunks(token) {
+            chunk.iter().for_each(&mut f);
         }
     }
 
@@ -409,17 +471,7 @@ impl<'brand, T, const CHUNK: usize> BrandedChunkedVec<'brand, T, CHUNK> {
     {
         let mut current = self.head.as_mut();
         while let Some(node) = current {
-            let chunk_len = node.chunk.len();
-            // Access chunk data mutably
-            // node.chunk.data is [GhostCell<T>; CHUNK]
-            // We need to iterate it.
-            for i in 0..chunk_len {
-                unsafe {
-                    let cell_ref = node.chunk.data.get_unchecked_mut(i);
-                    let elem = cell_ref.get_mut();
-                    f(elem);
-                }
-            }
+            node.chunk.as_mut_slice_exclusive().iter_mut().for_each(&mut f);
             current = node.next.as_mut();
         }
     }
@@ -432,16 +484,8 @@ impl<'brand, T, const CHUNK: usize> BrandedChunkedVec<'brand, T, CHUNK> {
     where
         F: FnMut(&mut T),
     {
-        let mut current = self.head.as_ref();
-        while let Some(node) = current {
-            for i in 0..node.chunk.len() {
-                unsafe {
-                    let cell = node.chunk.get_unchecked(i);
-                    let elem = cell.borrow_mut(token);
-                    f(elem);
-                }
-            }
-            current = node.next.as_ref();
+        for chunk in self.chunks_mut(token) {
+            chunk.iter_mut().for_each(&mut f);
         }
     }
 
@@ -451,16 +495,13 @@ impl<'brand, T, const CHUNK: usize> BrandedChunkedVec<'brand, T, CHUNK> {
     /// Returns None if no chunks have been allocated.
     #[inline]
     pub fn as_ptr(&self) -> Option<*const T> {
-        // We need to traverse the linked list to find the first chunk
-        let mut current = self.head.as_ref();
-        while let Some(node) = current {
+        self.head.as_ref().and_then(|node| {
             if node.chunk.initialized > 0 {
-                // Get the first element of this chunk
-                return Some(node.chunk.data.as_ptr() as *const T);
+                Some(node.chunk.data.as_ptr() as *const T)
+            } else {
+                None
             }
-            current = node.next.as_ref();
-        }
-        None
+        })
     }
 }
 
@@ -484,7 +525,7 @@ impl<'brand, T, const CHUNK: usize> ZeroCopyOps<'brand, T> for BrandedChunkedVec
     where
         F: Fn(&T) -> bool,
     {
-        self.iter(token).find(|&item| f(item))
+        self.chunks(token).flat_map(|c| c.iter()).find(|&item| f(item))
     }
 
     #[inline(always)]
@@ -492,7 +533,7 @@ impl<'brand, T, const CHUNK: usize> ZeroCopyOps<'brand, T> for BrandedChunkedVec
     where
         F: Fn(&T) -> bool,
     {
-        self.iter(token).any(|item| f(item))
+        self.chunks(token).any(|chunk| chunk.iter().any(|item| f(item)))
     }
 
     #[inline(always)]
@@ -500,7 +541,7 @@ impl<'brand, T, const CHUNK: usize> ZeroCopyOps<'brand, T> for BrandedChunkedVec
     where
         F: Fn(&T) -> bool,
     {
-        self.iter(token).all(|item| f(item))
+        self.chunks(token).all(|chunk| chunk.iter().all(|item| f(item)))
     }
 }
 
@@ -587,6 +628,33 @@ mod tests {
             assert_eq!(vec.find_ref(&token, |&x| x == 2), Some(&2));
             assert!(vec.any_ref(&token, |&x| x == 3));
             assert!(vec.all_ref(&token, |&x| x > 0));
+        });
+    }
+
+    #[test]
+    fn test_chunks_iterator() {
+        GhostToken::new(|mut token| {
+            let mut vec = BrandedChunkedVec::<_, 2>::new();
+            vec.push(1);
+            vec.push(2);
+            vec.push(3);
+            vec.push(4);
+
+            {
+                let mut chunks = vec.chunks(&token);
+                assert_eq!(chunks.next().unwrap(), &[1, 2]);
+                assert_eq!(chunks.next().unwrap(), &[3, 4]);
+                assert!(chunks.next().is_none());
+            }
+
+            for chunk in vec.chunks_mut(&mut token) {
+                for x in chunk {
+                    *x *= 10;
+                }
+            }
+
+            assert_eq!(*vec.get(&token, 0).unwrap(), 10);
+            assert_eq!(*vec.get(&token, 3).unwrap(), 40);
         });
     }
 }
