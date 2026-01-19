@@ -4,12 +4,14 @@
 //! branded for safe concurrent access patterns.
 
 pub mod active;
+pub mod active_set;
 pub mod hash_map;
 pub mod hash_set;
 pub mod index_map;
 pub mod linked_hash_map;
 
 pub use active::{ActiveHashMap, ActivateHashMap};
+pub use active_set::{ActiveHashSet, ActivateHashSet};
 pub use hash_map::BrandedHashMap;
 pub use hash_set::BrandedHashSet;
 pub use index_map::BrandedIndexMap;

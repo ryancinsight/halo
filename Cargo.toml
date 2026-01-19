@@ -116,3 +116,11 @@ harness = false
 [[bench]]
 name = "matrix_benchmark"
 harness = false
+
+[[bench]]
+name = "string_benchmark"
+harness = false
+
+[[bench]]
+name = "active_set_benchmark"
+harness = false
