@@ -8,6 +8,13 @@ pub mod node;
 pub mod map;
 pub mod set;
 pub mod iter;
+pub mod active;
 
 pub use map::BrandedRadixTrieMap;
 pub use set::BrandedRadixTrieSet;
+
+// Re-export active wrappers
+pub use active::{
+    ActiveRadixTrieMap, ActivateRadixTrieMap,
+    ActiveRadixTrieSet, ActivateRadixTrieSet,
+};

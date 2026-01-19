@@ -17,7 +17,7 @@ pub struct BrandedBinaryHeap<'brand, T> {
     data: BrandedVec<'brand, T>,
 }
 
-impl<'brand, T: Ord> BrandedBinaryHeap<'brand, T> {
+impl<'brand, T> BrandedBinaryHeap<'brand, T> {
     /// Creates an empty binary heap.
     pub fn new() -> Self {
         Self {
@@ -46,7 +46,9 @@ impl<'brand, T: Ord> BrandedBinaryHeap<'brand, T> {
     pub fn capacity(&self) -> usize {
         self.data.capacity()
     }
+}
 
+impl<'brand, T: Ord> BrandedBinaryHeap<'brand, T> {
     /// Pushes an item onto the binary heap.
     pub fn push(&mut self, token: &mut GhostToken<'brand>, item: T) {
         self.data.push(item);

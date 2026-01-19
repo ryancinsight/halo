@@ -75,6 +75,16 @@ impl<'brand, T> BrandedSlotMap<'brand, T> {
         }
     }
 
+    /// Returns the number of elements in the map.
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Returns `true` if the map is empty.
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
     /// Inserts a value into the map, returning a branded key.
     pub fn insert(&mut self, token: &mut GhostToken<'brand>, value: T) -> SlotKey<'brand> {
         self.len += 1;
