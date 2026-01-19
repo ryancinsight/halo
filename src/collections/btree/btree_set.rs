@@ -60,8 +60,8 @@ where
     }
 
     /// Returns an iterator over the values in the set.
-    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> impl Iterator<Item = &'a T> + 'a {
-        self.map.iter(token).map(|(k, _)| k)
+    pub fn iter<'a>(&'a self) -> impl Iterator<Item = &'a T> + 'a {
+        self.map.keys()
     }
 }
 
@@ -103,7 +103,7 @@ mod tests {
             assert!(set.insert(3));
             assert_eq!(set.len(), 3);
 
-            let mut items: Vec<i32> = set.iter(&token).copied().collect();
+            let mut items: Vec<i32> = set.iter().copied().collect();
             items.sort();
             assert_eq!(items, vec![1, 2, 3]);
 

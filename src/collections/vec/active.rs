@@ -7,7 +7,7 @@
 //! It also supports slicing into `BrandedSliceMut`, enabling parallel mutation patterns.
 
 use crate::GhostToken;
-use super::BrandedVec;
+use super::{BrandedVec, BrandedVecDeque};
 use super::slice::{BrandedSlice, BrandedSliceMut};
 use std::slice;
 
@@ -118,6 +118,102 @@ pub trait ActivateVec<'brand, T> {
 impl<'brand, T> ActivateVec<'brand, T> for BrandedVec<'brand, T> {
     fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveVec<'a, 'brand, T> {
         ActiveVec::new(self, token)
+    }
+}
+
+/// A wrapper around a mutable reference to a `BrandedVecDeque` and a mutable reference to a `GhostToken`.
+pub struct ActiveVecDeque<'a, 'brand, T> {
+    deque: &'a mut BrandedVecDeque<'brand, T>,
+    token: &'a mut GhostToken<'brand>,
+}
+
+impl<'a, 'brand, T> ActiveVecDeque<'a, 'brand, T> {
+    /// Creates a new active deque handle.
+    pub fn new(deque: &'a mut BrandedVecDeque<'brand, T>, token: &'a mut GhostToken<'brand>) -> Self {
+        Self { deque, token }
+    }
+
+    /// Returns the number of elements.
+    pub fn len(&self) -> usize {
+        self.deque.len()
+    }
+
+    /// Returns `true` if empty.
+    pub fn is_empty(&self) -> bool {
+        self.deque.is_empty()
+    }
+
+    /// Clears the deque.
+    pub fn clear(&mut self) {
+        self.deque.clear();
+    }
+
+    /// Pushes an element to the back.
+    pub fn push_back(&mut self, value: T) {
+        self.deque.push_back(value);
+    }
+
+    /// Pushes an element to the front.
+    pub fn push_front(&mut self, value: T) {
+        self.deque.push_front(value);
+    }
+
+    /// Pops from the back.
+    pub fn pop_back(&mut self) -> Option<T> {
+        self.deque.pop_back().map(|c| c.into_inner())
+    }
+
+    /// Pops from the front.
+    pub fn pop_front(&mut self) -> Option<T> {
+        self.deque.pop_front().map(|c| c.into_inner())
+    }
+
+    /// Returns a shared reference to the element at `idx`.
+    pub fn get(&self, idx: usize) -> Option<&T> {
+        self.deque.get(self.token, idx)
+    }
+
+    /// Returns a mutable reference to the element at `idx`.
+    pub fn get_mut(&mut self, idx: usize) -> Option<&mut T> {
+        self.deque.get_mut(self.token, idx)
+    }
+
+    /// Returns the front element.
+    pub fn front(&self) -> Option<&T> {
+        self.deque.get(self.token, 0)
+    }
+
+    /// Returns the back element.
+    pub fn back(&self) -> Option<&T> {
+        if self.len() == 0 {
+            None
+        } else {
+            self.deque.get(self.token, self.len() - 1)
+        }
+    }
+
+    /// Iterates over elements.
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        self.deque.iter(self.token)
+    }
+
+    /// Exclusive iteration via callback.
+    pub fn for_each_mut<F>(&mut self, f: F)
+    where
+        F: FnMut(&mut T),
+    {
+        self.deque.for_each_mut(self.token, f)
+    }
+}
+
+/// Extension trait to easily create ActiveVecDeque from BrandedVecDeque.
+pub trait ActivateVecDeque<'brand, T> {
+    fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveVecDeque<'a, 'brand, T>;
+}
+
+impl<'brand, T> ActivateVecDeque<'brand, T> for BrandedVecDeque<'brand, T> {
+    fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveVecDeque<'a, 'brand, T> {
+        ActiveVecDeque::new(self, token)
     }
 }
 

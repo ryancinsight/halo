@@ -5,7 +5,7 @@
 //! API without requiring the token as an argument for every call.
 
 use crate::GhostToken;
-use super::BrandedHashMap;
+use super::{BrandedHashMap, BrandedHashSet};
 use std::hash::{Hash, BuildHasher};
 
 /// A wrapper around a mutable reference to a `BrandedHashMap` and a mutable reference to a `GhostToken`.
@@ -111,5 +111,73 @@ where
 {
     fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveHashMap<'a, 'brand, K, V, S> {
         ActiveHashMap::new(self, token)
+    }
+}
+
+/// A wrapper around a mutable reference to a `BrandedHashSet` and a mutable reference to a `GhostToken`.
+pub struct ActiveHashSet<'a, 'brand, K, S> {
+    set: &'a mut BrandedHashSet<'brand, K, S>,
+    token: &'a mut GhostToken<'brand>,
+}
+
+impl<'a, 'brand, K, S> ActiveHashSet<'a, 'brand, K, S>
+where
+    K: Eq + Hash,
+    S: BuildHasher,
+{
+    /// Creates a new active set handle.
+    pub fn new(set: &'a mut BrandedHashSet<'brand, K, S>, token: &'a mut GhostToken<'brand>) -> Self {
+        Self { set, token }
+    }
+
+    /// Returns the number of elements.
+    pub fn len(&self) -> usize {
+        self.set.len()
+    }
+
+    /// Returns `true` if empty.
+    pub fn is_empty(&self) -> bool {
+        self.set.is_empty()
+    }
+
+    /// Returns `true` if the set contains the value.
+    pub fn contains(&self, value: &K) -> bool {
+        self.set.contains(value)
+    }
+
+    /// Returns `true` if the set contains the value (gated check).
+    pub fn contains_gated(&self, value: &K) -> bool {
+        self.set.contains_gated(self.token, value)
+    }
+
+    /// Inserts a value.
+    pub fn insert(&mut self, value: K) -> bool {
+        self.set.insert(value)
+    }
+
+    /// Removes a value.
+    pub fn remove(&mut self, value: &K) -> bool {
+        self.set.remove(value)
+    }
+
+    /// Iterates over elements.
+    pub fn iter(&self) -> impl Iterator<Item = &K> {
+        self.set.iter()
+    }
+}
+
+/// Extension trait to easily create ActiveHashSet from BrandedHashSet.
+pub trait ActivateHashSet<'brand, K, S> {
+    /// Activates the set with the given token, returning a handle that bundles them.
+    fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveHashSet<'a, 'brand, K, S>;
+}
+
+impl<'brand, K, S> ActivateHashSet<'brand, K, S> for BrandedHashSet<'brand, K, S>
+where
+    K: Eq + Hash,
+    S: BuildHasher,
+{
+    fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveHashSet<'a, 'brand, K, S> {
+        ActiveHashSet::new(self, token)
     }
 }

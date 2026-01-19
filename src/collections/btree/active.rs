@@ -5,7 +5,7 @@
 //! API without requiring the token as an argument for every call.
 
 use crate::GhostToken;
-use super::BrandedBTreeMap;
+use super::{BrandedBTreeMap, BrandedBTreeSet};
 use std::borrow::Borrow;
 
 /// A wrapper around a mutable reference to a `BrandedBTreeMap` and a mutable reference to a `GhostToken`.
@@ -99,5 +99,73 @@ pub trait ActivateBTreeMap<'brand, K, V> {
 impl<'brand, K, V> ActivateBTreeMap<'brand, K, V> for BrandedBTreeMap<'brand, K, V> {
     fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveBTreeMap<'a, 'brand, K, V> {
         ActiveBTreeMap::new(self, token)
+    }
+}
+
+/// A wrapper around a mutable reference to a `BrandedBTreeSet` and a mutable reference to a `GhostToken`.
+pub struct ActiveBTreeSet<'a, 'brand, T> {
+    set: &'a mut BrandedBTreeSet<'brand, T>,
+    token: &'a mut GhostToken<'brand>,
+}
+
+impl<'a, 'brand, T> ActiveBTreeSet<'a, 'brand, T> {
+    /// Creates a new active set handle.
+    pub fn new(set: &'a mut BrandedBTreeSet<'brand, T>, token: &'a mut GhostToken<'brand>) -> Self {
+        Self { set, token }
+    }
+
+    /// Returns the number of elements.
+    pub fn len(&self) -> usize {
+        self.set.len()
+    }
+
+    /// Returns `true` if empty.
+    pub fn is_empty(&self) -> bool {
+        self.set.is_empty()
+    }
+}
+
+impl<'a, 'brand, T> ActiveBTreeSet<'a, 'brand, T>
+where
+    T: Ord,
+{
+    /// Adds a value to the set.
+    pub fn insert(&mut self, value: T) -> bool {
+        self.set.insert(value)
+    }
+
+    /// Returns `true` if the set contains the value.
+    pub fn contains<Q: ?Sized>(&self, value: &Q) -> bool
+    where
+        T: Borrow<Q>,
+        Q: Ord,
+    {
+        self.set.contains(value)
+    }
+
+    /// Removes a value from the set.
+    pub fn remove<Q: ?Sized>(&mut self, value: &Q) -> bool
+    where
+        T: Borrow<Q>,
+        Q: Ord,
+    {
+        self.set.remove(value)
+    }
+
+    /// Iterates over the values in the set.
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        self.set.iter()
+    }
+}
+
+/// Extension trait to easily create ActiveBTreeSet from BrandedBTreeSet.
+pub trait ActivateBTreeSet<'brand, T> {
+    /// Activates the set with the given token, returning a handle that bundles them.
+    fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveBTreeSet<'a, 'brand, T>;
+}
+
+impl<'brand, T> ActivateBTreeSet<'brand, T> for BrandedBTreeSet<'brand, T> {
+    fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveBTreeSet<'a, 'brand, T> {
+        ActiveBTreeSet::new(self, token)
     }
 }
