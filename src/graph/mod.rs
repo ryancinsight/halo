@@ -11,7 +11,7 @@ pub mod specialized;
 pub(crate) mod access;
 
 // Re-export commonly used types from submodules
-pub use basic::{GhostAdjacencyGraph, GhostBipartiteGraph, GhostDag};
+pub use basic::{GhostAdjacencyGraph, GhostBipartiteGraph, GhostDag, BrandedPoolGraph};
 pub use compressed::{GhostCscGraph, GhostCsrGraph};
 
 
