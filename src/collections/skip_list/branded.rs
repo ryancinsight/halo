@@ -75,15 +75,16 @@ impl XorShift64 {
     }
 }
 
-struct NodeData<K, V> {
+struct NodeData<'brand, K, V> {
     keys: [MaybeUninit<K>; CHUNK_SIZE],
     vals: [MaybeUninit<V>; CHUNK_SIZE],
     len: u8,
     level: u8,
     link_offset: u32,
+    next_chunk: NodeIdx<'brand>, // Optimization: Direct link to next chunk (level 0)
 }
 
-impl<K, V> NodeData<K, V> {
+impl<'brand, K, V> NodeData<'brand, K, V> {
     fn new(level: u8, link_offset: u32) -> Self {
         // Safe because MaybeUninit doesn't require initialization
         let keys = unsafe { MaybeUninit::uninit().assume_init() };
@@ -94,6 +95,7 @@ impl<K, V> NodeData<K, V> {
             len: 0,
             level,
             link_offset,
+            next_chunk: NodeIdx::NONE,
         }
     }
 
@@ -115,7 +117,7 @@ impl<K, V> NodeData<K, V> {
 
 /// A Chunked SkipList map with token-gated values.
 pub struct BrandedSkipList<'brand, K, V> {
-    nodes: BrandedVec<'brand, NodeData<K, V>>,
+    nodes: BrandedVec<'brand, NodeData<'brand, K, V>>,
     links: BrandedVec<'brand, NodeIdx<'brand>>, // indices into `nodes`
     head_links: [NodeIdx<'brand>; MAX_LEVEL],
     len: usize,
@@ -186,7 +188,14 @@ where
 
         loop {
             // Find next chunk
-            let next_idx = self.get_next(token, curr, level);
+            // Optimization: if level is 0, use next_chunk directly if we are at a node
+            let next_idx = if level == 0 && curr.is_some() {
+                unsafe {
+                    self.nodes.get_unchecked(token, curr.index()).next_chunk
+                }
+            } else {
+                self.get_next_unchecked(token, curr, level)
+            };
 
             if next_idx.is_some() {
                 unsafe {
@@ -241,7 +250,14 @@ where
         }
 
         loop {
-            let next_idx = self.get_next_unchecked(token, curr, level);
+            let next_idx = if level == 0 && curr.is_some() {
+                unsafe {
+                    self.nodes.get_unchecked(token, curr.index()).next_chunk
+                }
+            } else {
+                self.get_next_unchecked(token, curr, level)
+            };
+
             if next_idx.is_some() {
                 unsafe {
                     let next_node = self.nodes.get_unchecked(token, next_idx.index());
@@ -297,7 +313,13 @@ where
         // Find predecessors
         if self.max_level > 0 {
             loop {
-                let next_idx = self.get_next_unchecked(token, curr, level);
+                // Optimization: use next_chunk for level 0
+                let next_idx = if level == 0 && curr.is_some() {
+                    unsafe { self.nodes.get_unchecked(token, curr.index()).next_chunk }
+                } else {
+                    self.get_next_unchecked(token, curr, level)
+                };
+
                 if next_idx.is_some() {
                     unsafe {
                         let next_node = self.nodes.get_unchecked(token, next_idx.index());
@@ -388,6 +410,7 @@ where
         node.keys[0].write(key);
         node.vals[0].write(value);
         node.len = 1;
+        node.next_chunk = NodeIdx::NONE;
         self.nodes.push(node);
     }
 
@@ -444,6 +467,10 @@ where
         // 2. Distribute keys
         unsafe {
             let node = self.nodes.get_unchecked_mut(token, node_idx.index());
+
+            // Update next_chunk
+            new_node.next_chunk = node.next_chunk;
+            node.next_chunk = new_node_idx;
 
             // Find insert pos
             let mut pos = node.len as usize;
@@ -563,8 +590,7 @@ impl<'brand, K, V> ZeroCopyMapOps<'brand, K, V> for BrandedSkipList<'brand, K, V
                         return Some((k, v));
                     }
                 }
-                let offset = node.link_offset as usize;
-                curr = *self.links.get_unchecked(token, offset);
+                curr = node.next_chunk; // Optimization: use next_chunk
             }
         }
         None
@@ -590,8 +616,7 @@ impl<'brand, K, V> ZeroCopyMapOps<'brand, K, V> for BrandedSkipList<'brand, K, V
                         return false;
                     }
                 }
-                let offset = node.link_offset as usize;
-                curr = *self.links.get_unchecked(token, offset);
+                curr = node.next_chunk; // Optimization
             }
         }
         true
@@ -622,8 +647,7 @@ impl<'a, 'brand, K, V> Iterator for Iter<'a, 'brand, K, V> {
                 self.idx += 1;
                 return Some((k, v));
             } else {
-                let offset = node.link_offset as usize;
-                self.curr = *self.list.links.get_unchecked(self.token, offset);
+                self.curr = node.next_chunk; // Optimization
                 self.idx = 0;
                 return self.next();
             }
@@ -657,8 +681,7 @@ impl<'a, 'brand, K, V> Iterator for IterMut<'a, 'brand, K, V> {
 
                 return Some((&*k_ptr, &mut *v_ptr));
             } else {
-                let offset = node.link_offset as usize;
-                let next_curr = *self.list.links.get_unchecked(self.token, offset);
+                let next_curr = node.next_chunk; // Optimization
 
                 self.curr = next_curr;
                 self.idx = 0;

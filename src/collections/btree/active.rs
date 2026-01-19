@@ -59,7 +59,7 @@ where
         K: Borrow<Q>,
         Q: Ord,
     {
-        self.map.contains_key(key)
+        self.map.contains_key_with_token(self.token, key)
     }
 
     /// Inserts a key-value pair into the map.
@@ -77,7 +77,7 @@ where
     }
 
     /// Iterates over the map.
-    pub fn iter(&self) -> impl Iterator<Item = (&K, &V)> {
+    pub fn iter(&self) -> super::btree_map::Iter<'_, 'brand, K, V> {
         self.map.iter(self.token)
     }
 
@@ -140,7 +140,7 @@ where
         T: Borrow<Q>,
         Q: Ord,
     {
-        self.set.contains(value)
+        self.set.contains(self.token, value)
     }
 
     /// Removes a value from the set.
@@ -153,8 +153,8 @@ where
     }
 
     /// Iterates over the values in the set.
-    pub fn iter(&self) -> impl Iterator<Item = &T> {
-        self.set.iter()
+    pub fn iter(&self) -> super::btree_map::Keys<'_, 'brand, T, ()> {
+        self.set.iter(self.token)
     }
 }
 
