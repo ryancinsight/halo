@@ -197,9 +197,9 @@ where
     }
 
     /// Splits the view into left and right children views.
-    /// Returns `None` if this is a leaf node.
+    /// Returns `None` if this is a leaf node or empty.
     pub fn split(self) -> Option<(Self, Self)> {
-        if self.range_start == self.range_end - 1 {
+        if self.range_start >= self.range_end || self.range_start == self.range_end - 1 {
             return None;
         }
 
@@ -395,6 +395,15 @@ mod tests {
             st.build(&mut token, &[]);
             st.repair(&mut token);
             assert_eq!(st.query(&token, 0, 0), 0);
+        });
+    }
+
+    #[test]
+    fn test_empty_view_split() {
+        GhostToken::new(|mut token| {
+            let mut st = BrandedSegmentTree::new(0, |a, b: &i32| a + b, 0);
+            let view = st.view_mut();
+            assert!(view.split().is_none());
         });
     }
 }
