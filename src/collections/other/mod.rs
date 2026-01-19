@@ -11,6 +11,7 @@ pub mod lru_cache;
 pub mod skip_list;
 pub mod slot_map;
 pub mod interval_map;
+pub mod active;
 
 pub use deque::BrandedDeque;
 pub use cow_strings::BrandedCowStrings;

@@ -451,6 +451,18 @@ where
         iter
     }
 
+    /// Returns an iterator over the keys of the map.
+    pub fn keys(&self) -> Keys<'_, 'brand, K, V> {
+        let mut iter = Keys {
+            stack: Vec::new(),
+            len: self.len,
+        };
+        if let Some(root) = &self.root {
+            iter.push_leftmost(root);
+        }
+        iter
+    }
+
     /// Applies `f` to all entries in the map, allowing mutation of values.
     ///
     /// This is the canonical safe pattern for exclusive iteration with GhostCell:
@@ -527,6 +539,75 @@ impl<'a, 'brand, K, V> Iterator for Iter<'a, 'brand, K, V> {
                          child_to_push = None;
                     }
                     item_to_yield = Some((key, val));
+                    should_pop = false;
+                } else {
+                    should_pop = true;
+                    item_to_yield = None;
+                    child_to_push = None;
+                }
+            }
+
+            if should_pop {
+                self.stack.pop();
+                continue;
+            }
+
+            if let Some(child) = child_to_push {
+                self.push_leftmost(child);
+            }
+
+            return item_to_yield;
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.len, Some(self.len))
+    }
+}
+
+pub struct Keys<'a, 'brand, K, V> {
+    stack: Vec<(&'a Node<'brand, K, V>, usize)>,
+    len: usize,
+}
+
+impl<'a, 'brand, K, V> Keys<'a, 'brand, K, V> {
+    fn push_leftmost(&mut self, mut node: &'a Node<'brand, K, V>) {
+        loop {
+            self.stack.push((node, 0));
+            if node.is_leaf() {
+                break;
+            }
+            node = &node.children[0];
+        }
+    }
+}
+
+impl<'a, 'brand, K, V> Iterator for Keys<'a, 'brand, K, V> {
+    type Item = &'a K;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let should_pop;
+            let item_to_yield;
+            let child_to_push;
+
+            {
+                let (node, idx) = match self.stack.last_mut() {
+                    Some(pair) => pair,
+                    None => return None,
+                };
+
+                if *idx < node.keys.len() {
+                    let node_ref = *node;
+                    let key = &node_ref.keys[*idx];
+                    *idx += 1;
+
+                    if !node_ref.is_leaf() {
+                         child_to_push = Some(&node_ref.children[*idx]);
+                    } else {
+                         child_to_push = None;
+                    }
+                    item_to_yield = Some(key);
                     should_pop = false;
                 } else {
                     should_pop = true;
@@ -824,5 +905,18 @@ mod tests {
             assert_eq!(items.len(), 10);
             assert_eq!(items[0], (0, 1));
          });
+    }
+
+    #[test]
+    fn test_keys_no_token() {
+        GhostToken::new(|_token| {
+            let mut map = BrandedBTreeMap::new();
+            map.insert(1, 10);
+            map.insert(2, 20);
+
+            // keys() does not take a token
+            let keys: Vec<&i32> = map.keys().collect();
+            assert_eq!(keys, vec![&1, &2]);
+        });
     }
 }
