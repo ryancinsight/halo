@@ -10,6 +10,7 @@ pub mod binary_heap;
 pub mod lru_cache;
 pub mod slot_map;
 pub mod interval_map;
+pub mod segment_tree;
 pub mod active;
 
 pub use deque::BrandedDeque;
@@ -19,3 +20,4 @@ pub use binary_heap::BrandedBinaryHeap;
 pub use lru_cache::BrandedLruCache;
 pub use slot_map::{BrandedSlotMap, SlotKey};
 pub use interval_map::BrandedIntervalMap;
+pub use segment_tree::{BrandedSegmentTree, BrandedSegmentTreeViewMut};

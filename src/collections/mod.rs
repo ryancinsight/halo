@@ -28,6 +28,7 @@ pub use trie::{BrandedRadixTrieMap, BrandedRadixTrieSet};
 pub use other::{
     BrandedBinaryHeap, BrandedCowStrings, BrandedDeque, BrandedDoublyLinkedList,
     BrandedLruCache, BrandedSlotMap, SlotKey, BrandedIntervalMap,
+    BrandedSegmentTree, BrandedSegmentTreeViewMut,
 };
 pub use skip_list::{BrandedSkipList, ActiveSkipList, ActivateSkipList};
 

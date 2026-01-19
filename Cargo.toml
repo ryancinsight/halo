@@ -132,3 +132,7 @@ harness = false
 [[bench]]
 name = "memory_primitives_benchmark"
 harness = false
+
+[[bench]]
+name = "segment_tree_benchmark"
+harness = false

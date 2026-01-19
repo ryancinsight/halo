@@ -122,6 +122,8 @@ pub use collections::{
     BrandedString,
     BrandedDoublyLinkedList,
     BrandedIntervalMap,
+    BrandedSegmentTree,
+    BrandedSegmentTreeViewMut,
     ActivateVec,
     ActiveVec,
     BrandedSlice,
