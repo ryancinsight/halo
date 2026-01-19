@@ -38,7 +38,8 @@ impl<'a, 'brand, T, const CAPACITY: usize> Iterator for BrandedDequeIter<'a, 'br
         let actual_idx = (self.deque.head + self.index) % CAPACITY;
         self.index += 1;
         unsafe {
-            Some(self.deque.buffer.get_unchecked(actual_idx).borrow(self.token))
+            let cell = self.deque.buffer.get_unchecked(actual_idx).assume_init_ref();
+            Some(cell.borrow(self.token))
         }
     }
 
@@ -54,8 +55,9 @@ impl<'a, 'brand, T, const CAPACITY: usize> ExactSizeIterator for BrandedDequeIte
 /// A ring buffer implementation optimized for token-gated access patterns.
 #[repr(C)]
 pub struct BrandedDeque<'brand, T, const CAPACITY: usize> {
-    /// The ring buffer storage - contiguous array for cache efficiency
-    buffer: [GhostCell<'brand, T>; CAPACITY],
+    /// The ring buffer storage - contiguous array for cache efficiency.
+    /// Uses MaybeUninit to allow for empty slots without initializing them.
+    buffer: [MaybeUninit<GhostCell<'brand, T>>; CAPACITY],
     /// Head index (next element to pop from front)
     head: usize,
     /// Tail index (next position to push to back)
@@ -67,14 +69,14 @@ pub struct BrandedDeque<'brand, T, const CAPACITY: usize> {
 impl<'brand, T, const CAPACITY: usize> BrandedDeque<'brand, T, CAPACITY> {
     /// Creates an empty deque.
     pub const fn new() -> Self {
-        // SAFETY: GhostCell<T> can be zero-initialized
-        unsafe {
-            Self {
-                buffer: MaybeUninit::uninit().assume_init(),
-                head: 0,
-                tail: 0,
-                len: 0,
-            }
+        // SAFETY: An array of MaybeUninit is safe to create uninitialized
+        // because MaybeUninit itself doesn't require initialization.
+        let buffer = unsafe { MaybeUninit::<[MaybeUninit<GhostCell<'brand, T>>; CAPACITY]>::uninit().assume_init() };
+        Self {
+            buffer,
+            head: 0,
+            tail: 0,
+            len: 0,
         }
     }
 
@@ -113,7 +115,8 @@ impl<'brand, T, const CAPACITY: usize> BrandedDeque<'brand, T, CAPACITY> {
 
         // SAFETY: We checked that len < CAPACITY, so tail is a valid index
         unsafe {
-            *self.buffer.get_unchecked_mut(self.tail) = GhostCell::new(value);
+            let ptr = self.buffer.get_unchecked_mut(self.tail).as_mut_ptr();
+            ptr.write(GhostCell::new(value));
         }
 
         self.tail = (self.tail + 1) % CAPACITY;
@@ -134,7 +137,8 @@ impl<'brand, T, const CAPACITY: usize> BrandedDeque<'brand, T, CAPACITY> {
 
         // SAFETY: We checked that len < CAPACITY, so new_head is valid
         unsafe {
-            *self.buffer.get_unchecked_mut(new_head) = GhostCell::new(value);
+            let ptr = self.buffer.get_unchecked_mut(new_head).as_mut_ptr();
+            ptr.write(GhostCell::new(value));
         }
 
         self.head = new_head;
@@ -153,10 +157,12 @@ impl<'brand, T, const CAPACITY: usize> BrandedDeque<'brand, T, CAPACITY> {
         self.tail = tail_idx;
         self.len -= 1;
 
-        // SAFETY: We maintained invariants that element exists at this position
+        // SAFETY: We maintained invariants that element exists at this position.
+        // We are reading it out, effectively moving ownership.
+        // The slot becomes logically uninitialized.
         unsafe {
-            let cell = self.buffer.get_unchecked(tail_idx);
-            Some(core::ptr::read(cell))
+            let ptr = self.buffer.get_unchecked(tail_idx).as_ptr();
+            Some(core::ptr::read(ptr))
         }
     }
 
@@ -171,10 +177,10 @@ impl<'brand, T, const CAPACITY: usize> BrandedDeque<'brand, T, CAPACITY> {
         self.head = (self.head + 1) % CAPACITY;
         self.len -= 1;
 
-        // SAFETY: We maintained invariants that element exists at this position
+        // SAFETY: We maintained invariants that element exists at this position.
         unsafe {
-            let cell = self.buffer.get_unchecked(head_idx);
-            Some(core::ptr::read(cell))
+            let ptr = self.buffer.get_unchecked(head_idx).as_ptr();
+            Some(core::ptr::read(ptr))
         }
     }
 
@@ -185,7 +191,8 @@ impl<'brand, T, const CAPACITY: usize> BrandedDeque<'brand, T, CAPACITY> {
             return None;
         }
         unsafe {
-            Some(self.buffer.get_unchecked(self.head).borrow(token))
+            let cell = self.buffer.get_unchecked(self.head).assume_init_ref();
+            Some(cell.borrow(token))
         }
     }
 
@@ -197,7 +204,8 @@ impl<'brand, T, const CAPACITY: usize> BrandedDeque<'brand, T, CAPACITY> {
         }
         let back_idx = if self.tail == 0 { CAPACITY - 1 } else { self.tail - 1 };
         unsafe {
-            Some(self.buffer.get_unchecked(back_idx).borrow(token))
+            let cell = self.buffer.get_unchecked(back_idx).assume_init_ref();
+            Some(cell.borrow(token))
         }
     }
 
@@ -209,7 +217,8 @@ impl<'brand, T, const CAPACITY: usize> BrandedDeque<'brand, T, CAPACITY> {
         }
         let actual_idx = (self.head + index) % CAPACITY;
         unsafe {
-            Some(self.buffer.get_unchecked(actual_idx).borrow(token))
+            let cell = self.buffer.get_unchecked(actual_idx).assume_init_ref();
+            Some(cell.borrow(token))
         }
     }
 
@@ -221,7 +230,9 @@ impl<'brand, T, const CAPACITY: usize> BrandedDeque<'brand, T, CAPACITY> {
         }
         let actual_idx = (self.head + index) % CAPACITY;
         unsafe {
-            Some(self.buffer.get_unchecked(actual_idx).borrow_mut(token))
+            // Note: we need mutable reference to initialized cell
+            let ptr = self.buffer.get_unchecked(actual_idx).as_ptr() as *mut GhostCell<'brand, T>;
+            Some((*ptr).borrow_mut(token))
         }
     }
 
@@ -247,8 +258,8 @@ impl<'brand, T, const CAPACITY: usize> BrandedDeque<'brand, T, CAPACITY> {
         for i in 0..self.len {
             let actual_idx = (self.head + i) % CAPACITY;
             unsafe {
-                let elem = self.buffer.get_unchecked(actual_idx).borrow(token);
-                f(elem);
+                let cell = self.buffer.get_unchecked(actual_idx).assume_init_ref();
+                f(cell.borrow(token));
             }
         }
     }
@@ -262,8 +273,8 @@ impl<'brand, T, const CAPACITY: usize> BrandedDeque<'brand, T, CAPACITY> {
         for i in 0..self.len {
             let actual_idx = (self.head + i) % CAPACITY;
             unsafe {
-                let elem = self.buffer.get_unchecked(actual_idx).borrow_mut(token);
-                f(elem);
+                let ptr = self.buffer.get_unchecked(actual_idx).as_ptr() as *mut GhostCell<'brand, T>;
+                f((*ptr).borrow_mut(token));
             }
         }
     }
