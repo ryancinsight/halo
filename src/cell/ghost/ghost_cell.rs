@@ -9,6 +9,7 @@
 use crate::cell::raw::GhostUnsafeCell;
 
 /// A branded cell that can only be accessed using a token of the same brand.
+#[repr(transparent)]
 #[derive(Debug)]
 pub struct GhostCell<'brand, T> {
     pub(super) inner: GhostUnsafeCell<'brand, T>,
