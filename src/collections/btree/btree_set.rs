@@ -41,12 +41,12 @@ where
     }
 
     /// Returns `true` if the set contains the value.
-    pub fn contains<Q: ?Sized>(&self, value: &Q) -> bool
+    pub fn contains<Q: ?Sized>(&self, token: &GhostToken<'brand>, value: &Q) -> bool
     where
         T: Borrow<Q>,
         Q: Ord,
     {
-        self.map.contains_key(value)
+        self.map.contains_key_with_token(token, value)
     }
 
     /// Removes a value from the set.
@@ -60,8 +60,8 @@ where
     }
 
     /// Returns an iterator over the values in the set.
-    pub fn iter<'a>(&'a self) -> impl Iterator<Item = &'a T> + 'a {
-        self.map.keys()
+    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> super::btree_map::Keys<'a, 'brand, T, ()> {
+        self.map.keys(token)
     }
 }
 
@@ -96,19 +96,19 @@ mod tests {
             assert!(!set.insert(1));
             assert_eq!(set.len(), 1);
 
-            assert!(set.contains(&1));
-            assert!(!set.contains(&2));
+            assert!(set.contains(&token, &1));
+            assert!(!set.contains(&token, &2));
 
             assert!(set.insert(2));
             assert!(set.insert(3));
             assert_eq!(set.len(), 3);
 
-            let mut items: Vec<i32> = set.iter().copied().collect();
+            let mut items: Vec<i32> = set.iter(&token).copied().collect();
             items.sort();
             assert_eq!(items, vec![1, 2, 3]);
 
             assert!(set.remove(&2));
-            assert!(!set.contains(&2));
+            assert!(!set.contains(&token, &2));
             assert_eq!(set.len(), 2);
         });
     }
