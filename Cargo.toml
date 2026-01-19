@@ -128,3 +128,7 @@ harness = false
 [[bench]]
 name = "bplus_tree_benchmark"
 harness = false
+
+[[bench]]
+name = "memory_primitives_benchmark"
+harness = false
