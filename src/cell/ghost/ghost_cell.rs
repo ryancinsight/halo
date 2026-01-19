@@ -34,6 +34,16 @@ impl<'brand, T> GhostCell<'brand, T> {
     pub fn get_mut(&mut self) -> &mut T {
         self.inner.get_mut_exclusive()
     }
+
+    /// Returns a raw pointer to the contained value.
+    pub fn as_ptr(&self, token: &crate::GhostToken<'brand>) -> *const T {
+        self.inner.as_ptr(token)
+    }
+
+    /// Returns a raw mutable pointer to the contained value.
+    pub fn as_mut_ptr(&self, token: &mut crate::GhostToken<'brand>) -> *mut T {
+        self.inner.as_mut_ptr(token)
+    }
 }
 
 impl<'brand, T: Default> Default for GhostCell<'brand, T> {

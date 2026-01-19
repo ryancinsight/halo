@@ -170,6 +170,11 @@ impl<'brand, K, V, S> BrandedIndexMap<'brand, K, V, S> {
     pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> impl Iterator<Item = (&'a K, &'a V)> {
         self.keys.iter().zip(self.values.iter(token))
     }
+
+    /// Iterator over key-value pairs (mutable).
+    pub fn iter_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>) -> impl Iterator<Item = (&'a K, &'a mut V)> {
+        self.keys.iter().zip(self.values.as_mut_slice(token).iter_mut())
+    }
 }
 
 impl<'brand, K, V, S> BrandedIndexMap<'brand, K, V, S>

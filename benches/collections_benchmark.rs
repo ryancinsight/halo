@@ -440,12 +440,14 @@ fn bench_branded_hash_set_operations(c: &mut Criterion) {
 fn bench_branded_arena_operations(c: &mut Criterion) {
     c.bench_function("branded_arena_allocation", |b| {
         b.iter(|| {
-            let mut arena: BrandedArena<'_, usize, 1024> = BrandedArena::new();
-            let mut keys = Vec::new();
-            for i in 0..1000 {
-                keys.push(arena.alloc(i));
-            }
-            black_box(keys.len());
+            GhostToken::new(|mut token| {
+                let mut arena: BrandedArena<'_, usize, 1024> = BrandedArena::new();
+                let mut keys = Vec::new();
+                for i in 0..1000 {
+                    keys.push(arena.alloc(&mut token, i));
+                }
+                black_box(keys.len());
+            });
         });
     });
 
@@ -454,7 +456,7 @@ fn bench_branded_arena_operations(c: &mut Criterion) {
             let mut arena: BrandedArena<'_, usize, 1024> = BrandedArena::new();
             let mut keys = Vec::new();
             for i in 0..1000 {
-                keys.push(arena.alloc(i));
+                keys.push(arena.alloc(&mut token, i));
             }
             b.iter(|| {
                 for &key in &keys {

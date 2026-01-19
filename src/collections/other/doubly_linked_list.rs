@@ -47,6 +47,39 @@ impl<'a, 'brand, T> Iterator for BrandedDoublyLinkedListIter<'a, 'brand, T> {
     }
 }
 
+/// Mutable iterator for BrandedDoublyLinkedList.
+pub struct BrandedDoublyLinkedListIterMut<'a, 'brand, T> {
+    storage: &'a mut [PoolSlot<ListNode<T>>],
+    current: Option<usize>,
+    _marker: PhantomData<fn(&'brand ()) -> &'brand ()>,
+}
+
+impl<'a, 'brand, T> Iterator for BrandedDoublyLinkedListIterMut<'a, 'brand, T> {
+    type Item = &'a mut T;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        let idx = self.current?;
+        // SAFETY: Internal indices are guaranteed to be valid and synchronized.
+        // We use raw pointers to bypass borrow checker because we know we yield unique nodes.
+        unsafe {
+            // Check bounds just in case, though invariant should hold
+            if idx >= self.storage.len() {
+                return None;
+            }
+
+            let ptr = self.storage.as_mut_ptr().add(idx);
+            match &mut *ptr {
+                PoolSlot::Occupied(node) => {
+                    self.current = node.next;
+                    Some(&mut node.value)
+                }
+                PoolSlot::Free(_) => None, // Should not happen
+            }
+        }
+    }
+}
+
 /// A doubly linked list with token-gated access.
 pub struct BrandedDoublyLinkedList<'brand, T> {
     /// Pool storage for nodes.
@@ -203,6 +236,15 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
     pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> BrandedDoublyLinkedListIter<'a, 'brand, T> {
         BrandedDoublyLinkedListIter {
             storage: self.pool.as_slice(token),
+            current: self.head,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Iterates over the list elements (mutable).
+    pub fn iter_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>) -> BrandedDoublyLinkedListIterMut<'a, 'brand, T> {
+        BrandedDoublyLinkedListIterMut {
+            storage: self.pool.as_mut_slice(token),
             current: self.head,
             _marker: PhantomData,
         }

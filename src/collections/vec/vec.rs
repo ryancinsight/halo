@@ -241,6 +241,24 @@ impl<'brand, T> BrandedVec<'brand, T> {
         }
     }
 
+    /// Returns a mutable slice of the underlying elements without a token.
+    ///
+    /// This requires exclusive access to the vector (`&mut self`).
+    ///
+    /// # Safety
+    /// This uses `unsafe` code to create `&mut [T]` from the vector's buffer.
+    /// This is safe because:
+    /// 1. Layout compatibility: `GhostCell<T>` has same layout as `T`.
+    /// 2. We hold `&mut self`, guaranteeing exclusive access to the vector and all its cells.
+    /// 3. Since we have exclusive access to the vector, no other tokens can be accessing it.
+    #[inline(always)]
+    pub fn as_mut_slice_exclusive(&mut self) -> &mut [T] {
+        unsafe {
+            let ptr = self.inner.as_mut_ptr() as *mut T;
+            std::slice::from_raw_parts_mut(ptr, self.inner.len())
+        }
+    }
+
     /// Iterates over all elements by shared reference.
     ///
     /// This iterator is zero-cost: no allocations, no closures per element.
