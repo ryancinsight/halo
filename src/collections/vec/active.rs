@@ -9,6 +9,8 @@
 use crate::GhostToken;
 use super::BrandedVec;
 use super::slice::{BrandedSlice, BrandedSliceMut};
+use super::chunked_vec::BrandedChunkedVec;
+use super::small_vec::BrandedSmallVec;
 use std::slice;
 
 /// A wrapper around a mutable reference to a `BrandedVec` and a mutable reference to a `GhostToken`.
@@ -121,6 +123,106 @@ impl<'brand, T> ActivateVec<'brand, T> for BrandedVec<'brand, T> {
     }
 }
 
+/// A wrapper around `BrandedChunkedVec` and `GhostToken`.
+pub struct ActiveChunkedVec<'a, 'brand, T, const CHUNK: usize> {
+    vec: &'a mut BrandedChunkedVec<'brand, T, CHUNK>,
+    token: &'a mut GhostToken<'brand>,
+}
+
+impl<'a, 'brand, T, const CHUNK: usize> ActiveChunkedVec<'a, 'brand, T, CHUNK> {
+    pub fn new(vec: &'a mut BrandedChunkedVec<'brand, T, CHUNK>, token: &'a mut GhostToken<'brand>) -> Self {
+        Self { vec, token }
+    }
+
+    pub fn len(&self) -> usize {
+        self.vec.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.vec.is_empty()
+    }
+
+    pub fn push(&mut self, value: T) -> usize {
+        self.vec.push(value)
+    }
+
+    pub fn get(&self, idx: usize) -> Option<&T> {
+        self.vec.get(self.token, idx)
+    }
+
+    pub fn get_mut(&mut self, idx: usize) -> Option<&mut T> {
+        self.vec.get_mut(self.token, idx)
+    }
+
+    pub fn for_each<F>(&self, f: F)
+    where F: FnMut(&T)
+    {
+        self.vec.for_each(self.token, f)
+    }
+
+    pub fn for_each_mut<F>(&mut self, f: F)
+    where F: FnMut(&mut T)
+    {
+        self.vec.for_each_mut(self.token, f)
+    }
+}
+
+pub trait ActivateChunkedVec<'brand, T, const CHUNK: usize> {
+    fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveChunkedVec<'a, 'brand, T, CHUNK>;
+}
+
+impl<'brand, T, const CHUNK: usize> ActivateChunkedVec<'brand, T, CHUNK> for BrandedChunkedVec<'brand, T, CHUNK> {
+    fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveChunkedVec<'a, 'brand, T, CHUNK> {
+        ActiveChunkedVec::new(self, token)
+    }
+}
+
+/// A wrapper around `BrandedSmallVec` and `GhostToken`.
+pub struct ActiveSmallVec<'a, 'brand, T, const N: usize> {
+    vec: &'a mut BrandedSmallVec<'brand, T, N>,
+    token: &'a mut GhostToken<'brand>,
+}
+
+impl<'a, 'brand, T, const N: usize> ActiveSmallVec<'a, 'brand, T, N> {
+    pub fn new(vec: &'a mut BrandedSmallVec<'brand, T, N>, token: &'a mut GhostToken<'brand>) -> Self {
+        Self { vec, token }
+    }
+
+    pub fn len(&self) -> usize {
+        self.vec.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.vec.is_empty()
+    }
+
+    pub fn push(&mut self, value: T) {
+        self.vec.push(value)
+    }
+
+    pub fn pop(&mut self) -> Option<T> {
+        self.vec.pop()
+    }
+
+    pub fn get(&self, idx: usize) -> Option<&T> {
+        self.vec.get(self.token, idx)
+    }
+
+    pub fn get_mut(&mut self, idx: usize) -> Option<&mut T> {
+        self.vec.get_mut(self.token, idx)
+    }
+}
+
+pub trait ActivateSmallVec<'brand, T, const N: usize> {
+    fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveSmallVec<'a, 'brand, T, N>;
+}
+
+impl<'brand, T, const N: usize> ActivateSmallVec<'brand, T, N> for BrandedSmallVec<'brand, T, N> {
+    fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveSmallVec<'a, 'brand, T, N> {
+        ActiveSmallVec::new(self, token)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -193,6 +295,38 @@ mod tests {
             assert_eq!(*vec.get(&token, 0).unwrap(), 1);
             assert_eq!(*vec.get(&token, 1).unwrap(), 2);
             assert_eq!(*vec.get(&token, 2).unwrap(), 3);
+        });
+    }
+
+    #[test]
+    fn test_active_chunked_vec() {
+        GhostToken::new(|mut token| {
+            let mut vec = BrandedChunkedVec::<_, 4>::new();
+            {
+                let mut active = vec.activate(&mut token);
+                active.push(1);
+                active.push(2);
+
+                assert_eq!(*active.get(0).unwrap(), 1);
+                *active.get_mut(1).unwrap() += 10;
+            }
+            assert_eq!(*vec.get(&token, 1).unwrap(), 12);
+        });
+    }
+
+    #[test]
+    fn test_active_small_vec() {
+        GhostToken::new(|mut token| {
+            let mut vec = BrandedSmallVec::<_, 4>::new();
+            {
+                let mut active = vec.activate(&mut token);
+                active.push(1);
+                active.push(2);
+
+                assert_eq!(*active.get(0).unwrap(), 1);
+                *active.get_mut(1).unwrap() += 10;
+            }
+            assert_eq!(*vec.get(&token, 1).unwrap(), 12);
         });
     }
 }
