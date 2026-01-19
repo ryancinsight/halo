@@ -55,7 +55,7 @@ fn bench_btree_set_iter(c: &mut Criterion) {
         })
     });
 
-    GhostToken::new(|_token| {
+    GhostToken::new(|token| {
         let mut branded_set = BrandedBTreeSet::new();
         for i in 0..size {
             branded_set.insert(i);
@@ -64,7 +64,7 @@ fn bench_btree_set_iter(c: &mut Criterion) {
         group.bench_function("BrandedBTreeSet (Token-Free)", |b| {
             b.iter(|| {
                 // Now supports iteration without token!
-                for x in branded_set.iter() {
+                for x in branded_set.iter(&token) {
                     black_box(x);
                 }
             })
