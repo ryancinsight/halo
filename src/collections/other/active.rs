@@ -1,8 +1,9 @@
 //! Active wrappers for `other` collections.
 
 use crate::GhostToken;
-use super::{BrandedDoublyLinkedList, BrandedBinaryHeap};
+use super::{BrandedDoublyLinkedList, BrandedBinaryHeap, BrandedDeque};
 use super::doubly_linked_list::{BrandedDoublyLinkedListIter, BrandedDoublyLinkedListIterMut};
+use super::deque::BrandedDequeIter;
 use core::cmp::Ord;
 
 /// A wrapper around a mutable reference to a `BrandedDoublyLinkedList` and a mutable reference to a `GhostToken`.
@@ -166,5 +167,110 @@ pub trait ActivateBinaryHeap<'brand, T> {
 impl<'brand, T: Ord> ActivateBinaryHeap<'brand, T> for BrandedBinaryHeap<'brand, T> {
     fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveBinaryHeap<'a, 'brand, T> {
         ActiveBinaryHeap::new(self, token)
+    }
+}
+
+/// A wrapper around a mutable reference to a `BrandedDeque` (fixed size ring buffer) and a mutable reference to a `GhostToken`.
+pub struct ActiveDeque<'a, 'brand, T, const CAPACITY: usize> {
+    deque: &'a mut BrandedDeque<'brand, T, CAPACITY>,
+    token: &'a mut GhostToken<'brand>,
+}
+
+impl<'a, 'brand, T, const CAPACITY: usize> ActiveDeque<'a, 'brand, T, CAPACITY> {
+    /// Creates a new active deque handle.
+    pub fn new(deque: &'a mut BrandedDeque<'brand, T, CAPACITY>, token: &'a mut GhostToken<'brand>) -> Self {
+        Self { deque, token }
+    }
+
+    /// Returns the number of elements.
+    pub fn len(&self) -> usize {
+        self.deque.len()
+    }
+
+    /// Returns `true` if empty.
+    pub fn is_empty(&self) -> bool {
+        self.deque.is_empty()
+    }
+
+    /// Returns `true` if full.
+    pub fn is_full(&self) -> bool {
+        self.deque.is_full()
+    }
+
+    /// Clears the deque.
+    pub fn clear(&mut self) {
+        self.deque.clear();
+    }
+
+    /// Pushes an element to the back.
+    pub fn push_back(&mut self, value: T) -> Option<()> {
+        self.deque.push_back(value)
+    }
+
+    /// Pushes an element to the front.
+    pub fn push_front(&mut self, value: T) -> Option<()> {
+        self.deque.push_front(value)
+    }
+
+    /// Pops from the back.
+    pub fn pop_back(&mut self) -> Option<T> {
+        self.deque.pop_back().map(|c| c.into_inner())
+    }
+
+    /// Pops from the front.
+    pub fn pop_front(&mut self) -> Option<T> {
+        self.deque.pop_front().map(|c| c.into_inner())
+    }
+
+    /// Returns the front element.
+    pub fn front(&self) -> Option<&T> {
+        self.deque.front(self.token)
+    }
+
+    /// Returns the back element.
+    pub fn back(&self) -> Option<&T> {
+        self.deque.back(self.token)
+    }
+
+    /// Returns a shared reference to the element at `idx`.
+    pub fn get(&self, idx: usize) -> Option<&T> {
+        self.deque.get(self.token, idx)
+    }
+
+    /// Returns a mutable reference to the element at `idx`.
+    pub fn get_mut(&mut self, idx: usize) -> Option<&mut T> {
+        self.deque.get_mut(self.token, idx)
+    }
+
+    /// Iterates over elements.
+    pub fn iter(&self) -> BrandedDequeIter<'_, 'brand, T, CAPACITY> {
+        self.deque.iter(self.token)
+    }
+
+    /// Bulk operation.
+    pub fn for_each<F>(&self, f: F)
+    where
+        F: FnMut(&T),
+    {
+        self.deque.for_each(self.token, f)
+    }
+
+    /// Bulk mutation.
+    pub fn for_each_mut<F>(&mut self, f: F)
+    where
+        F: FnMut(&mut T),
+    {
+        self.deque.for_each_mut(self.token, f)
+    }
+}
+
+/// Extension trait to easily create ActiveDeque from BrandedDeque.
+pub trait ActivateDeque<'brand, T, const CAPACITY: usize> {
+    fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveDeque<'a, 'brand, T, CAPACITY>;
+}
+
+impl<'brand, T, const CAPACITY: usize> ActivateDeque<'brand, T, CAPACITY> for BrandedDeque<'brand, T, CAPACITY> {
+    fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveDeque<'a, 'brand, T, CAPACITY> {
+        ActiveDeque::new(self, token)
     }
 }

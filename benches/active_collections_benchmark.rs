@@ -2,9 +2,11 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use halo::{GhostToken, BrandedHashSet};
 use halo::collections::hash::active::ActivateHashSet;
 use halo::collections::btree::BrandedBTreeSet;
-use halo::collections::other::{BrandedDoublyLinkedList, BrandedBinaryHeap};
-use halo::collections::other::active::{ActivateDoublyLinkedList, ActivateBinaryHeap};
-use std::collections::{HashSet, BTreeSet, LinkedList, BinaryHeap};
+use halo::collections::other::{BrandedDoublyLinkedList, BrandedBinaryHeap, BrandedDeque};
+use halo::collections::other::active::{ActivateDoublyLinkedList, ActivateBinaryHeap, ActivateDeque};
+use halo::collections::vec::BrandedVecDeque;
+use halo::collections::vec::active::ActivateVecDeque;
+use std::collections::{HashSet, BTreeSet, LinkedList, BinaryHeap, VecDeque};
 
 fn bench_set_insert(c: &mut Criterion) {
     let mut group = c.benchmark_group("Set Insert");
@@ -132,5 +134,51 @@ fn bench_binary_heap_push(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_set_insert, bench_btree_set_iter, bench_linked_list_push, bench_binary_heap_push);
+fn bench_vec_deque_push(c: &mut Criterion) {
+    let mut group = c.benchmark_group("VecDeque Push");
+    let size = 1000;
+
+    group.bench_function("std::VecDeque", |b| {
+        b.iter(|| {
+            let mut deque = VecDeque::new();
+            for i in 0..size {
+                deque.push_back(black_box(i));
+            }
+        })
+    });
+
+    group.bench_function("ActiveVecDeque", |b| {
+        b.iter(|| {
+             GhostToken::new(|mut token| {
+                let mut deque = BrandedVecDeque::new();
+                {
+                    let mut active = deque.activate(&mut token);
+                    for i in 0..size {
+                        active.push_back(black_box(i));
+                    }
+                }
+            })
+        })
+    });
+
+    // Also benchmark the fixed-size ring buffer implementation
+    group.bench_function("ActiveDeque (Fixed Ring Buffer)", |b| {
+        b.iter(|| {
+             GhostToken::new(|mut token| {
+                // Must ensure capacity is enough for the test
+                let mut deque: BrandedDeque<'_, i32, 1024> = BrandedDeque::new();
+                {
+                    let mut active = deque.activate(&mut token);
+                    for i in 0..size {
+                        active.push_back(black_box(i));
+                    }
+                }
+            })
+        })
+    });
+
+    group.finish();
+}
+
+criterion_group!(benches, bench_set_insert, bench_btree_set_iter, bench_linked_list_push, bench_binary_heap_push, bench_vec_deque_push);
 criterion_main!(benches);
