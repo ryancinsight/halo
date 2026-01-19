@@ -7,3 +7,5 @@ pub use allocator::{GhostAlloc, AllocError};
 pub use arena::BrandedArena;
 pub use bump::BrandedBumpAllocator;
 pub use pool::BrandedPool;
+pub mod heap;
+pub mod branded;
