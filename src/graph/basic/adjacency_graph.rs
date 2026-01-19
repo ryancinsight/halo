@@ -22,13 +22,15 @@ use crate::{
 /// Allows efficient insertion/deletion of edges and vertices at runtime.
 /// Each adjacency list is independently mutable through ghost tokens.
 ///
+/// Adjacency lists are kept **sorted** to allow O(log d) edge lookup.
+///
 /// ### Performance Characteristics
 /// | Operation | Complexity | Notes |
 /// |-----------|------------|-------|
 /// | `add_vertex` | \(O(1)\) amortized | Appends to internal vectors |
 /// | `remove_vertex` | \(O(n + m)\) | Must scan all adjacency lists |
-/// | `add_edge` | \(O(\text{out-degree})\) | Checks for existence first |
-/// | `remove_edge` | \(O(\text{out-degree})\) | Linear scan of adjacency list |
+/// | `add_edge` | \(O(\text{out-degree})\) | Insert into sorted vector |
+/// | `remove_edge` | \(O(\text{out-degree})\) | Remove from sorted vector |
 /// | `out_degree` | \(O(1)\) | returns `Vec::len` |
 /// | `in_degree` | \(O(n + m)\) | Scans all adjacency lists |
 pub struct GhostAdjacencyGraph<'brand> {
@@ -50,12 +52,16 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
 
     /// Creates a graph from adjacency lists.
     ///
+    /// The adjacency lists will be sorted to maintain invariants.
+    ///
     /// # Panics
     /// Panics if any neighbor index is out of bounds.
-    pub fn from_adjacency(adjacency_lists: Vec<Vec<usize>>) -> Self {
+    pub fn from_adjacency(mut adjacency_lists: Vec<Vec<usize>>) -> Self {
         let vertex_count = adjacency_lists.len();
-        for (u, nbrs) in adjacency_lists.iter().enumerate() {
-            for &v in nbrs {
+        for (u, nbrs) in adjacency_lists.iter_mut().enumerate() {
+            nbrs.sort_unstable();
+            nbrs.dedup(); // Remove duplicate edges
+            for &v in nbrs.iter() {
                 assert!(v < vertex_count, "edge {u}->{v} out of bounds for n={vertex_count}");
             }
         }
@@ -71,6 +77,7 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
     /// Adds a vertex to the graph.
     ///
     /// Returns the index of the new vertex.
+    #[inline]
     pub fn add_vertex(&mut self) -> usize {
         let idx = self.adjacency.len();
         self.adjacency.push(Vec::new());
@@ -82,6 +89,8 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
     ///
     /// This is O(n + m) where n is vertex count and m is edge count,
     /// as it needs to remove the vertex from all adjacency lists.
+    ///
+    /// For frequent node removals, consider `BrandedPoolGraph` which allows O(1) removal (amortized).
     pub fn remove_vertex(&mut self, token: &mut GhostToken<'brand>, vertex: usize) {
         assert!(vertex < self.adjacency.len(), "vertex {vertex} out of bounds");
 
@@ -91,8 +100,11 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
                 continue;
             }
             let nbrs = self.adjacency.borrow_mut(token, u);
-            // Remove all occurrences of `vertex`.
+
+            // Remove vertex if present
+            // Since sorted, we could use binary search, but we need to shift anyway.
             nbrs.retain(|&v| v != vertex);
+
             // Shift indices above removed vertex.
             for v in nbrs.iter_mut() {
                 if *v > vertex {
@@ -108,14 +120,19 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
 
     /// Adds a directed edge `from -> to` if it is not already present.
     ///
+    /// Maintains sorted order of neighbors.
+    ///
     /// # Panics
     /// Panics if `from` or `to` are out of bounds.
+    #[inline]
     pub fn add_edge(&self, token: &mut GhostToken<'brand>, from: usize, to: usize) {
         assert!(from < self.vertex_count(), "from vertex {from} out of bounds");
         assert!(to < self.vertex_count(), "to vertex {to} out of bounds");
         let nbrs = self.adjacency.borrow_mut(token, from);
-        if !nbrs.iter().any(|&v| v == to) {
-            nbrs.push(to);
+
+        match nbrs.binary_search(&to) {
+            Ok(_) => {} // Already exists
+            Err(pos) => nbrs.insert(pos, to),
         }
     }
 
@@ -123,16 +140,22 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
     ///
     /// # Panics
     /// Panics if `from` or `to` are out of bounds.
+    #[inline]
     pub fn remove_edge(&self, token: &mut GhostToken<'brand>, from: usize, to: usize) -> bool {
         assert!(from < self.vertex_count(), "from vertex {from} out of bounds");
         assert!(to < self.vertex_count(), "to vertex {to} out of bounds");
         let nbrs = self.adjacency.borrow_mut(token, from);
-        let before = nbrs.len();
-        nbrs.retain(|&v| v != to);
-        before != nbrs.len()
+
+        if let Ok(pos) = nbrs.binary_search(&to) {
+            nbrs.remove(pos);
+            true
+        } else {
+            false
+        }
     }
 
     /// Returns the number of vertices.
+    #[inline]
     pub fn vertex_count(&self) -> usize {
         self.adjacency.len()
     }
@@ -145,6 +168,7 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
     }
 
     /// Returns the out-degree of a vertex.
+    #[inline]
     pub fn out_degree(&self, token: &GhostToken<'brand>, vertex: usize) -> usize {
         assert!(vertex < self.vertex_count(), "vertex {vertex} out of bounds");
         self.adjacency.borrow(token, vertex).len()
@@ -155,7 +179,7 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
         assert!(vertex < self.vertex_count(), "vertex {vertex} out of bounds");
         let mut deg = 0usize;
         for u in 0..self.vertex_count() {
-            if self.out_neighbors(token, u).any(|v| v == vertex) {
+            if self.has_edge(token, u, vertex) {
                 deg += 1;
             }
         }
@@ -163,13 +187,18 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
     }
 
     /// Checks if an edge exists from `from` to `to`.
+    ///
+    /// Uses binary search (O(log d)).
+    #[inline]
     pub fn has_edge(&self, token: &GhostToken<'brand>, from: usize, to: usize) -> bool {
         assert!(from < self.vertex_count(), "from vertex {from} out of bounds");
         assert!(to < self.vertex_count(), "to vertex {to} out of bounds");
-        self.out_neighbors(token, from).any(|v| v == to)
+        let nbrs = self.adjacency.borrow(token, from);
+        nbrs.binary_search(&to).is_ok()
     }
 
     /// Returns the out-neighbors of a vertex.
+    #[inline]
     pub fn out_neighbors<'a>(
         &'a self,
         token: &'a GhostToken<'brand>,
@@ -184,7 +213,7 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
         assert!(vertex < self.vertex_count(), "vertex {vertex} out of bounds");
         let mut preds = Vec::new();
         for u in 0..self.vertex_count() {
-            if self.out_neighbors(token, u).any(|v| v == vertex) {
+            if self.has_edge(token, u, vertex) {
                 preds.push(u);
             }
         }
@@ -250,37 +279,66 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
         count
     }
 
-    /// Computes transitive closure using dynamic programming.
+    /// Computes transitive closure using dynamic programming with bitsets.
     ///
     /// Returns a matrix where matrix[i][j] is true if there's a path from i to j.
+    /// Optimized to use bitwise operations (64x speedup for dense operations).
     pub fn transitive_closure(&self, token: &GhostToken<'brand>) -> Vec<Vec<bool>> {
         let n = self.adjacency.len();
-        let mut closure = vec![vec![false; n]; n];
+        let num_words = (n + 63) / 64;
+        let mut closure_bits = vec![0u64; n * num_words];
+
+        // Helper to set bit
+        let set_bit = |bits: &mut [u64], row: usize, col: usize| {
+            bits[row * num_words + (col / 64)] |= 1u64 << (col % 64);
+        };
+
+        // Helper to get bit
+        let _get_bit = |bits: &[u64], row: usize, col: usize| -> bool {
+            (bits[row * num_words + (col / 64)] & (1u64 << (col % 64))) != 0
+        };
 
         // Reflexive closure.
         for i in 0..n {
-            closure[i][i] = true;
+            set_bit(&mut closure_bits, i, i);
         }
 
         // Initialize direct edges
         for i in 0..n {
             for j in self.out_neighbors(token, i) {
-                closure[i][j] = true;
+                set_bit(&mut closure_bits, i, j);
             }
         }
 
-        // Floyd-Warshall style transitive closure
+        // Floyd-Warshall using bitwise OR
         for k in 0..n {
             for i in 0..n {
-                for j in 0..n {
-                    if closure[i][k] && closure[k][j] {
-                        closure[i][j] = true;
+                // if i -> k
+                let i_to_k_word = k / 64;
+                let i_to_k_mask = 1u64 << (k % 64);
+
+                if (closure_bits[i * num_words + i_to_k_word] & i_to_k_mask) != 0 {
+                    // row[i] |= row[k]
+                    let i_start = i * num_words;
+                    let k_start = k * num_words;
+                    for w in 0..num_words {
+                        closure_bits[i_start + w] |= closure_bits[k_start + w];
                     }
                 }
             }
         }
 
-        closure
+        // Convert back to Vec<Vec<bool>> for API compatibility
+        // (Though in a real high-perf scenario we'd return the bitset)
+        let mut result = vec![vec![false; n]; n];
+        for i in 0..n {
+            for j in 0..n {
+                if (closure_bits[i * num_words + (j / 64)] & (1u64 << (j % 64))) != 0 {
+                    result[i][j] = true;
+                }
+            }
+        }
+        result
     }
 
     /// Computes strongly connected components using Kosaraju's algorithm.
