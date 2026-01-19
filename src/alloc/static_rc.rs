@@ -38,6 +38,8 @@ impl<T, const N: usize, const D: usize> StaticRc<T, N, D> {
     /// and that the ownership fractions are correctly managed such that `N` and `D`
     /// reflect the state relative to other `StaticRc` instances.
     /// Specifically for `N == D`, this instance takes full ownership.
+    ///
+    /// The pointer must be compatible with `Box::from_raw` for deallocation.
     pub unsafe fn from_raw(ptr: NonNull<T>) -> Self {
         Self { ptr }
     }

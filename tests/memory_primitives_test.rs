@@ -1,5 +1,7 @@
 use halo::alloc::{StaticRc, BrandedBox};
 use halo::{GhostToken, GhostCell};
+use std::rc::Rc;
+use std::sync::Arc;
 
 #[test]
 fn test_static_rc_basic() {
@@ -80,4 +82,44 @@ fn test_branded_box_downgrade() {
         let rc = rc1.join::<2, 4>(rc2);
         // Drops here
     });
+}
+
+#[test]
+fn test_branded_box_zst_drop() {
+    struct ZstDropCounter {
+        dropped: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    // ZST because only PhantomData or similar, but wait, Arc is not ZST.
+    // We need a true ZST that has side effects on drop.
+    // We can use a thread_local or static, but that's messy for parallel tests.
+    // Or we can use a ZST that just prints? No, we need to assert.
+    // How about a type with a field that is logically ZST but controls something?
+    // No, ZST implies size 0. `Arc` is size 8 (ptr).
+    // A unit struct `struct MyZst;` is ZST.
+    // `impl Drop for MyZst` can access `thread_local`.
+
+    use std::cell::RefCell;
+    thread_local! {
+        static DROP_COUNT: RefCell<usize> = RefCell::new(0);
+    }
+
+    struct MyZst;
+    impl Drop for MyZst {
+        fn drop(&mut self) {
+             DROP_COUNT.with(|c| *c.borrow_mut() += 1);
+        }
+    }
+
+    DROP_COUNT.with(|c| *c.borrow_mut() = 0);
+
+    GhostToken::new(|mut token| {
+        let b = BrandedBox::new(MyZst, &mut token);
+        // Should not be dropped yet.
+        DROP_COUNT.with(|c| assert_eq!(*c.borrow(), 0));
+        drop(b);
+    });
+
+    // Should be dropped now.
+    DROP_COUNT.with(|c| assert_eq!(*c.borrow(), 1));
 }
