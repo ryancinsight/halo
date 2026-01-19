@@ -12,7 +12,7 @@
 //!
 //! Access is controlled via `GhostToken`.
 
-use crate::{GhostCell, GhostToken, BrandedVec};
+use crate::{GhostToken, BrandedVec};
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::mem::MaybeUninit;
@@ -385,10 +385,8 @@ where
         }
 
         let mut node = NodeData::new(level as u8, link_offset);
-        unsafe {
-            node.keys[0].write(key);
-            node.vals[0].write(value);
-        }
+        node.keys[0].write(key);
+        node.vals[0].write(value);
         node.len = 1;
         self.nodes.push(node);
     }

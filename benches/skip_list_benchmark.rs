@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use halo::collections::{BrandedSkipList, BrandedBTreeMap};
+use halo::collections::{BrandedSkipList, BrandedBTreeMap, ActivateSkipList};
 use halo::GhostToken;
 use std::collections::BTreeMap;
 
@@ -18,12 +18,11 @@ fn bench_skip_list(c: &mut Criterion) {
 
     group.bench_function("branded_btreemap_insert_1000", |b| {
         b.iter(|| {
-            GhostToken::new(|token| {
+            GhostToken::new(|_token| {
                 let mut map = BrandedBTreeMap::new();
                 for i in 0..1000 {
                     map.insert(black_box(i), black_box(i));
                 }
-                drop(token);
             });
         });
     });
@@ -35,7 +34,18 @@ fn bench_skip_list(c: &mut Criterion) {
                 for i in 0..1000 {
                     list.insert(&mut token, black_box(i), black_box(i));
                 }
-                drop(token);
+            });
+        });
+    });
+
+    group.bench_function("active_skip_list_insert_1000", |b| {
+        b.iter(|| {
+            GhostToken::new(|mut token| {
+                let mut list = BrandedSkipList::new();
+                let mut active = list.activate(&mut token);
+                for i in 0..1000 {
+                    active.insert(black_box(i), black_box(i));
+                }
             });
         });
     });
@@ -54,7 +64,7 @@ fn bench_skip_list(c: &mut Criterion) {
     });
 
     group.bench_function("branded_btreemap_lookup", |b| {
-        GhostToken::new(|mut token| {
+        GhostToken::new(|token| {
             let mut map = BrandedBTreeMap::new();
             for i in 0..1000 {
                 map.insert(i, i);
@@ -77,6 +87,24 @@ fn bench_skip_list(c: &mut Criterion) {
             b.iter(|| {
                 for i in 0..1000 {
                     black_box(list.get(&token, &i));
+                }
+            });
+        });
+    });
+
+    group.bench_function("active_skip_list_lookup", |b| {
+        GhostToken::new(|mut token| {
+            let mut list = BrandedSkipList::new();
+            {
+                let mut active = list.activate(&mut token);
+                for i in 0..1000 {
+                    active.insert(i, i);
+                }
+            }
+            let active = list.activate(&mut token);
+            b.iter(|| {
+                for i in 0..1000 {
+                    black_box(active.get(&i));
                 }
             });
         });

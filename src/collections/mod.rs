@@ -12,6 +12,7 @@ pub mod btree;
 pub mod trie;
 pub mod other;
 pub mod string;
+pub mod skip_list;
 
 // Re-export commonly used types from submodules
 pub use vec::{
@@ -26,8 +27,9 @@ pub use btree::{BrandedBTreeMap, BrandedBTreeSet};
 pub use trie::{BrandedRadixTrieMap, BrandedRadixTrieSet};
 pub use other::{
     BrandedBinaryHeap, BrandedCowStrings, BrandedDeque, BrandedDoublyLinkedList,
-    BrandedLruCache, BrandedSkipList, BrandedSlotMap, SlotKey, BrandedIntervalMap,
+    BrandedLruCache, BrandedSlotMap, SlotKey, BrandedIntervalMap,
 };
+pub use skip_list::{BrandedSkipList, ActiveSkipList, ActivateSkipList};
 
 pub use crate::alloc::BrandedArena;
 pub use string::{BrandedString, ActiveString, ActivateString};
