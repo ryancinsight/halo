@@ -76,6 +76,14 @@ impl<'brand> BrandedString<'brand> {
         unsafe { std::str::from_utf8_unchecked(slice) }
     }
 
+    /// Returns a byte slice of this string's contents.
+    ///
+    /// Requires a token to prove permission to read the branded bytes.
+    #[inline]
+    pub fn as_bytes<'a>(&'a self, token: &'a GhostToken<'brand>) -> &'a [u8] {
+        self.vec.as_slice(token)
+    }
+
     /// Appends a string slice.
     ///
     /// Does NOT require a token because we are owners of the structure and
@@ -266,5 +274,13 @@ mod tests {
         let mut s = BrandedString::from("héllo"); // 'é' is 2 bytes
         // 'h' is index 0. 'é' starts at 1. next char at 3.
         s.truncate(2); // Mid-char boundary of 'é'
+    }
+
+    #[test]
+    fn test_branded_string_as_bytes() {
+        let mut s = BrandedString::from("abc");
+        GhostToken::new(|token| {
+            assert_eq!(s.as_bytes(&token), b"abc");
+        });
     }
 }

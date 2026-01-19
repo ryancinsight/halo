@@ -18,7 +18,10 @@ pub use vec::{
     BrandedVec, BrandedArray, BrandedVecDeque, BrandedChunkedVec, ChunkedVec, BrandedSmallVec,
     ActiveVec, ActivateVec, BrandedSlice, BrandedSliceMut, BrandedMatrix, BrandedMatrixViewMut
 };
-pub use hash::{BrandedHashMap, BrandedHashSet, BrandedIndexMap};
+pub use hash::{
+    BrandedHashMap, BrandedHashSet, BrandedIndexMap,
+    ActiveHashMap, ActivateHashMap, ActiveHashSet, ActivateHashSet
+};
 pub use btree::{BrandedBTreeMap, BrandedBTreeSet};
 pub use trie::{BrandedRadixTrieMap, BrandedRadixTrieSet};
 pub use other::{
@@ -27,7 +30,7 @@ pub use other::{
 };
 
 pub use crate::alloc::BrandedArena;
-pub use string::BrandedString;
+pub use string::{BrandedString, ActiveString, ActivateString};
 
 // Re-export for trait definitions
 pub use crate::GhostToken;
