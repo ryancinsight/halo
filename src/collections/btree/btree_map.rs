@@ -4,12 +4,12 @@
 //! and reducing allocations compared to pointer-based implementations.
 //! Values are stored inline in the nodes, protected by the `BrandedVec`'s token mechanism.
 
-use crate::{GhostToken, BrandedVec};
+use crate::collections::BrandedCollection;
+use crate::{BrandedVec, GhostToken};
 use std::borrow::Borrow;
 use std::cmp::Ordering;
-use std::mem::MaybeUninit;
 use std::marker::PhantomData;
-use crate::collections::BrandedCollection;
+use std::mem::MaybeUninit;
 
 // B-Tree order parameters.
 // B = 6 roughly corresponds to std::collections::BTreeMap logic but simplified.
@@ -107,9 +107,7 @@ impl<'brand, K, V> NodeData<'brand, K, V> {
     {
         // Binary search
         let len = self.len as usize;
-        let slice = unsafe {
-             std::slice::from_raw_parts(self.keys.as_ptr() as *const K, len)
-        };
+        let slice = unsafe { std::slice::from_raw_parts(self.keys.as_ptr() as *const K, len) };
         slice.binary_search_by(|k| k.borrow().cmp(key))
     }
 }
@@ -215,7 +213,11 @@ where
     }
 
     /// Returns a mutable reference to the value corresponding to the key.
-    pub fn get_mut<'a, Q: ?Sized>(&'a self, token: &'a mut GhostToken<'brand>, key: &Q) -> Option<&'a mut V>
+    pub fn get_mut<'a, Q: ?Sized>(
+        &'a self,
+        token: &'a mut GhostToken<'brand>,
+        key: &Q,
+    ) -> Option<&'a mut V>
     where
         K: Borrow<Q>,
         Q: Ord,
@@ -256,7 +258,6 @@ where
         self.get(token, key).is_some()
     }
 
-
     /// Inserts a key-value pair into the map.
     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
         if self.root.is_none() {
@@ -273,7 +274,9 @@ where
         }
 
         let is_root_full = unsafe {
-            self.nodes.get_unchecked_mut_exclusive(self.root.index()).is_full()
+            self.nodes
+                .get_unchecked_mut_exclusive(self.root.index())
+                .is_full()
         };
 
         if is_root_full {
@@ -315,21 +318,21 @@ where
             std::ptr::copy_nonoverlapping(
                 child.keys.as_ptr().add(split_idx),
                 new_child.keys.as_mut_ptr(),
-                move_count
+                move_count,
             );
             std::ptr::copy_nonoverlapping(
                 child.vals.as_ptr().add(split_idx),
                 new_child.vals.as_mut_ptr(),
-                move_count
+                move_count,
             );
 
             if !child.is_leaf {
-                 let children_move_count = MAX_CHILDREN - B;
-                 std::ptr::copy_nonoverlapping(
-                     child.children.as_ptr().add(B),
-                     new_child.children.as_mut_ptr(),
-                     children_move_count
-                 );
+                let children_move_count = MAX_CHILDREN - B;
+                std::ptr::copy_nonoverlapping(
+                    child.children.as_ptr().add(B),
+                    new_child.children.as_mut_ptr(),
+                    children_move_count,
+                );
             }
 
             new_child.len = move_count as u16;
@@ -340,29 +343,29 @@ where
                 std::ptr::copy(
                     parent.keys.as_ptr().add(child_index),
                     parent.keys.as_mut_ptr().add(child_index + 1),
-                    p_len - child_index
+                    p_len - child_index,
                 );
-                 std::ptr::copy(
+                std::ptr::copy(
                     parent.vals.as_ptr().add(child_index),
                     parent.vals.as_mut_ptr().add(child_index + 1),
-                    p_len - child_index
+                    p_len - child_index,
                 );
                 std::ptr::copy(
                     parent.children.as_ptr().add(child_index + 1),
                     parent.children.as_mut_ptr().add(child_index + 2),
-                    p_len - child_index
+                    p_len - child_index,
                 );
             }
 
             std::ptr::copy_nonoverlapping(
                 child.keys.as_ptr().add(mid_idx),
                 parent.keys.as_mut_ptr().add(child_index),
-                1
+                1,
             );
             std::ptr::copy_nonoverlapping(
-                 child.vals.as_ptr().add(mid_idx),
-                 parent.vals.as_mut_ptr().add(child_index),
-                 1
+                child.vals.as_ptr().add(mid_idx),
+                parent.vals.as_mut_ptr().add(child_index),
+                1,
             );
 
             parent.children[child_index + 1] = new_child_idx;
@@ -381,8 +384,8 @@ where
                 while i > 0 {
                     let k = node.key_at(i - 1);
                     if k == &key {
-                         let old = std::mem::replace(node.val_at_mut(i - 1), value);
-                         return Some(old);
+                        let old = std::mem::replace(node.val_at_mut(i - 1), value);
+                        return Some(old);
                     }
                     if k < &key {
                         break;
@@ -394,12 +397,12 @@ where
                     std::ptr::copy(
                         node.keys.as_ptr().add(i),
                         node.keys.as_mut_ptr().add(i + 1),
-                        node.len as usize - i
+                        node.len as usize - i,
                     );
-                     std::ptr::copy(
+                    std::ptr::copy(
                         node.vals.as_ptr().add(i),
                         node.vals.as_mut_ptr().add(i + 1),
-                        node.len as usize - i
+                        node.len as usize - i,
                     );
                 }
 
@@ -409,38 +412,43 @@ where
                 self.len += 1;
                 None
             } else {
-                 while i > 0 {
+                while i > 0 {
                     let k = node.key_at(i - 1);
-                     if k == &key {
-                         let old = std::mem::replace(node.val_at_mut(i - 1), value);
-                         return Some(old);
+                    if k == &key {
+                        let old = std::mem::replace(node.val_at_mut(i - 1), value);
+                        return Some(old);
                     }
                     if k < &key {
                         break;
                     }
                     i -= 1;
-                 }
+                }
 
-                 let child_idx = node.children[i];
-                 let child = &*nodes_ptr.add(child_idx.index());
+                let child_idx = node.children[i];
+                let child = &*nodes_ptr.add(child_idx.index());
 
-                 if child.is_full() {
-                     self.split_child(node_idx, i);
+                if child.is_full() {
+                    self.split_child(node_idx, i);
 
-                     // Re-acquire pointer after split_child (which calls alloc_node)
-                     let nodes_ptr = self.nodes.as_mut_slice_exclusive().as_mut_ptr();
-                     let node = &*nodes_ptr.add(node_idx.index());
-                     if node.key_at(i) < &key {
-                         self.insert_non_full(node.children[i + 1], key, value)
-                     } else if node.key_at(i) > &key {
-                          self.insert_non_full(node.children[i], key, value)
-                     } else {
-                          let old = std::mem::replace(self.nodes.get_unchecked_mut_exclusive(node_idx.index()).val_at_mut(i), value);
-                          Some(old)
-                     }
-                 } else {
-                     self.insert_non_full(child_idx, key, value)
-                 }
+                    // Re-acquire pointer after split_child (which calls alloc_node)
+                    let nodes_ptr = self.nodes.as_mut_slice_exclusive().as_mut_ptr();
+                    let node = &*nodes_ptr.add(node_idx.index());
+                    if node.key_at(i) < &key {
+                        self.insert_non_full(node.children[i + 1], key, value)
+                    } else if node.key_at(i) > &key {
+                        self.insert_non_full(node.children[i], key, value)
+                    } else {
+                        let old = std::mem::replace(
+                            self.nodes
+                                .get_unchecked_mut_exclusive(node_idx.index())
+                                .val_at_mut(i),
+                            value,
+                        );
+                        Some(old)
+                    }
+                } else {
+                    self.insert_non_full(child_idx, key, value)
+                }
             }
         }
     }
@@ -478,91 +486,96 @@ where
     }
 
     fn remove_from_node<Q: ?Sized>(&mut self, node_idx: NodeIdx<'brand>, key: &Q) -> Option<V>
-    where K: Borrow<Q> + Ord, Q: Ord
+    where
+        K: Borrow<Q> + Ord,
+        Q: Ord,
     {
         unsafe {
-             let nodes_ptr = self.nodes.as_mut_slice_exclusive().as_mut_ptr();
-             let node = &mut *nodes_ptr.add(node_idx.index());
+            let nodes_ptr = self.nodes.as_mut_slice_exclusive().as_mut_ptr();
+            let node = &mut *nodes_ptr.add(node_idx.index());
 
-             let idx = match node.search_key(key) {
-                 Ok(i) => i,
-                 Err(i) => {
-                     // Not found in this node.
-                     if node.is_leaf {
-                         return None;
-                     }
-                     // Go to child i.
-                     // Ensure child has >= B keys.
-                     // If child has B-1 keys, we need to fix it.
-                     // (Standard B-Tree: MIN_LEN = B-1. We need MIN_LEN+1 to remove safely?
-                     // No, if we descend, we ensure child has >= B keys so that if we delete from it, it has >= B-1).
+            let idx = match node.search_key(key) {
+                Ok(i) => i,
+                Err(i) => {
+                    // Not found in this node.
+                    if node.is_leaf {
+                        return None;
+                    }
+                    // Go to child i.
+                    // Ensure child has >= B keys.
+                    // If child has B-1 keys, we need to fix it.
+                    // (Standard B-Tree: MIN_LEN = B-1. We need MIN_LEN+1 to remove safely?
+                    // No, if we descend, we ensure child has >= B keys so that if we delete from it, it has >= B-1).
 
-                     let child_idx = node.children[i];
-                     let child = &*nodes_ptr.add(child_idx.index());
+                    let child_idx = node.children[i];
+                    let child = &*nodes_ptr.add(child_idx.index());
 
-                     if (child.len as usize) < B {
-                         self.fix_child(node_idx, i);
-                         // After fix, key might be in node or one of children.
-                         // Restart search in this node?
-                         return self.remove_from_node(node_idx, key);
-                     } else {
-                         return self.remove_from_node(child_idx, key);
-                     }
-                 }
-             };
+                    if (child.len as usize) < B {
+                        self.fix_child(node_idx, i);
+                        // After fix, key might be in node or one of children.
+                        // Restart search in this node?
+                        return self.remove_from_node(node_idx, key);
+                    } else {
+                        return self.remove_from_node(child_idx, key);
+                    }
+                }
+            };
 
-             // Found at idx.
-             if node.is_leaf {
-                 let val = std::ptr::read(node.val_at(idx));
-                 let _k = std::ptr::read(node.key_at(idx)); // Drop key
+            // Found at idx.
+            if node.is_leaf {
+                let val = std::ptr::read(node.val_at(idx));
+                let _k = std::ptr::read(node.key_at(idx)); // Drop key
 
-                 // Shift
-                 if idx < node.len as usize - 1 {
-                     std::ptr::copy(
-                         node.keys.as_ptr().add(idx + 1),
-                         node.keys.as_mut_ptr().add(idx),
-                         node.len as usize - 1 - idx
-                     );
-                     std::ptr::copy(
-                         node.vals.as_ptr().add(idx + 1),
-                         node.vals.as_mut_ptr().add(idx),
-                         node.len as usize - 1 - idx
-                     );
-                 }
-                 node.len -= 1;
-                 return Some(val);
-             } else {
-                 // Internal node.
-                 // Replace with predecessor (from left child)
-                 let left_child_idx = node.children[idx];
-                 let left_child = &*nodes_ptr.add(left_child_idx.index());
+                // Shift
+                if idx < node.len as usize - 1 {
+                    std::ptr::copy(
+                        node.keys.as_ptr().add(idx + 1),
+                        node.keys.as_mut_ptr().add(idx),
+                        node.len as usize - 1 - idx,
+                    );
+                    std::ptr::copy(
+                        node.vals.as_ptr().add(idx + 1),
+                        node.vals.as_mut_ptr().add(idx),
+                        node.len as usize - 1 - idx,
+                    );
+                }
+                node.len -= 1;
+                return Some(val);
+            } else {
+                // Internal node.
+                // Replace with predecessor (from left child)
+                let left_child_idx = node.children[idx];
+                let left_child = &*nodes_ptr.add(left_child_idx.index());
 
-                 if (left_child.len as usize) >= B {
-                     let (pred_key, pred_val) = self.pop_max(left_child_idx);
-                     // Replace key/val at idx with pred
-                     let old_val = std::mem::replace(node.val_at_mut(idx), pred_val);
-                     let _old_key = std::mem::replace(node.key_at_mut(idx), pred_key);
-                     return Some(old_val);
-                 }
+                if (left_child.len as usize) >= B {
+                    let (pred_key, pred_val) = self.pop_max(left_child_idx);
+                    // Replace key/val at idx with pred
+                    let old_val = std::mem::replace(node.val_at_mut(idx), pred_val);
+                    let _old_key = std::mem::replace(node.key_at_mut(idx), pred_key);
+                    return Some(old_val);
+                }
 
-                 // Or successor (from right child)
-                 let right_child_idx = node.children[idx + 1];
-                 let right_child = &*nodes_ptr.add(right_child_idx.index());
+                // Or successor (from right child)
+                let right_child_idx = node.children[idx + 1];
+                let right_child = &*nodes_ptr.add(right_child_idx.index());
 
-                 if (right_child.len as usize) >= B {
-                      let (succ_key, succ_val) = self.pop_min(right_child_idx);
-                      let old_val = std::mem::replace(node.val_at_mut(idx), succ_val);
-                      let _old_key = std::mem::replace(node.key_at_mut(idx), succ_key);
-                      return Some(old_val);
-                 }
+                if (right_child.len as usize) >= B {
+                    let (succ_key, succ_val) = self.pop_min(right_child_idx);
+                    let old_val = std::mem::replace(node.val_at_mut(idx), succ_val);
+                    let _old_key = std::mem::replace(node.key_at_mut(idx), succ_key);
+                    return Some(old_val);
+                }
 
-                 // Both have B-1. Merge them.
-                 self.merge_children(node_idx, idx);
-                 // Key is now in the merged child. Recurse.
-                 // merged child is at children[idx].
-                 let merged_child_idx = self.nodes.get_unchecked_mut_exclusive(node_idx.index()).children[idx];
-                 return self.remove_from_node(merged_child_idx, key);
-             }
+                // Both have B-1. Merge them.
+                self.merge_children(node_idx, idx);
+                // Key is now in the merged child. Recurse.
+                // merged child is at children[idx].
+                let merged_child_idx = self
+                    .nodes
+                    .get_unchecked_mut_exclusive(node_idx.index())
+                    .children[idx];
+                return self.remove_from_node(merged_child_idx, key);
+            }
         }
     }
 
@@ -640,95 +653,97 @@ where
                 std::ptr::copy(
                     node.keys.as_ptr().add(1),
                     node.keys.as_mut_ptr(),
-                    node.len as usize - 1
+                    node.len as usize - 1,
                 );
                 std::ptr::copy(
                     node.vals.as_ptr().add(1),
                     node.vals.as_mut_ptr(),
-                    node.len as usize - 1
+                    node.len as usize - 1,
                 );
                 node.len -= 1;
                 return (key, val);
             } else {
-                 let child_idx = node.children[0];
-                 let child = &*nodes_ptr.add(child_idx.index());
-                 if (child.len as usize) < B {
-                     self.fix_child(node_idx, 0);
-                     return self.pop_min(node_idx);
-                 }
-                 return self.pop_min(child_idx);
+                let child_idx = node.children[0];
+                let child = &*nodes_ptr.add(child_idx.index());
+                if (child.len as usize) < B {
+                    self.fix_child(node_idx, 0);
+                    return self.pop_min(node_idx);
+                }
+                return self.pop_min(child_idx);
             }
         }
     }
 
     // Merge children[idx] and children[idx+1]
     fn merge_children(&mut self, parent_idx: NodeIdx<'brand>, idx: usize) {
-         let right_idx_to_free = unsafe {
-             self.nodes.get_unchecked_mut_exclusive(parent_idx.index()).children[idx + 1]
-         };
+        let right_idx_to_free = unsafe {
+            self.nodes
+                .get_unchecked_mut_exclusive(parent_idx.index())
+                .children[idx + 1]
+        };
 
-         unsafe {
-             let nodes_ptr = self.nodes.as_mut_slice_exclusive().as_mut_ptr();
-             let parent = &mut *nodes_ptr.add(parent_idx.index());
+        unsafe {
+            let nodes_ptr = self.nodes.as_mut_slice_exclusive().as_mut_ptr();
+            let parent = &mut *nodes_ptr.add(parent_idx.index());
 
-             let left_idx = parent.children[idx];
-             // right_idx_to_free is already captured
+            let left_idx = parent.children[idx];
+            // right_idx_to_free is already captured
 
-             let left = &mut *nodes_ptr.add(left_idx.index());
-             let right = &mut *nodes_ptr.add(right_idx_to_free.index());
+            let left = &mut *nodes_ptr.add(left_idx.index());
+            let right = &mut *nodes_ptr.add(right_idx_to_free.index());
 
-             // Move separator from parent to left
-             let sep_key = std::ptr::read(parent.key_at(idx));
-             let sep_val = std::ptr::read(parent.val_at(idx));
+            // Move separator from parent to left
+            let sep_key = std::ptr::read(parent.key_at(idx));
+            let sep_val = std::ptr::read(parent.val_at(idx));
 
-             left.keys[left.len as usize].write(sep_key);
-             left.vals[left.len as usize].write(sep_val);
+            left.keys[left.len as usize].write(sep_key);
+            left.vals[left.len as usize].write(sep_val);
 
-             // Move right to left
-             std::ptr::copy_nonoverlapping(
-                 right.keys.as_ptr(),
-                 left.keys.as_mut_ptr().add(left.len as usize + 1),
-                 right.len as usize
-             );
-             std::ptr::copy_nonoverlapping(
-                 right.vals.as_ptr(),
-                 left.vals.as_mut_ptr().add(left.len as usize + 1),
-                 right.len as usize
-             );
+            // Move right to left
+            std::ptr::copy_nonoverlapping(
+                right.keys.as_ptr(),
+                left.keys.as_mut_ptr().add(left.len as usize + 1),
+                right.len as usize,
+            );
+            std::ptr::copy_nonoverlapping(
+                right.vals.as_ptr(),
+                left.vals.as_mut_ptr().add(left.len as usize + 1),
+                right.len as usize,
+            );
 
-             if !left.is_leaf {
-                 std::ptr::copy_nonoverlapping(
-                     right.children.as_ptr(),
-                     left.children.as_mut_ptr().add(left.len as usize + 1),
-                     right.len as usize + 1
-                 );
-             }
+            if !left.is_leaf {
+                std::ptr::copy_nonoverlapping(
+                    right.children.as_ptr(),
+                    left.children.as_mut_ptr().add(left.len as usize + 1),
+                    right.len as usize + 1,
+                );
+            }
 
-             left.len += 1 + right.len;
+            left.len += 1 + right.len;
 
-             // Shift parent
-             std::ptr::copy(
-                 parent.keys.as_ptr().add(idx + 1),
-                 parent.keys.as_mut_ptr().add(idx),
-                 parent.len as usize - 1 - idx
-             );
-             std::ptr::copy(
-                 parent.vals.as_ptr().add(idx + 1),
-                 parent.vals.as_mut_ptr().add(idx),
-                 parent.len as usize - 1 - idx
-             );
-             std::ptr::copy(
-                 parent.children.as_ptr().add(idx + 2),
-                 parent.children.as_mut_ptr().add(idx + 1),
-                 parent.len as usize - 1 - idx
-             );
-             parent.len -= 1;
+            // Shift parent
+            std::ptr::copy(
+                parent.keys.as_ptr().add(idx + 1),
+                parent.keys.as_mut_ptr().add(idx),
+                parent.len as usize - 1 - idx,
+            );
+            std::ptr::copy(
+                parent.vals.as_ptr().add(idx + 1),
+                parent.vals.as_mut_ptr().add(idx),
+                parent.len as usize - 1 - idx,
+            );
+            std::ptr::copy(
+                parent.children.as_ptr().add(idx + 2),
+                parent.children.as_mut_ptr().add(idx + 1),
+                parent.len as usize - 1 - idx,
+            );
+            parent.len -= 1;
 
-             // right node is logically empty now (contents moved)
-             right.len = 0;
-         }
+            // right node is logically empty now (contents moved)
+            right.len = 0;
+        }
 
-         self.free_node(right_idx_to_free);
+        self.free_node(right_idx_to_free);
     }
 
     fn rotate_right(&mut self, parent_idx: NodeIdx<'brand>, child_idx: usize) {
@@ -743,18 +758,18 @@ where
             std::ptr::copy(
                 child.keys.as_ptr(),
                 child.keys.as_mut_ptr().add(1),
-                child.len as usize
+                child.len as usize,
             );
             std::ptr::copy(
                 child.vals.as_ptr(),
                 child.vals.as_mut_ptr().add(1),
-                child.len as usize
+                child.len as usize,
             );
             if !child.is_leaf {
-                 std::ptr::copy(
+                std::ptr::copy(
                     child.children.as_ptr(),
                     child.children.as_mut_ptr().add(1),
-                    child.len as usize + 1
+                    child.len as usize + 1,
                 );
             }
 
@@ -778,7 +793,7 @@ where
     }
 
     fn rotate_left(&mut self, parent_idx: NodeIdx<'brand>, child_idx: usize) {
-         unsafe {
+        unsafe {
             let nodes_ptr = self.nodes.as_mut_slice_exclusive().as_mut_ptr();
             let parent = &mut *nodes_ptr.add(parent_idx.index());
             let child = &mut *nodes_ptr.add(parent.children[child_idx].index());
@@ -803,22 +818,22 @@ where
             std::ptr::copy(
                 sibling.keys.as_ptr().add(1),
                 sibling.keys.as_mut_ptr(),
-                sibling.len as usize - 1
+                sibling.len as usize - 1,
             );
-             std::ptr::copy(
+            std::ptr::copy(
                 sibling.vals.as_ptr().add(1),
                 sibling.vals.as_mut_ptr(),
-                sibling.len as usize - 1
+                sibling.len as usize - 1,
             );
             if !sibling.is_leaf {
                 std::ptr::copy(
                     sibling.children.as_ptr().add(1),
                     sibling.children.as_mut_ptr(),
-                    sibling.len as usize
+                    sibling.len as usize,
                 );
             }
             sibling.len -= 1;
-         }
+        }
     }
 
     /// Returns an iterator over the map.
@@ -855,7 +870,7 @@ where
         F: FnMut(&K, &mut V),
     {
         if self.root.is_some() {
-             self.for_each_node(self.root, token, &mut f);
+            self.for_each_node(self.root, token, &mut f);
         }
     }
 
@@ -891,8 +906,8 @@ where
             }
 
             if !is_leaf {
-                 let child_idx = self.nodes.get_unchecked(token, node_idx.index()).children[len];
-                 self.for_each_node(child_idx, token, f);
+                let child_idx = self.nodes.get_unchecked(token, node_idx.index()).children[len];
+                self.for_each_node(child_idx, token, f);
             }
         }
     }
@@ -907,16 +922,16 @@ pub struct Iter<'a, 'brand, K, V> {
 
 impl<'a, 'brand, K, V> Iter<'a, 'brand, K, V> {
     fn push_leftmost(&mut self, mut node_idx: NodeIdx<'brand>) {
-         while node_idx.is_some() {
-             self.stack.push((node_idx, 0));
-             unsafe {
-                 let node = self.map.nodes.get_unchecked(self.token, node_idx.index());
-                 if node.is_leaf {
-                     break;
-                 }
-                 node_idx = node.children[0];
-             }
-         }
+        while node_idx.is_some() {
+            self.stack.push((node_idx, 0));
+            unsafe {
+                let node = self.map.nodes.get_unchecked(self.token, node_idx.index());
+                if node.is_leaf {
+                    break;
+                }
+                node_idx = node.children[0];
+            }
+        }
     }
 }
 
@@ -936,8 +951,8 @@ impl<'a, 'brand, K, V> Iterator for Iter<'a, 'brand, K, V> {
                     *idx += 1;
 
                     if !node.is_leaf {
-                         let child_idx = node.children[*idx];
-                         self.push_leftmost(child_idx);
+                        let child_idx = node.children[*idx];
+                        self.push_leftmost(child_idx);
                     }
 
                     return Some((key, val));
@@ -959,16 +974,16 @@ pub struct Keys<'a, 'brand, K, V> {
 
 impl<'a, 'brand, K: 'a, V> Keys<'a, 'brand, K, V> {
     fn push_leftmost(&mut self, mut node_idx: NodeIdx<'brand>) {
-         while node_idx.is_some() {
-             self.stack.push((node_idx, 0));
-             unsafe {
-                 let node = self.map.nodes.get_unchecked(self.token, node_idx.index());
-                 if node.is_leaf {
-                     break;
-                 }
-                 node_idx = node.children[0];
-             }
-         }
+        while node_idx.is_some() {
+            self.stack.push((node_idx, 0));
+            unsafe {
+                let node = self.map.nodes.get_unchecked(self.token, node_idx.index());
+                if node.is_leaf {
+                    break;
+                }
+                node_idx = node.children[0];
+            }
+        }
     }
 }
 
@@ -987,8 +1002,8 @@ impl<'a, 'brand, K: 'a, V> Iterator for Keys<'a, 'brand, K, V> {
                     *idx += 1;
 
                     if !node.is_leaf {
-                         let child_idx = node.children[*idx];
-                         self.push_leftmost(child_idx);
+                        let child_idx = node.children[*idx];
+                        self.push_leftmost(child_idx);
                     }
 
                     return Some(key);
@@ -1022,14 +1037,21 @@ impl<'brand, K, V> IntoIterator for BrandedBTreeMap<'brand, K, V> {
         // Collect all items efficiently
         let mut vec = Vec::with_capacity(self.len);
         if self.root.is_some() {
-             Self::collect(self.root, &mut self.nodes, &mut vec);
+            Self::collect(self.root, &mut self.nodes, &mut vec);
         }
-        IntoIter { vec: vec.into_iter(), phantom: PhantomData }
+        IntoIter {
+            vec: vec.into_iter(),
+            phantom: PhantomData,
+        }
     }
 }
 
 impl<'brand, K, V> BrandedBTreeMap<'brand, K, V> {
-    fn collect(node_idx: NodeIdx<'brand>, nodes: &mut BrandedVec<'brand, NodeData<'brand, K, V>>, vec: &mut Vec<(K, V)>) {
+    fn collect(
+        node_idx: NodeIdx<'brand>,
+        nodes: &mut BrandedVec<'brand, NodeData<'brand, K, V>>,
+        vec: &mut Vec<(K, V)>,
+    ) {
         unsafe {
             let node = nodes.get_unchecked_mut_exclusive(node_idx.index());
             let len = node.len as usize;
@@ -1053,7 +1075,11 @@ impl<'brand, K, V> BrandedBTreeMap<'brand, K, V> {
             std::ptr::copy_nonoverlapping(node.keys.as_ptr(), keys.as_mut_ptr(), len);
             std::ptr::copy_nonoverlapping(node.vals.as_ptr(), vals.as_mut_ptr(), len);
             if !is_leaf {
-                std::ptr::copy_nonoverlapping(node.children.as_ptr(), children.as_mut_ptr(), len + 1);
+                std::ptr::copy_nonoverlapping(
+                    node.children.as_ptr(),
+                    children.as_mut_ptr(),
+                    len + 1,
+                );
             }
 
             node.len = 0; // Prevent double free
@@ -1066,7 +1092,7 @@ impl<'brand, K, V> BrandedBTreeMap<'brand, K, V> {
                 vec.push((keys[i].assume_init_read(), vals[i].assume_init_read()));
             }
             if !is_leaf {
-                 Self::collect(children[len], nodes, vec);
+                Self::collect(children[len], nodes, vec);
             }
         }
     }
@@ -1122,7 +1148,7 @@ mod tests {
 
             assert_eq!(map.len(), 100);
             for i in 0..100 {
-                 assert_eq!(*map.get(&token, &i).unwrap(), i * 10);
+                assert_eq!(*map.get(&token, &i).unwrap(), i * 10);
             }
         });
     }
@@ -1180,7 +1206,7 @@ mod tests {
 
     #[test]
     fn test_remove_complex() {
-         GhostToken::new(|token| {
+        GhostToken::new(|token| {
             let mut map = BrandedBTreeMap::new();
             // Insert enough to create internal nodes
             for i in 0..100 {
@@ -1197,7 +1223,7 @@ mod tests {
             // Check consistency
             for i in 0..100 {
                 if i != 50 {
-                     assert_eq!(*map.get(&token, &i).unwrap(), i * 10);
+                    assert_eq!(*map.get(&token, &i).unwrap(), i * 10);
                 }
             }
 
@@ -1208,12 +1234,12 @@ mod tests {
                 }
             }
             assert!(map.is_empty());
-         });
+        });
     }
 
     #[test]
     fn test_iterators() {
-         GhostToken::new(|mut token| {
+        GhostToken::new(|mut token| {
             let mut map = BrandedBTreeMap::new();
             for i in 0..10 {
                 map.insert(i, i * 10);
@@ -1233,6 +1259,6 @@ mod tests {
             });
 
             assert_eq!(*map.get(&token, &0).unwrap(), 1);
-         });
+        });
     }
 }

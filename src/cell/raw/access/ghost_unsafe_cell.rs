@@ -18,6 +18,3 @@ pub(crate) unsafe fn as_mut_ptr_unchecked<'brand, T: ?Sized>(
 ) -> *mut T {
     cell.as_mut_ptr_unchecked()
 }
-
-
-

@@ -9,8 +9,8 @@ mod ops;
 
 use core::mem::MaybeUninit;
 
-use crate::GhostToken;
 use crate::cell::raw::GhostUnsafeCell;
+use crate::GhostToken;
 
 /// A cacheline-aligned copy-based interior mutable cell branded by a ghost token.
 #[repr(align(64))]
@@ -79,5 +79,3 @@ impl<'brand, T> Drop for GhostCell<'brand, T> {
         unsafe { ops::drop_unchecked(&self.value) }
     }
 }
-
-

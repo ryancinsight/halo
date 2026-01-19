@@ -16,9 +16,9 @@
 //! - Bulk operations: O(n) with optimal cache behavior
 //! - Memory: Fixed-size ring buffer with zero dynamic allocation
 
-use core::mem::MaybeUninit;
-use crate::{GhostCell, GhostToken};
 use crate::collections::ZeroCopyOps;
+use crate::{GhostCell, GhostToken};
+use core::mem::MaybeUninit;
 
 /// Zero-cost iterator for BrandedDeque.
 pub struct BrandedDequeIter<'a, 'brand, T, const CAPACITY: usize> {
@@ -38,7 +38,11 @@ impl<'a, 'brand, T, const CAPACITY: usize> Iterator for BrandedDequeIter<'a, 'br
         let actual_idx = (self.deque.head + self.index) % CAPACITY;
         self.index += 1;
         unsafe {
-            let cell = self.deque.buffer.get_unchecked(actual_idx).assume_init_ref();
+            let cell = self
+                .deque
+                .buffer
+                .get_unchecked(actual_idx)
+                .assume_init_ref();
             Some(cell.borrow(self.token))
         }
     }
@@ -50,7 +54,10 @@ impl<'a, 'brand, T, const CAPACITY: usize> Iterator for BrandedDequeIter<'a, 'br
     }
 }
 
-impl<'a, 'brand, T, const CAPACITY: usize> ExactSizeIterator for BrandedDequeIter<'a, 'brand, T, CAPACITY> {}
+impl<'a, 'brand, T, const CAPACITY: usize> ExactSizeIterator
+    for BrandedDequeIter<'a, 'brand, T, CAPACITY>
+{
+}
 
 /// A ring buffer implementation optimized for token-gated access patterns.
 #[repr(C)]
@@ -71,7 +78,9 @@ impl<'brand, T, const CAPACITY: usize> BrandedDeque<'brand, T, CAPACITY> {
     pub const fn new() -> Self {
         // SAFETY: An array of MaybeUninit is safe to create uninitialized
         // because MaybeUninit itself doesn't require initialization.
-        let buffer = unsafe { MaybeUninit::<[MaybeUninit<GhostCell<'brand, T>>; CAPACITY]>::uninit().assume_init() };
+        let buffer = unsafe {
+            MaybeUninit::<[MaybeUninit<GhostCell<'brand, T>>; CAPACITY]>::uninit().assume_init()
+        };
         Self {
             buffer,
             head: 0,
@@ -133,7 +142,11 @@ impl<'brand, T, const CAPACITY: usize> BrandedDeque<'brand, T, CAPACITY> {
             return None;
         }
 
-        let new_head = if self.head == 0 { CAPACITY - 1 } else { self.head - 1 };
+        let new_head = if self.head == 0 {
+            CAPACITY - 1
+        } else {
+            self.head - 1
+        };
 
         // SAFETY: We checked that len < CAPACITY, so new_head is valid
         unsafe {
@@ -153,7 +166,11 @@ impl<'brand, T, const CAPACITY: usize> BrandedDeque<'brand, T, CAPACITY> {
             return None;
         }
 
-        let tail_idx = if self.tail == 0 { CAPACITY - 1 } else { self.tail - 1 };
+        let tail_idx = if self.tail == 0 {
+            CAPACITY - 1
+        } else {
+            self.tail - 1
+        };
         self.tail = tail_idx;
         self.len -= 1;
 
@@ -202,7 +219,11 @@ impl<'brand, T, const CAPACITY: usize> BrandedDeque<'brand, T, CAPACITY> {
         if self.is_empty() {
             return None;
         }
-        let back_idx = if self.tail == 0 { CAPACITY - 1 } else { self.tail - 1 };
+        let back_idx = if self.tail == 0 {
+            CAPACITY - 1
+        } else {
+            self.tail - 1
+        };
         unsafe {
             let cell = self.buffer.get_unchecked(back_idx).assume_init_ref();
             Some(cell.borrow(token))
@@ -224,7 +245,11 @@ impl<'brand, T, const CAPACITY: usize> BrandedDeque<'brand, T, CAPACITY> {
 
     /// Returns a token-gated mutable reference to the element at the given index.
     #[inline]
-    pub fn get_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>, index: usize) -> Option<&'a mut T> {
+    pub fn get_mut<'a>(
+        &'a self,
+        token: &'a mut GhostToken<'brand>,
+        index: usize,
+    ) -> Option<&'a mut T> {
         if index >= self.len {
             return None;
         }
@@ -238,7 +263,10 @@ impl<'brand, T, const CAPACITY: usize> BrandedDeque<'brand, T, CAPACITY> {
 
     /// Iterates over the elements.
     #[inline]
-    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> BrandedDequeIter<'a, 'brand, T, CAPACITY> {
+    pub fn iter<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+    ) -> BrandedDequeIter<'a, 'brand, T, CAPACITY> {
         BrandedDequeIter {
             deque: self,
             index: 0,
@@ -273,7 +301,8 @@ impl<'brand, T, const CAPACITY: usize> BrandedDeque<'brand, T, CAPACITY> {
         for i in 0..self.len {
             let actual_idx = (self.head + i) % CAPACITY;
             unsafe {
-                let ptr = self.buffer.get_unchecked(actual_idx).as_ptr() as *mut GhostCell<'brand, T>;
+                let ptr =
+                    self.buffer.get_unchecked(actual_idx).as_ptr() as *mut GhostCell<'brand, T>;
                 f((*ptr).borrow_mut(token));
             }
         }
@@ -304,7 +333,9 @@ impl<'brand, T, const CAPACITY: usize> Drop for BrandedDeque<'brand, T, CAPACITY
     }
 }
 
-impl<'brand, T, const CAPACITY: usize> ZeroCopyOps<'brand, T> for BrandedDeque<'brand, T, CAPACITY> {
+impl<'brand, T, const CAPACITY: usize> ZeroCopyOps<'brand, T>
+    for BrandedDeque<'brand, T, CAPACITY>
+{
     #[inline(always)]
     fn find_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<&'a T>
     where

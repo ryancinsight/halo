@@ -34,5 +34,3 @@ fn main() {
         assert_eq!(cell.get(&token), 123);
     });
 }
-
-

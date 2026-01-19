@@ -1,7 +1,7 @@
 use core::mem::MaybeUninit;
 
-use crate::cell::raw::access::maybe_uninit as mu;
 use crate::cell::raw::access::ghost_unsafe_cell as guc;
+use crate::cell::raw::access::maybe_uninit as mu;
 
 use super::GhostRefCell;
 
@@ -27,7 +27,10 @@ impl<'brand, 'cell, T> core::ops::Deref for Ref<'brand, 'cell, T> {
 impl<'brand, 'cell, T> Drop for Ref<'brand, 'cell, T> {
     fn drop(&mut self) {
         // Decrement reader count.
-        let prev = self.cell.borrow.fetch_sub(1, core::sync::atomic::Ordering::Release);
+        let prev = self
+            .cell
+            .borrow
+            .fetch_sub(1, core::sync::atomic::Ordering::Release);
         debug_assert!(prev > 0, "Borrow count underflow");
     }
 }
@@ -60,9 +63,10 @@ impl<'brand, 'cell, T> core::ops::DerefMut for RefMut<'brand, 'cell, T> {
 impl<'brand, 'cell, T> Drop for RefMut<'brand, 'cell, T> {
     fn drop(&mut self) {
         // Clear writer flag.
-        let prev = self.cell.borrow.fetch_add(1, core::sync::atomic::Ordering::Release);
+        let prev = self
+            .cell
+            .borrow
+            .fetch_add(1, core::sync::atomic::Ordering::Release);
         debug_assert_eq!(prev, -1, "Expected writer borrow count");
     }
 }
-
-

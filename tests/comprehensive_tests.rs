@@ -3,8 +3,8 @@
 use halo::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 use std::hint::black_box;
+use std::sync::{Arc, Mutex};
 
 // ===== SAFETY AND CORRECTNESS TESTS =====
 
@@ -247,7 +247,10 @@ fn test_memory_layout() {
     assert!(cell_size <= base_size + 8); // But not much bigger
 
     // Test that alignment is reasonable
-    assert_eq!(mem::align_of::<GhostCell<i32>>(), mem::align_of::<std::cell::Cell<std::mem::MaybeUninit<i32>>>());
+    assert_eq!(
+        mem::align_of::<GhostCell<i32>>(),
+        mem::align_of::<std::cell::Cell<std::mem::MaybeUninit<i32>>>()
+    );
 
     // Note: GhostToken size depends on the specific lifetime used
     // The zero-sized property holds for the abstract token type
@@ -344,7 +347,10 @@ fn test_trait_implementations() {
 #[test]
 fn test_generic_bounds() {
     // Test that our generic bounds work correctly
-    fn generic_function<'brand, T: Clone>(cell: &GhostCell<'brand, T>, token: &GhostToken<'brand>) -> T {
+    fn generic_function<'brand, T: Clone>(
+        cell: &GhostCell<'brand, T>,
+        token: &GhostToken<'brand>,
+    ) -> T {
         cell.cloned(token)
     }
 
@@ -695,7 +701,7 @@ fn branded_hashmap_comprehensive_vs_std_hashmap() {
             (1, 42),
             (2, 24),
             (3, 100),
-            (0, 999),  // Zero key
+            (0, 999), // Zero key
             (999, 123),
         ];
 
@@ -708,7 +714,10 @@ fn branded_hashmap_comprehensive_vs_std_hashmap() {
 
         // Verify all insertions
         for (k, expected_v) in &test_data {
-            assert_eq!(std_map.get(k), branded_map.get(&token, k).map(|x| *x).as_ref());
+            assert_eq!(
+                std_map.get(k),
+                branded_map.get(&token, k).map(|x| *x).as_ref()
+            );
         }
 
         // Test updates (same key, different value)
@@ -719,7 +728,10 @@ fn branded_hashmap_comprehensive_vs_std_hashmap() {
         let std_prev = std_map.insert(1, 999);
         let branded_prev = branded_map.insert(1, 999);
         assert_eq!(std_prev, branded_prev);
-        assert_eq!(std_map.get(&1), branded_map.get(&token, &1).map(|x| *x).as_ref());
+        assert_eq!(
+            std_map.get(&1),
+            branded_map.get(&token, &1).map(|x| *x).as_ref()
+        );
 
         // Test removals
         for (k, _) in &test_data {
@@ -876,7 +888,8 @@ fn memory_overhead_comparison() {
 
             // Both should contain the same data
             assert_eq!(std_vec.len(), branded_vec.len());
-            for i in 0..size.min(100) { // Test first 100 elements to avoid excessive time
+            for i in 0..size.min(100) {
+                // Test first 100 elements to avoid excessive time
                 assert_eq!(std_vec[i], *branded_vec.get(&token, i).unwrap());
             }
 
@@ -939,7 +952,8 @@ fn asymptotic_complexity_validation() {
 
             // O(1) access should be much faster than O(n) operations
             let start = std::time::Instant::now();
-            for i in 0..(size.min(1000)) {  // Limit to avoid excessive time
+            for i in 0..(size.min(1000)) {
+                // Limit to avoid excessive time
                 black_box(branded_vec.get(&token, i % branded_vec.len()));
             }
             let access_time = start.elapsed();
@@ -949,7 +963,8 @@ fn asymptotic_complexity_validation() {
 
             // O(n) iteration (simplified test)
             let start = std::time::Instant::now();
-            for i in 0..size.min(1000) { // Limit iterations
+            for i in 0..size.min(1000) {
+                // Limit iterations
                 black_box(branded_vec.get(&token, i % branded_vec.len()));
             }
             let iterate_time = start.elapsed();
@@ -1205,8 +1220,9 @@ fn test_lazy_ghostcell_memory_efficiency() {
         // Size should remain the same (raw allocation handles storage)
         assert_eq!(computed_size, empty_size);
         // Upper bound sanity check: must not be egregiously larger than (F + T).
-        let upper =
-            mem::size_of::<fn() -> Vec<i32>>() + mem::size_of::<Vec<i32>>() + 2 * mem::size_of::<usize>();
+        let upper = mem::size_of::<fn() -> Vec<i32>>()
+            + mem::size_of::<Vec<i32>>()
+            + 2 * mem::size_of::<usize>();
         assert!(empty_size <= upper);
     });
 }
@@ -1355,7 +1371,9 @@ fn test_ghostcell_drop_behavior() {
 
         // Initialize lazy/once values so there is something to drop.
         let _ = lazy_lock.get(&mut token);
-        assert!(once_cell.set(&mut token, DropCounter(drops.clone())).is_ok());
+        assert!(once_cell
+            .set(&mut token, DropCounter(drops.clone()))
+            .is_ok());
 
         let c0 = drops.load(Ordering::Relaxed);
         drop(cell);
@@ -1394,7 +1412,9 @@ fn test_ghostcell_memory_layout() {
     assert!(mem::size_of::<GhostLazyCell<i32>>() <= 32);
 
     // `GhostUnsafeCell` is a thin wrapper around `UnsafeCell`.
-    assert!(mem::size_of::<GhostUnsafeCell<i32>>() <= mem::size_of::<std::cell::UnsafeCell<i32>>() + 8);
+    assert!(
+        mem::size_of::<GhostUnsafeCell<i32>>() <= mem::size_of::<std::cell::UnsafeCell<i32>>() + 8
+    );
 }
 
 #[test]

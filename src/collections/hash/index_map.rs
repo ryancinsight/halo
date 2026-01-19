@@ -13,10 +13,10 @@
 //! - **Zero-Cost Access**: Values are token-gated using `GhostCell`.
 //! - **Index Access**: O(1) access by index.
 
-use core::hash::{Hash, Hasher, BuildHasher};
-use std::collections::hash_map::RandomState;
+use crate::collections::{BrandedCollection, BrandedVec, ZeroCopyMapOps};
 use crate::{GhostCell, GhostToken};
-use crate::collections::{BrandedVec, ZeroCopyMapOps, BrandedCollection};
+use core::hash::{BuildHasher, Hash, Hasher};
+use std::collections::hash_map::RandomState;
 // Control byte constants
 const EMPTY: u8 = 0xFF;
 const DELETED: u8 = 0xFE;
@@ -125,7 +125,11 @@ impl<'brand, K, V, S> BrandedIndexMap<'brand, K, V, S> {
     }
 
     /// Returns the key-value pair at the given index.
-    pub fn get_index<'a>(&'a self, token: &'a GhostToken<'brand>, index: usize) -> Option<(&'a K, &'a V)> {
+    pub fn get_index<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+        index: usize,
+    ) -> Option<(&'a K, &'a V)> {
         if index < self.keys.len() {
             let key = &self.keys[index];
             let val = self.values.get(token, index)?;
@@ -136,7 +140,11 @@ impl<'brand, K, V, S> BrandedIndexMap<'brand, K, V, S> {
     }
 
     /// Returns the key-value pair at the given index (mutable).
-    pub fn get_index_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>, index: usize) -> Option<(&'a K, &'a mut V)> {
+    pub fn get_index_mut<'a>(
+        &'a self,
+        token: &'a mut GhostToken<'brand>,
+        index: usize,
+    ) -> Option<(&'a K, &'a mut V)> {
         if index < self.keys.len() {
             let key = &self.keys[index];
             let val = self.values.get_mut(token, index)?;
@@ -167,13 +175,21 @@ impl<'brand, K, V, S> BrandedIndexMap<'brand, K, V, S> {
     }
 
     /// Iterator over key-value pairs.
-    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> impl Iterator<Item = (&'a K, &'a V)> {
+    pub fn iter<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+    ) -> impl Iterator<Item = (&'a K, &'a V)> {
         self.keys.iter().zip(self.values.iter(token))
     }
 
     /// Iterator over key-value pairs (mutable).
-    pub fn iter_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>) -> impl Iterator<Item = (&'a K, &'a mut V)> {
-        self.keys.iter().zip(self.values.as_mut_slice(token).iter_mut())
+    pub fn iter_mut<'a>(
+        &'a self,
+        token: &'a mut GhostToken<'brand>,
+    ) -> impl Iterator<Item = (&'a K, &'a mut V)> {
+        self.keys
+            .iter()
+            .zip(self.values.as_mut_slice(token).iter_mut())
     }
 }
 
@@ -223,9 +239,9 @@ where
                     unsafe {
                         let dense_idx = *self.slots.get_unchecked(slot_idx);
                         if let Some(k) = self.keys.get(dense_idx) {
-                             if *k == *key {
-                                 return (slot_idx, true);
-                             }
+                            if *k == *key {
+                                return (slot_idx, true);
+                            }
                         }
                     }
 
@@ -244,11 +260,11 @@ where
             }
 
             if first_deleted.is_none() {
-                 let deleted_mask = match_byte(group_word, DELETED);
-                 if deleted_mask != 0 {
-                     let trailing = deleted_mask.trailing_zeros() / 8;
-                     first_deleted = Some((idx + trailing as usize) & mask);
-                 }
+                let deleted_mask = match_byte(group_word, DELETED);
+                if deleted_mask != 0 {
+                    let trailing = deleted_mask.trailing_zeros() / 8;
+                    first_deleted = Some((idx + trailing as usize) & mask);
+                }
             }
 
             idx = (idx + step) & mask;
@@ -256,10 +272,10 @@ where
             probes += 1;
 
             if probes > self.table_capacity {
-                 return match first_deleted {
-                     Some(d) => (d, false),
-                     None => (0, false),
-                 };
+                return match first_deleted {
+                    Some(d) => (d, false),
+                    None => (0, false),
+                };
             }
         }
     }
@@ -312,7 +328,9 @@ where
     /// Removes a key from the map, returning the value.
     /// Performs a swap_remove on the dense vectors to perform in O(1).
     pub fn swap_remove(&mut self, key: &K) -> Option<V> {
-        if self.table_capacity == 0 { return None; }
+        if self.table_capacity == 0 {
+            return None;
+        }
 
         let (h1, h2) = self.hash(key);
         let (slot_idx, found) = self.find_slot(key, h1, h2);
@@ -372,12 +390,12 @@ where
 
         self.table_capacity = new_cap;
         if new_cap > 0 {
-             let ctrl_len = new_cap + GROUP_WIDTH;
-             self.ctrl = vec![EMPTY; ctrl_len].into_boxed_slice();
-             self.slots = vec![0; new_cap].into_boxed_slice();
+            let ctrl_len = new_cap + GROUP_WIDTH;
+            self.ctrl = vec![EMPTY; ctrl_len].into_boxed_slice();
+            self.slots = vec![0; new_cap].into_boxed_slice();
         } else {
-             self.items_count = 0;
-             return;
+            self.items_count = 0;
+            return;
         }
 
         self.items_count = 0;
@@ -426,7 +444,9 @@ where
 
     /// Gets a shared reference to the value associated with the key.
     pub fn get<'a>(&'a self, token: &'a GhostToken<'brand>, key: &K) -> Option<&'a V> {
-        if self.table_capacity == 0 { return None; }
+        if self.table_capacity == 0 {
+            return None;
+        }
         let (h1, h2) = self.hash(key);
         let (slot_idx, found) = self.find_slot(key, h1, h2);
 
@@ -442,7 +462,9 @@ where
 
     /// Gets a mutable reference to the value associated with the key.
     pub fn get_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>, key: &K) -> Option<&'a mut V> {
-        if self.table_capacity == 0 { return None; }
+        if self.table_capacity == 0 {
+            return None;
+        }
         let (h1, h2) = self.hash(key);
         let (slot_idx, found) = self.find_slot(key, h1, h2);
 
@@ -455,7 +477,6 @@ where
             None
         }
     }
-
 }
 
 impl<'brand, K, V, S> BrandedCollection<'brand> for BrandedIndexMap<'brand, K, V, S> {
@@ -469,26 +490,36 @@ impl<'brand, K, V, S> BrandedCollection<'brand> for BrandedIndexMap<'brand, K, V
 }
 
 impl<'brand, K, V, S> ZeroCopyMapOps<'brand, K, V> for BrandedIndexMap<'brand, K, V, S>
-where K: Eq + Hash, S: BuildHasher
+where
+    K: Eq + Hash,
+    S: BuildHasher,
 {
     fn find_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<(&'a K, &'a V)>
-    where F: Fn(&K, &V) -> bool {
+    where
+        F: Fn(&K, &V) -> bool,
+    {
         self.iter(token).find(|(k, v)| f(k, v))
     }
 
     fn any_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
-    where F: Fn(&K, &V) -> bool {
+    where
+        F: Fn(&K, &V) -> bool,
+    {
         self.iter(token).any(|(k, v)| f(k, v))
     }
 
     fn all_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
-    where F: Fn(&K, &V) -> bool {
+    where
+        F: Fn(&K, &V) -> bool,
+    {
         self.iter(token).all(|(k, v)| f(k, v))
     }
 }
 
 impl<'brand, K, V, S> Default for BrandedIndexMap<'brand, K, V, S>
-where K: Eq + Hash, S: BuildHasher + Default
+where
+    K: Eq + Hash,
+    S: BuildHasher + Default,
 {
     fn default() -> Self {
         Self::with_capacity_and_hasher(0, S::default())

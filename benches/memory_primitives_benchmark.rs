@@ -1,5 +1,5 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BatchSize};
-use halo::alloc::{StaticRc, BrandedBox};
+use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
+use halo::alloc::{BrandedBox, StaticRc};
 use halo::GhostToken;
 use std::rc::Rc;
 use std::sync::Arc;

@@ -6,34 +6,34 @@
 //! - `btree`: B-Tree based collections (maps and sets)
 //! - `other`: Specialized collections (deques, arenas)
 
-pub mod vec;
-pub mod hash;
 pub mod btree;
-pub mod trie;
+pub mod hash;
 pub mod other;
-pub mod string;
 pub mod skip_list;
+pub mod string;
+pub mod trie;
+pub mod vec;
 
 // Re-export commonly used types from submodules
-pub use vec::{
-    BrandedVec, BrandedArray, BrandedVecDeque, BrandedChunkedVec, ChunkedVec, BrandedSmallVec,
-    ActiveVec, ActivateVec, BrandedSlice, BrandedSliceMut, BrandedMatrix, BrandedMatrixViewMut
-};
-pub use hash::{
-    BrandedHashMap, BrandedHashSet, BrandedIndexMap,
-    ActiveHashMap, ActivateHashMap, ActiveHashSet, ActivateHashSet
-};
 pub use btree::{BrandedBTreeMap, BrandedBTreeSet};
-pub use trie::{BrandedRadixTrieMap, BrandedRadixTrieSet};
+pub use hash::{
+    ActivateHashMap, ActivateHashSet, ActiveHashMap, ActiveHashSet, BrandedHashMap, BrandedHashSet,
+    BrandedIndexMap,
+};
 pub use other::{
     BrandedBinaryHeap, BrandedCowStrings, BrandedDeque, BrandedDoublyLinkedList,
-    BrandedLruCache, BrandedSlotMap, SlotKey, BrandedIntervalMap,
-    BrandedSegmentTree, BrandedSegmentTreeViewMut,
+    BrandedIntervalMap, BrandedLruCache, BrandedSegmentTree, BrandedSegmentTreeViewMut,
+    BrandedSlotMap, SlotKey, TripodList,
 };
-pub use skip_list::{BrandedSkipList, ActiveSkipList, ActivateSkipList};
+pub use skip_list::{ActivateSkipList, ActiveSkipList, BrandedSkipList};
+pub use trie::{BrandedRadixTrieMap, BrandedRadixTrieSet};
+pub use vec::{
+    ActivateVec, ActiveVec, BrandedArray, BrandedChunkedVec, BrandedMatrix, BrandedMatrixViewMut,
+    BrandedSlice, BrandedSliceMut, BrandedSmallVec, BrandedVec, BrandedVecDeque, ChunkedVec,
+};
 
 pub use crate::alloc::BrandedArena;
-pub use string::{BrandedString, ActiveString, ActivateString};
+pub use string::{ActivateString, ActiveString, BrandedString};
 
 // Re-export for trait definitions
 pub use crate::GhostToken;

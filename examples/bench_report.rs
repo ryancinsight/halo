@@ -37,15 +37,23 @@ fn main() {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--criterion-dir" => {
-                let p = args.next().unwrap_or_else(|| usage_exit("missing value for --criterion-dir"));
+                let p = args
+                    .next()
+                    .unwrap_or_else(|| usage_exit("missing value for --criterion-dir"));
                 criterion_dir = Some(PathBuf::from(p));
             }
             "--threshold" => {
-                let v = args.next().unwrap_or_else(|| usage_exit("missing value for --threshold"));
-                threshold = v.parse::<f64>().unwrap_or_else(|_| usage_exit("invalid float for --threshold"));
+                let v = args
+                    .next()
+                    .unwrap_or_else(|| usage_exit("missing value for --threshold"));
+                threshold = v
+                    .parse::<f64>()
+                    .unwrap_or_else(|_| usage_exit("invalid float for --threshold"));
             }
             "--stat" => {
-                let v = args.next().unwrap_or_else(|| usage_exit("missing value for --stat"));
+                let v = args
+                    .next()
+                    .unwrap_or_else(|| usage_exit("missing value for --stat"));
                 stat = match v.as_str() {
                     "mean" => Stat::Mean,
                     "median" => Stat::Median,
@@ -77,19 +85,51 @@ fn main() {
             "unsafe_cell_get_mut",
             "GhostUnsafeCell get_mut loop vs UnsafeCell get_mut loop",
         ),
-        ("ghostcell_copy_ops_wrapping", "refcell_copy_ops_wrapping", "GhostCell inc loop vs RefCell inc loop"),
-        ("ghost_lazy_lock_cached_get", "std_sync_lazy_lock_cached_get", "GhostLazyLock cached get vs std::sync::LazyLock cached get"),
-        ("ghost_lazy_lock_first_get", "std_sync_lazy_lock_first_get", "GhostLazyLock first get vs std::sync::LazyLock first get"),
-        ("ghost_once_cell_get", "std_once_cell_get", "GhostOnceCell get vs std::cell::OnceCell get"),
-        ("ghost_once_cell_set", "std_once_cell_set", "GhostOnceCell set vs std::cell::OnceCell set"),
-        ("ghost_atomic_u64_fetch_add", "std_atomic_u64_fetch_add", "GhostAtomicU64 fetch_add vs AtomicU64 fetch_add"),
-        ("ghost_chunked_vec_push_iter_sum", "std_vec_push_iter_sum", "ChunkedVec push+iter sum vs Vec push+iter sum"),
+        (
+            "ghostcell_copy_ops_wrapping",
+            "refcell_copy_ops_wrapping",
+            "GhostCell inc loop vs RefCell inc loop",
+        ),
+        (
+            "ghost_lazy_lock_cached_get",
+            "std_sync_lazy_lock_cached_get",
+            "GhostLazyLock cached get vs std::sync::LazyLock cached get",
+        ),
+        (
+            "ghost_lazy_lock_first_get",
+            "std_sync_lazy_lock_first_get",
+            "GhostLazyLock first get vs std::sync::LazyLock first get",
+        ),
+        (
+            "ghost_once_cell_get",
+            "std_once_cell_get",
+            "GhostOnceCell get vs std::cell::OnceCell get",
+        ),
+        (
+            "ghost_once_cell_set",
+            "std_once_cell_set",
+            "GhostOnceCell set vs std::cell::OnceCell set",
+        ),
+        (
+            "ghost_atomic_u64_fetch_add",
+            "std_atomic_u64_fetch_add",
+            "GhostAtomicU64 fetch_add vs AtomicU64 fetch_add",
+        ),
+        (
+            "ghost_chunked_vec_push_iter_sum",
+            "std_vec_push_iter_sum",
+            "ChunkedVec push+iter sum vs Vec push+iter sum",
+        ),
         (
             "ghost_csr_dfs_atomic_visited",
             "std_csr_dfs_atomicbool_visited",
             "Ghost CSR DFS (atomic visited) vs std CSR DFS (AtomicBool visited)",
         ),
-        ("ghost_scoped_read_fanout", "std_rwlock_read_fanout", "Scoped fan-out read: GhostToken vs RwLock"),
+        (
+            "ghost_scoped_read_fanout",
+            "std_rwlock_read_fanout",
+            "Scoped fan-out read: GhostToken vs RwLock",
+        ),
         (
             "ghost_scoped_many_cells_read",
             "std_rwlock_many_cells_read",
@@ -100,7 +140,11 @@ fn main() {
             "std_rwlock_many_cells_write",
             "Many-cells write: batched commit (GhostToken) vs per-cell RwLock write",
         ),
-        ("ghost_scoped_baton_write", "std_mutex_baton_write", "Scoped baton write: GhostToken vs Mutex"),
+        (
+            "ghost_scoped_baton_write",
+            "std_mutex_baton_write",
+            "Scoped baton write: GhostToken vs Mutex",
+        ),
         (
             "ghost_parallel_reachable_lockfree_worklist",
             "std_parallel_reachable_mutex_worklist",
@@ -121,9 +165,21 @@ fn main() {
             "ghost_parallel_reachable_lockfree_worklist_batched_hi",
             "High-contention reachability: Chase–Lev deque vs batched Treiber stack",
         ),
-        ("branded_vec_push_pop", "std_vec_push_pop", "BrandedVec vs std::vec::Vec (push/pop)"),
-        ("branded_vec_deque_push_pop", "std_vec_deque_push_pop", "BrandedVecDeque vs std::collections::VecDeque (push/pop)"),
-        ("branded_hash_map_insert_get", "std_hash_map_insert_get", "BrandedHashMap vs std::collections::HashMap (insert/get)"),
+        (
+            "branded_vec_push_pop",
+            "std_vec_push_pop",
+            "BrandedVec vs std::vec::Vec (push/pop)",
+        ),
+        (
+            "branded_vec_deque_push_pop",
+            "std_vec_deque_push_pop",
+            "BrandedVecDeque vs std::collections::VecDeque (push/pop)",
+        ),
+        (
+            "branded_hash_map_insert_get",
+            "std_hash_map_insert_get",
+            "BrandedHashMap vs std::collections::HashMap (insert/get)",
+        ),
     ];
 
     let mut missing = Vec::new();
@@ -137,16 +193,24 @@ fn main() {
     }
 
     if !missing.is_empty() {
-        eprintln!("error: missing benchmark estimates in `{}`:", criterion_dir.display());
+        eprintln!(
+            "error: missing benchmark estimates in `{}`:",
+            criterion_dir.display()
+        );
         for name in missing {
             eprintln!("  - {name}");
         }
-        eprintln!("\nTip: run `cargo bench` first. If you renamed benches, update `bench_report.rs`.");
+        eprintln!(
+            "\nTip: run `cargo bench` first. If you renamed benches, update `bench_report.rs`."
+        );
         process::exit(2);
     }
 
     println!("Criterion dir: {}", criterion_dir.display());
-    println!("Threshold:     {:.4} (Ghost/std must be <= threshold)\n", threshold);
+    println!(
+        "Threshold:     {:.4} (Ghost/std must be <= threshold)\n",
+        threshold
+    );
 
     let stat_name = match stat {
         Stat::Mean => "mean",
@@ -155,7 +219,10 @@ fn main() {
 
     println!("Stat:          {stat_name}\n");
 
-    println!("{:<58} {:>12} {:>12} {:>10}", "comparison", "ghost(ns)", "std(ns)", "ratio");
+    println!(
+        "{:<58} {:>12} {:>12} {:>10}",
+        "comparison", "ghost(ns)", "std(ns)", "ratio"
+    );
     println!("{:-<96}", "");
 
     let mut failed = false;
@@ -180,11 +247,17 @@ fn main() {
     }
 
     if failed {
-        eprintln!("\nFAIL: at least one Ghost/std ratio exceeded threshold {:.4}.", threshold);
+        eprintln!(
+            "\nFAIL: at least one Ghost/std ratio exceeded threshold {:.4}.",
+            threshold
+        );
         process::exit(1);
     }
 
-    println!("\nOK: all Ghost/std ratios are within threshold {:.4}.", threshold);
+    println!(
+        "\nOK: all Ghost/std ratios are within threshold {:.4}.",
+        threshold
+    );
 }
 
 fn usage() {
@@ -206,7 +279,10 @@ fn usage_exit(msg: &str) -> ! {
 fn read_all_estimates(root: &Path) -> Result<BTreeMap<String, Estimate>, String> {
     let mut out = BTreeMap::new();
     if !root.exists() {
-        return Err(format!("criterion directory does not exist: {}", root.display()));
+        return Err(format!(
+            "criterion directory does not exist: {}",
+            root.display()
+        ));
     }
 
     let mut stack = vec![root.to_path_buf()];
@@ -241,8 +317,10 @@ fn read_all_estimates(root: &Path) -> Result<BTreeMap<String, Estimate>, String>
                 .to_string_lossy()
                 .replace('\\', "/");
 
-            let json = fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
-            let est = parse_estimates_json(&json).ok_or_else(|| format!("failed to parse {}", path.display()))?;
+            let json =
+                fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+            let est = parse_estimates_json(&json)
+                .ok_or_else(|| format!("failed to parse {}", path.display()))?;
             out.insert(bench_name, est);
         }
     }
@@ -289,5 +367,3 @@ fn parse_f64(s: &str) -> Option<(f64, usize)> {
     let v = s[start..i].parse::<f64>().ok()?;
     Some((v, i))
 }
-
-

@@ -4,9 +4,9 @@
 //! in a single scope. By holding the token exclusively, it can expose a standard `HashMap`-like
 //! API without requiring the token as an argument for every call.
 
-use crate::GhostToken;
 use super::{BrandedHashMap, BrandedHashSet};
-use std::hash::{Hash, BuildHasher};
+use crate::GhostToken;
+use std::hash::{BuildHasher, Hash};
 
 /// A wrapper around a mutable reference to a `BrandedHashMap` and a mutable reference to a `GhostToken`.
 pub struct ActiveHashMap<'a, 'brand, K, V, S> {
@@ -20,7 +20,10 @@ where
     S: BuildHasher,
 {
     /// Creates a new active map handle.
-    pub fn new(map: &'a mut BrandedHashMap<'brand, K, V, S>, token: &'a mut GhostToken<'brand>) -> Self {
+    pub fn new(
+        map: &'a mut BrandedHashMap<'brand, K, V, S>,
+        token: &'a mut GhostToken<'brand>,
+    ) -> Self {
         Self { map, token }
     }
 
@@ -101,7 +104,10 @@ where
 /// Extension trait to easily create ActiveHashMap from BrandedHashMap.
 pub trait ActivateHashMap<'brand, K, V, S> {
     /// Activates the map with the given token, returning a handle that bundles them.
-    fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveHashMap<'a, 'brand, K, V, S>;
+    fn activate<'a>(
+        &'a mut self,
+        token: &'a mut GhostToken<'brand>,
+    ) -> ActiveHashMap<'a, 'brand, K, V, S>;
 }
 
 impl<'brand, K, V, S> ActivateHashMap<'brand, K, V, S> for BrandedHashMap<'brand, K, V, S>
@@ -109,7 +115,10 @@ where
     K: Eq + Hash,
     S: BuildHasher,
 {
-    fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveHashMap<'a, 'brand, K, V, S> {
+    fn activate<'a>(
+        &'a mut self,
+        token: &'a mut GhostToken<'brand>,
+    ) -> ActiveHashMap<'a, 'brand, K, V, S> {
         ActiveHashMap::new(self, token)
     }
 }
@@ -126,7 +135,10 @@ where
     S: BuildHasher,
 {
     /// Creates a new active set handle.
-    pub fn new(set: &'a mut BrandedHashSet<'brand, K, S>, token: &'a mut GhostToken<'brand>) -> Self {
+    pub fn new(
+        set: &'a mut BrandedHashSet<'brand, K, S>,
+        token: &'a mut GhostToken<'brand>,
+    ) -> Self {
         Self { set, token }
     }
 
@@ -169,7 +181,10 @@ where
 /// Extension trait to easily create ActiveHashSet from BrandedHashSet.
 pub trait ActivateHashSet<'brand, K, S> {
     /// Activates the set with the given token, returning a handle that bundles them.
-    fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveHashSet<'a, 'brand, K, S>;
+    fn activate<'a>(
+        &'a mut self,
+        token: &'a mut GhostToken<'brand>,
+    ) -> ActiveHashSet<'a, 'brand, K, S>;
 }
 
 impl<'brand, K, S> ActivateHashSet<'brand, K, S> for BrandedHashSet<'brand, K, S>
@@ -177,7 +192,10 @@ where
     K: Eq + Hash,
     S: BuildHasher,
 {
-    fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveHashSet<'a, 'brand, K, S> {
+    fn activate<'a>(
+        &'a mut self,
+        token: &'a mut GhostToken<'brand>,
+    ) -> ActiveHashSet<'a, 'brand, K, S> {
         ActiveHashSet::new(self, token)
     }
 }

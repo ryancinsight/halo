@@ -7,34 +7,34 @@ fn bench_graph_sparse_remove(c: &mut Criterion) {
 
     c.bench_function("pool_graph_sparse_remove", |b| {
         b.iter(|| {
-             GhostToken::new(|mut token| {
+            GhostToken::new(|mut token| {
                 let graph = BrandedPoolGraph::<usize, ()>::with_capacity(size);
                 let mut nodes = Vec::with_capacity(size);
                 for i in 0..size {
                     nodes.push(graph.add_node(&mut token, i));
                 }
                 // Chain: 0->1->...->N
-                for i in 0..size-1 {
-                    graph.add_edge(&mut token, nodes[i], nodes[i+1], ());
+                for i in 0..size - 1 {
+                    graph.add_edge(&mut token, nodes[i], nodes[i + 1], ());
                 }
 
                 // Remove middle node
-                black_box(graph.remove_node(&mut token, nodes[size/2]));
+                black_box(graph.remove_node(&mut token, nodes[size / 2]));
             })
         });
     });
 
     c.bench_function("adj_graph_sparse_remove", |b| {
         b.iter(|| {
-             GhostToken::new(|mut token| {
+            GhostToken::new(|mut token| {
                 let mut graph = GhostAdjacencyGraph::new(size);
                 // Chain
-                for i in 0..size-1 {
-                    graph.add_edge(&mut token, i, i+1);
+                for i in 0..size - 1 {
+                    graph.add_edge(&mut token, i, i + 1);
                 }
 
                 // Remove middle node
-                black_box(graph.remove_vertex(&mut token, size/2));
+                black_box(graph.remove_vertex(&mut token, size / 2));
             })
         });
     });
@@ -45,7 +45,7 @@ fn bench_graph_bfs(c: &mut Criterion) {
 
     c.bench_function("pool_graph_bfs", |b| {
         b.iter(|| {
-             GhostToken::new(|mut token| {
+            GhostToken::new(|mut token| {
                 let graph = BrandedPoolGraph::<usize, ()>::with_capacity(size);
                 let mut nodes = Vec::with_capacity(size);
                 for i in 0..size {
@@ -53,7 +53,7 @@ fn bench_graph_bfs(c: &mut Criterion) {
                 }
                 // Tree-like structure
                 for i in 1..size {
-                    graph.add_edge(&mut token, nodes[i/2], nodes[i], ());
+                    graph.add_edge(&mut token, nodes[i / 2], nodes[i], ());
                 }
 
                 // BFS manually
@@ -78,10 +78,10 @@ fn bench_graph_bfs(c: &mut Criterion) {
 
     c.bench_function("adj_graph_bfs", |b| {
         b.iter(|| {
-             GhostToken::new(|mut token| {
+            GhostToken::new(|mut token| {
                 let mut graph = GhostAdjacencyGraph::new(size);
                 for i in 1..size {
-                    graph.add_edge(&mut token, i/2, i);
+                    graph.add_edge(&mut token, i / 2, i);
                 }
 
                 let mut q = std::collections::VecDeque::new();

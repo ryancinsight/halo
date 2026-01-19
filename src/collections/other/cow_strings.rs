@@ -50,8 +50,8 @@
 //! });
 //! ```
 
-use crate::{GhostToken, GhostCell};
 use crate::collections::BrandedVec;
+use crate::{GhostCell, GhostToken};
 use std::borrow::Cow;
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hash, Hasher};
@@ -88,7 +88,11 @@ impl<'brand> BrandedCowStrings<'brand> {
 
     /// Creates a new collection with the specified capacity.
     pub fn with_capacity(capacity: usize) -> Self {
-        let cap = if capacity < 4 { 4 } else { capacity.next_power_of_two() };
+        let cap = if capacity < 4 {
+            4
+        } else {
+            capacity.next_power_of_two()
+        };
         Self {
             strings: BrandedVec::with_capacity(capacity),
             buckets: vec![None; cap],
@@ -190,13 +194,21 @@ impl<'brand> BrandedCowStrings<'brand> {
 
     /// Gets a reference to a string by index with zero-copy access.
     #[inline(always)]
-    pub fn get<'a>(&'a self, token: &'a GhostToken<'brand>, idx: usize) -> Option<&'a Cow<'brand, str>> {
+    pub fn get<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+        idx: usize,
+    ) -> Option<&'a Cow<'brand, str>> {
         self.strings.get(token, idx)
     }
 
     /// Gets a reference to a string by value with zero-copy lookup.
     #[inline(always)]
-    pub fn get_by_value<'a>(&'a self, token: &'a GhostToken<'brand>, value: &str) -> Option<&'a Cow<'brand, str>> {
+    pub fn get_by_value<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+        value: &str,
+    ) -> Option<&'a Cow<'brand, str>> {
         let hash = self.hash_str(value);
         match self.find_slot(token, value, hash) {
             Ok(idx) => self.get(token, idx),
@@ -217,7 +229,10 @@ impl<'brand> BrandedCowStrings<'brand> {
     }
 
     /// Zero-copy iterator over all strings.
-    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> impl Iterator<Item = &'a Cow<'brand, str>> {
+    pub fn iter<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+    ) -> impl Iterator<Item = &'a Cow<'brand, str>> {
         self.strings.iter(token)
     }
 
@@ -284,9 +299,7 @@ mod tests {
             assert_eq!(idx1, idx1_dup); // Same index for duplicate
 
             // Iterator works
-            let collected: Vec<&str> = strings.iter(&token)
-                .map(|cow| cow.as_ref())
-                .collect();
+            let collected: Vec<&str> = strings.iter(&token).map(|cow| cow.as_ref()).collect();
             assert_eq!(collected.len(), 3);
         });
     }
@@ -324,7 +337,8 @@ mod tests {
             assert_eq!(idx1, idx2); // Same index
 
             // Test filter operations
-            let filtered: Vec<_> = strings.filter_ref(&token, |cow| cow.len() > 4)
+            let filtered: Vec<_> = strings
+                .filter_ref(&token, |cow| cow.len() > 4)
                 .map(|cow| cow.as_ref())
                 .collect();
             assert_eq!(filtered, vec!["static", "owned", "another_static"]);
@@ -355,7 +369,10 @@ mod tests {
             // Very long strings
             let long_string = "a".repeat(10000);
             let idx = strings.insert_owned(&token, long_string.clone());
-            assert_eq!(strings.get(&token, idx).unwrap().as_ref(), long_string.as_str());
+            assert_eq!(
+                strings.get(&token, idx).unwrap().as_ref(),
+                long_string.as_str()
+            );
         });
     }
 

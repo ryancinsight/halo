@@ -22,5 +22,3 @@ fn ghost_csr_graph_dfs_visits_expected_set() {
         assert_eq!(g.dfs_count(0), 4);
     });
 }
-
-

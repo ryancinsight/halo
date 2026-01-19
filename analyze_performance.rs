@@ -2,10 +2,10 @@
 //!
 //! Run this after benchmarks to generate detailed performance reports.
 
+use serde_json;
 use std::collections::HashMap;
 use std::fs;
 use std::process;
-use serde_json;
 
 #[derive(serde::Deserialize, Debug)]
 struct BenchmarkResult {
@@ -44,12 +44,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Group results by operation
     let mut by_operation: HashMap<String, Vec<&BenchmarkResult>> = HashMap::new();
     for result in &benchmark_results.results {
-        by_operation.entry(result.operation.clone()).or_insert(Vec::new()).push(result);
+        by_operation
+            .entry(result.operation.clone())
+            .or_insert(Vec::new())
+            .push(result);
     }
 
     // Analyze each operation
     for (operation, results) in by_operation {
-        println!("📊 OPERATION: {} ({})", operation.to_uppercase(), results.len());
+        println!(
+            "📊 OPERATION: {} ({})",
+            operation.to_uppercase(),
+            results.len()
+        );
 
         // Sort by performance (fastest first)
         let mut sorted_results = results.clone();
@@ -63,7 +70,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 _ => "📊",
             };
 
-            print!("  {} {}: {:.2} ± {:.2} ns", rank_emoji, result.collection, result.time_ns, result.std_dev_ns);
+            print!(
+                "  {} {}: {:.2} ± {:.2} ns",
+                rank_emoji, result.collection, result.time_ns, result.std_dev_ns
+            );
 
             // Show performance ratios
             let mut improvements = Vec::new();
@@ -101,7 +111,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let slowest = sorted_results.last().unwrap().time_ns;
         let improvement_range = slowest / fastest;
 
-        println!("  📈 Performance range: {:.1}x (fastest vs slowest)", improvement_range);
+        println!(
+            "  📈 Performance range: {:.1}x (fastest vs slowest)",
+            improvement_range
+        );
         println!();
     }
 
@@ -129,7 +142,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if !total_improvements.is_empty() {
-        let avg_improvement: f64 = total_improvements.iter().sum::<f64>() / total_improvements.len() as f64;
+        let avg_improvement: f64 =
+            total_improvements.iter().sum::<f64>() / total_improvements.len() as f64;
         let max_improvement = total_improvements.iter().cloned().fold(0.0, f64::max);
 
         println!("• Average performance improvement: {:.1}x", avg_improvement);

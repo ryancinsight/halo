@@ -123,5 +123,11 @@ fn bench_get_index(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_insert, bench_lookup, bench_iter, bench_get_index);
+criterion_group!(
+    benches,
+    bench_insert,
+    bench_lookup,
+    bench_iter,
+    bench_get_index
+);
 criterion_main!(benches);

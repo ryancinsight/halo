@@ -4,14 +4,7 @@
 //! unsafe code in a small number of modules. Cell implementations are organized
 //! by their core functionality in the `cells` submodule.
 
-pub mod cells;
 pub(crate) mod access;
+pub mod cells;
 
-pub use cells::{GhostUnsafeCell, GhostCell, GhostRefCell};
-
-
-
-
-
-
-
+pub use cells::{GhostCell, GhostRefCell, GhostUnsafeCell};

@@ -1,4 +1,4 @@
-use halo::{GhostToken, SharedGhostToken, BrandedHashMap};
+use halo::{BrandedHashMap, GhostToken, SharedGhostToken};
 use std::sync::Arc;
 use std::thread;
 

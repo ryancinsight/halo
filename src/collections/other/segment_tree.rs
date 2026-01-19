@@ -5,8 +5,8 @@
 //! It features hierarchical "sub-token" views (`BrandedSegmentTreeViewMut`) that allow
 //! safe splitting of the tree into disjoint mutable regions for parallel processing.
 
+use crate::collections::{BrandedCollection, BrandedVec};
 use crate::{GhostCell, GhostToken};
-use crate::collections::{BrandedVec, BrandedCollection};
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 
@@ -66,13 +66,20 @@ where
         assert!(data.len() <= self.n);
         // Reset
         for i in 0..self.tree.len() {
-             *self.tree.borrow_mut(token, i) = self.default_value.clone();
+            *self.tree.borrow_mut(token, i) = self.default_value.clone();
         }
 
         self.build_recursive(token, data, 0, 0, self.n);
     }
 
-    fn build_recursive(&mut self, token: &mut GhostToken<'brand>, data: &[T], node: usize, start: usize, end: usize) {
+    fn build_recursive(
+        &mut self,
+        token: &mut GhostToken<'brand>,
+        data: &[T],
+        node: usize,
+        start: usize,
+        end: usize,
+    ) {
         if start >= end {
             return;
         }
@@ -101,7 +108,15 @@ where
         self.update_recursive(token, 0, 0, self.n, index, value);
     }
 
-    fn update_recursive(&mut self, token: &mut GhostToken<'brand>, node: usize, start: usize, end: usize, idx: usize, val: T) {
+    fn update_recursive(
+        &mut self,
+        token: &mut GhostToken<'brand>,
+        node: usize,
+        start: usize,
+        end: usize,
+        idx: usize,
+        val: T,
+    ) {
         if start == end - 1 {
             *self.tree.borrow_mut(token, node) = val;
             return;
@@ -131,7 +146,15 @@ where
         self.query_recursive(token, 0, 0, self.n, q_start, q_end)
     }
 
-    fn query_recursive(&self, token: &GhostToken<'brand>, node: usize, start: usize, end: usize, q_start: usize, q_end: usize) -> T {
+    fn query_recursive(
+        &self,
+        token: &GhostToken<'brand>,
+        node: usize,
+        start: usize,
+        end: usize,
+        q_start: usize,
+        q_end: usize,
+    ) -> T {
         if q_start <= start && end <= q_end {
             return self.tree.borrow(token, node).clone();
         }
@@ -156,7 +179,13 @@ where
         self.repair_recursive(token, 0, 0, self.n);
     }
 
-    fn repair_recursive(&mut self, token: &mut GhostToken<'brand>, node: usize, start: usize, end: usize) {
+    fn repair_recursive(
+        &mut self,
+        token: &mut GhostToken<'brand>,
+        node: usize,
+        start: usize,
+        end: usize,
+    ) {
         if start >= end || start == end - 1 {
             return;
         }
@@ -242,7 +271,13 @@ where
         if index < self.range_start || index >= self.range_end {
             return false;
         }
-        self.update_recursive(self.node_idx, self.range_start, self.range_end, index, value);
+        self.update_recursive(
+            self.node_idx,
+            self.range_start,
+            self.range_end,
+            index,
+            value,
+        );
         true
     }
 
@@ -312,11 +347,7 @@ mod tests {
     fn test_segment_tree_sum() {
         GhostToken::new(|mut token| {
             // Range Sum Query
-            let mut st = BrandedSegmentTree::new(
-                8,
-                |a, b| a + b,
-                0
-            );
+            let mut st = BrandedSegmentTree::new(8, |a, b| a + b, 0);
 
             let data = vec![1, 2, 3, 4, 5, 6, 7, 8];
             st.build(&mut token, &data);
@@ -334,11 +365,7 @@ mod tests {
     fn test_segment_tree_min() {
         GhostToken::new(|mut token| {
             // Range Minimum Query
-            let mut st = BrandedSegmentTree::new(
-                4,
-                |a, b| std::cmp::min(*a, *b),
-                i32::MAX
-            );
+            let mut st = BrandedSegmentTree::new(4, |a, b| std::cmp::min(*a, *b), i32::MAX);
 
             st.update(&mut token, 0, 10);
             st.update(&mut token, 1, 5);
@@ -354,11 +381,7 @@ mod tests {
     #[test]
     fn test_view_mut_split() {
         GhostToken::new(|mut token| {
-            let mut st = BrandedSegmentTree::new(
-                4,
-                |a, b| a + b,
-                0
-            );
+            let mut st = BrandedSegmentTree::new(4, |a, b| a + b, 0);
 
             // Build initial
             st.update(&mut token, 0, 1);

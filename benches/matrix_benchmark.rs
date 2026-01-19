@@ -1,5 +1,5 @@
-use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId, black_box};
-use halo::{GhostToken, BrandedMatrix};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use halo::{BrandedMatrix, GhostToken};
 
 fn matrix_access_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("Matrix Access");
@@ -110,7 +110,7 @@ fn matrix_split_benchmark(c: &mut Criterion) {
             let mut mat = BrandedMatrix::<i32>::new(rows, cols);
             b.iter(|| {
                 let view = mat.view_mut();
-                let (tl, tr, bl, br) = view.split_quadrants(rows/2, cols/2);
+                let (tl, tr, bl, br) = view.split_quadrants(rows / 2, cols / 2);
 
                 // Simulate partial work on quadrants
                 black_box(tl.rows());
@@ -128,7 +128,7 @@ fn matrix_split_benchmark(c: &mut Criterion) {
             vec.push(vec![0; cols]);
         }
         b.iter(|| {
-            let (top, bottom) = vec.split_at_mut(rows/2);
+            let (top, bottom) = vec.split_at_mut(rows / 2);
             // We can't split columns easily in Vec<Vec> without iterating rows!
             // This demonstrates the advantage of BrandedMatrix view.
             black_box(top.len());
@@ -156,7 +156,7 @@ fn matrix_fill_benchmark(c: &mut Criterion) {
         });
     });
 
-     // 2. BrandedMatrix manual loop
+    // 2. BrandedMatrix manual loop
     group.bench_function("BrandedMatrix::for_each_mut", |b| {
         GhostToken::new(|mut token| {
             let mut mat = BrandedMatrix::<i32>::new(rows, cols);
@@ -175,11 +175,11 @@ fn matrix_fill_benchmark(c: &mut Criterion) {
             vec.push(vec![0; cols]);
         }
         b.iter(|| {
-             for row in &mut vec {
-                 for val in row {
-                     *val = 42;
-                 }
-             }
+            for row in &mut vec {
+                for val in row {
+                    *val = 42;
+                }
+            }
             black_box(());
         });
     });
@@ -196,5 +196,11 @@ fn matrix_fill_benchmark(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, matrix_access_benchmark, matrix_iteration_benchmark, matrix_split_benchmark, matrix_fill_benchmark);
+criterion_group!(
+    benches,
+    matrix_access_benchmark,
+    matrix_iteration_benchmark,
+    matrix_split_benchmark,
+    matrix_fill_benchmark
+);
 criterion_main!(benches);

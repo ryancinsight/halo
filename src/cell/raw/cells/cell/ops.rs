@@ -1,12 +1,15 @@
 use core::mem::MaybeUninit;
 
-use crate::{GhostToken, GhostUnsafeCell};
 use crate::cell::raw::access::ghost_unsafe_cell as guc;
 use crate::cell::raw::access::maybe_uninit as mu;
+use crate::{GhostToken, GhostUnsafeCell};
 
 /// Reads an initialized `T: Copy` out of a branded slot.
 #[inline(always)]
-pub(super) fn get_copy<'brand, T: Copy>(cell: &GhostUnsafeCell<'brand, MaybeUninit<T>>, token: &GhostToken<'brand>) -> T {
+pub(super) fn get_copy<'brand, T: Copy>(
+    cell: &GhostUnsafeCell<'brand, MaybeUninit<T>>,
+    token: &GhostToken<'brand>,
+) -> T {
     // SAFETY: initialized in constructors; mutation requires exclusive token elsewhere.
     unsafe { *mu::assume_init_ref(cell.get(token)) }
 }
@@ -60,5 +63,3 @@ pub(super) unsafe fn drop_unchecked<'brand, T>(cell: &GhostUnsafeCell<'brand, Ma
     let slot = unsafe { guc::as_mut_ptr_unchecked(cell) };
     unsafe { mu::drop_in_place_ptr(slot) }
 }
-
-

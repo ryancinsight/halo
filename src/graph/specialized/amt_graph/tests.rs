@@ -46,6 +46,3 @@ fn amt_graph_representation_upgrade() {
     assert_eq!(graph.degree(node), 49);
     assert!(graph.has_edge(node, 25));
 }
-
-
-

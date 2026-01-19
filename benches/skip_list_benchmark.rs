@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use halo::collections::{BrandedSkipList, BrandedBTreeMap, ActivateSkipList};
+use halo::collections::{ActivateSkipList, BrandedBTreeMap, BrandedSkipList};
 use halo::GhostToken;
 use std::collections::BTreeMap;
 
@@ -57,9 +57,9 @@ fn bench_skip_list(c: &mut Criterion) {
             map.insert(i, i);
         }
         b.iter(|| {
-             for i in 0..1000 {
-                 black_box(map.get(&i));
-             }
+            for i in 0..1000 {
+                black_box(map.get(&i));
+            }
         });
     });
 

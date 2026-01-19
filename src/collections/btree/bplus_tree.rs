@@ -1,7 +1,7 @@
 //! `BrandedBPlusTree` — a B+Tree implementation using `BrandedPool` for node storage.
 
-use crate::{GhostCell, GhostToken};
 use crate::alloc::pool::{BrandedPool, PoolSlot};
+use crate::{GhostCell, GhostToken};
 use core::mem::MaybeUninit;
 use core::ptr;
 use std::borrow::Borrow;
@@ -27,7 +27,9 @@ pub enum Node<'brand, K, V> {
 impl<'brand, K, V> Node<'brand, K, V> {
     pub fn new_leaf() -> Self {
         let keys = unsafe { MaybeUninit::<[MaybeUninit<K>; MAX_KEYS]>::uninit().assume_init() };
-        let vals = unsafe { MaybeUninit::<[MaybeUninit<GhostCell<'brand, V>>; MAX_KEYS]>::uninit().assume_init() };
+        let vals = unsafe {
+            MaybeUninit::<[MaybeUninit<GhostCell<'brand, V>>; MAX_KEYS]>::uninit().assume_init()
+        };
 
         Self::Leaf {
             len: 0,
@@ -67,12 +69,23 @@ impl<'brand, K, V> Node<'brand, K, V> {
     }
 
     pub fn leaf_insert(&mut self, idx: usize, key: K, val: GhostCell<'brand, V>) {
-        if let Node::Leaf { len, keys, vals, .. } = self {
+        if let Node::Leaf {
+            len, keys, vals, ..
+        } = self
+        {
             assert!((*len as usize) < MAX_KEYS);
             let l = *len as usize;
             unsafe {
-                ptr::copy(keys.as_ptr().add(idx), keys.as_mut_ptr().add(idx + 1), l - idx);
-                ptr::copy(vals.as_ptr().add(idx), vals.as_mut_ptr().add(idx + 1), l - idx);
+                ptr::copy(
+                    keys.as_ptr().add(idx),
+                    keys.as_mut_ptr().add(idx + 1),
+                    l - idx,
+                );
+                ptr::copy(
+                    vals.as_ptr().add(idx),
+                    vals.as_mut_ptr().add(idx + 1),
+                    l - idx,
+                );
                 keys.get_unchecked_mut(idx).write(key);
                 vals.get_unchecked_mut(idx).write(val);
             }
@@ -83,12 +96,26 @@ impl<'brand, K, V> Node<'brand, K, V> {
     }
 
     pub fn internal_insert(&mut self, idx: usize, key: K, child: usize) {
-        if let Node::Internal { len, keys, children, .. } = self {
+        if let Node::Internal {
+            len,
+            keys,
+            children,
+            ..
+        } = self
+        {
             assert!((*len as usize) < MAX_KEYS);
             let l = *len as usize;
             unsafe {
-                ptr::copy(keys.as_ptr().add(idx), keys.as_mut_ptr().add(idx + 1), l - idx);
-                ptr::copy(children.as_ptr().add(idx + 1), children.as_mut_ptr().add(idx + 2), l - idx);
+                ptr::copy(
+                    keys.as_ptr().add(idx),
+                    keys.as_mut_ptr().add(idx + 1),
+                    l - idx,
+                );
+                ptr::copy(
+                    children.as_ptr().add(idx + 1),
+                    children.as_mut_ptr().add(idx + 2),
+                    l - idx,
+                );
                 keys.get_unchecked_mut(idx).write(key);
                 children[idx + 1] = child;
             }
@@ -107,7 +134,7 @@ impl<'brand, K, V> Node<'brand, K, V> {
     }
 
     pub fn child_at(&self, idx: usize) -> usize {
-         if let Node::Internal { children, .. } = self {
+        if let Node::Internal { children, .. } = self {
             children[idx]
         } else {
             panic!("Not internal")
@@ -146,30 +173,44 @@ impl<'brand, K, V> BrandedBPlusTree<'brand, K, V> {
     }
 
     #[inline]
-    fn get_node<'a>(&'a self, token: &'a GhostToken<'brand>, index: usize) -> &'a Node<'brand, K, V> {
+    fn get_node<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+        index: usize,
+    ) -> &'a Node<'brand, K, V> {
         self.pool.get(token, index).expect("Node should exist")
     }
 
     #[inline]
-    fn get_node_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>, index: usize) -> &'a mut Node<'brand, K, V> {
+    fn get_node_mut<'a>(
+        &'a self,
+        token: &'a mut GhostToken<'brand>,
+        index: usize,
+    ) -> &'a mut Node<'brand, K, V> {
         self.pool.get_mut(token, index).expect("Node should exist")
     }
 
     pub fn get<'a>(&'a self, token: &'a GhostToken<'brand>, key: &K) -> Option<&'a V>
-    where K: Ord {
+    where
+        K: Ord,
+    {
         if let Some(root_idx) = self.root {
             let mut node_idx = root_idx;
             loop {
                 let node = self.get_node(token, node_idx);
                 match node {
-                    Node::Leaf { len, keys, vals, .. } => {
+                    Node::Leaf {
+                        len, keys, vals, ..
+                    } => {
                         let l = *len as usize;
                         let mut idx = 0;
                         while idx < l {
                             let k = unsafe { keys.get_unchecked(idx).assume_init_ref() };
                             match key.cmp(k) {
                                 std::cmp::Ordering::Equal => {
-                                    return Some(unsafe { vals.get_unchecked(idx).assume_init_ref().borrow(token) });
+                                    return Some(unsafe {
+                                        vals.get_unchecked(idx).assume_init_ref().borrow(token)
+                                    });
                                 }
                                 std::cmp::Ordering::Greater => idx += 1,
                                 std::cmp::Ordering::Less => return None,
@@ -177,15 +218,19 @@ impl<'brand, K, V> BrandedBPlusTree<'brand, K, V> {
                         }
                         return None;
                     }
-                    Node::Internal { len, keys, children } => {
+                    Node::Internal {
+                        len,
+                        keys,
+                        children,
+                    } => {
                         let l = *len as usize;
                         let mut idx = 0;
                         while idx < l {
-                             let k = unsafe { keys.get_unchecked(idx).assume_init_ref() };
-                             if key < k {
-                                 break;
-                             }
-                             idx += 1;
+                            let k = unsafe { keys.get_unchecked(idx).assume_init_ref() };
+                            if key < k {
+                                break;
+                            }
+                            idx += 1;
                         }
                         node_idx = children[idx];
                     }
@@ -197,15 +242,20 @@ impl<'brand, K, V> BrandedBPlusTree<'brand, K, V> {
     }
 
     pub fn get_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>, key: &K) -> Option<&'a mut V>
-    where K: Ord {
+    where
+        K: Ord,
+    {
         if let Some(root_idx) = self.root {
             let mut node_idx = root_idx;
             loop {
                 let is_leaf = self.get_node(token, node_idx).is_leaf();
 
                 if is_leaf {
-                     let node = self.get_node_mut(token, node_idx);
-                     if let Node::Leaf { len, keys, vals, .. } = node {
+                    let node = self.get_node_mut(token, node_idx);
+                    if let Node::Leaf {
+                        len, keys, vals, ..
+                    } = node
+                    {
                         let l = *len as usize;
                         let mut idx = 0;
                         while idx < l {
@@ -215,28 +265,39 @@ impl<'brand, K, V> BrandedBPlusTree<'brand, K, V> {
                                     // We have exclusive access to the node (via get_node_mut which used the token),
                                     // so we have exclusive access to the GhostCell.
                                     // We can skip the token for inner access.
-                                    return Some(unsafe { vals.get_unchecked_mut(idx).assume_init_mut().get_mut() });
+                                    return Some(unsafe {
+                                        vals.get_unchecked_mut(idx).assume_init_mut().get_mut()
+                                    });
                                 }
                                 std::cmp::Ordering::Greater => idx += 1,
                                 std::cmp::Ordering::Less => return None,
                             }
                         }
                         return None;
-                     } else { unreachable!() }
+                    } else {
+                        unreachable!()
+                    }
                 } else {
-                     let node = self.get_node(token, node_idx);
-                     if let Node::Internal { len, keys, children } = node {
+                    let node = self.get_node(token, node_idx);
+                    if let Node::Internal {
+                        len,
+                        keys,
+                        children,
+                    } = node
+                    {
                         let l = *len as usize;
                         let mut idx = 0;
                         while idx < l {
-                             let k = unsafe { keys.get_unchecked(idx).assume_init_ref() };
-                             if key < k {
-                                 break;
-                             }
-                             idx += 1;
+                            let k = unsafe { keys.get_unchecked(idx).assume_init_ref() };
+                            if key < k {
+                                break;
+                            }
+                            idx += 1;
                         }
                         node_idx = children[idx];
-                     } else { unreachable!() }
+                    } else {
+                        unreachable!()
+                    }
                 }
             }
         } else {
@@ -247,18 +308,18 @@ impl<'brand, K, V> BrandedBPlusTree<'brand, K, V> {
     pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> Iter<'a, 'brand, K, V> {
         let mut leaf_idx = None;
         if let Some(mut idx) = self.root {
-             loop {
-                 let node = self.get_node(token, idx);
-                 match node {
-                     Node::Leaf { .. } => {
-                         leaf_idx = Some(idx);
-                         break;
-                     }
-                     Node::Internal { children, .. } => {
-                         idx = children[0];
-                     }
-                 }
-             }
+            loop {
+                let node = self.get_node(token, idx);
+                match node {
+                    Node::Leaf { .. } => {
+                        leaf_idx = Some(idx);
+                        break;
+                    }
+                    Node::Internal { children, .. } => {
+                        idx = children[0];
+                    }
+                }
+            }
         }
 
         Iter {
@@ -303,10 +364,17 @@ impl<'brand, K, V> BrandedBPlusTree<'brand, K, V> {
         res
     }
 
-    fn split_child(&self, token: &mut GhostToken<'brand>, parent_idx: usize, child_index_in_parent: usize)
-    where K: Clone
+    fn split_child(
+        &self,
+        token: &mut GhostToken<'brand>,
+        parent_idx: usize,
+        child_index_in_parent: usize,
+    ) where
+        K: Clone,
     {
-        let child_idx = self.get_node(token, parent_idx).child_at(child_index_in_parent);
+        let child_idx = self
+            .get_node(token, parent_idx)
+            .child_at(child_index_in_parent);
 
         let sibling_idx = if self.get_node(token, child_idx).is_leaf() {
             self.pool.alloc(token, Node::new_leaf())
@@ -318,11 +386,25 @@ impl<'brand, K, V> BrandedBPlusTree<'brand, K, V> {
         let ptr = pool_slice.as_mut_ptr();
 
         unsafe {
-            let parent = match &mut *ptr.add(parent_idx) { PoolSlot::Occupied(n) => n, _ => unreachable!() };
-            let child = match &mut *ptr.add(child_idx) { PoolSlot::Occupied(n) => n, _ => unreachable!() };
-            let sibling = match &mut *ptr.add(sibling_idx) { PoolSlot::Occupied(n) => n, _ => unreachable!() };
+            let parent = match &mut *ptr.add(parent_idx) {
+                PoolSlot::Occupied(n) => n,
+                _ => unreachable!(),
+            };
+            let child = match &mut *ptr.add(child_idx) {
+                PoolSlot::Occupied(n) => n,
+                _ => unreachable!(),
+            };
+            let sibling = match &mut *ptr.add(sibling_idx) {
+                PoolSlot::Occupied(n) => n,
+                _ => unreachable!(),
+            };
 
-            if let Node::Internal { len: c_len, keys: c_keys, children: c_children } = child {
+            if let Node::Internal {
+                len: c_len,
+                keys: c_keys,
+                children: c_children,
+            } = child
+            {
                 let mut s_keys = MaybeUninit::<[MaybeUninit<K>; MAX_KEYS]>::uninit().assume_init();
                 let mut s_children = [0; MAX_CHILDREN];
 
@@ -335,13 +417,13 @@ impl<'brand, K, V> BrandedBPlusTree<'brand, K, V> {
                 ptr::copy_nonoverlapping(
                     c_keys.as_ptr().add(right_start),
                     s_keys.as_mut_ptr(),
-                    right_count
+                    right_count,
                 );
 
                 ptr::copy_nonoverlapping(
                     c_children.as_ptr().add(right_start),
                     s_children.as_mut_ptr(),
-                    right_count + 1
+                    right_count + 1,
                 );
 
                 *c_len = median_idx as u16;
@@ -353,24 +435,31 @@ impl<'brand, K, V> BrandedBPlusTree<'brand, K, V> {
                 };
 
                 parent.internal_insert(child_index_in_parent, median_key, sibling_idx);
-
-            } else if let Node::Leaf { len: c_len, keys: c_keys, vals: c_vals, next: c_next } = child {
+            } else if let Node::Leaf {
+                len: c_len,
+                keys: c_keys,
+                vals: c_vals,
+                next: c_next,
+            } = child
+            {
                 let split_idx = B - 1;
                 let median_key = c_keys.get_unchecked(split_idx).assume_init_ref().clone();
                 let mut s_keys = MaybeUninit::<[MaybeUninit<K>; MAX_KEYS]>::uninit().assume_init();
-                let mut s_vals = MaybeUninit::<[MaybeUninit<GhostCell<'brand, V>>; MAX_KEYS]>::uninit().assume_init();
+                let mut s_vals =
+                    MaybeUninit::<[MaybeUninit<GhostCell<'brand, V>>; MAX_KEYS]>::uninit()
+                        .assume_init();
 
                 let count = *c_len as usize - split_idx;
 
                 ptr::copy_nonoverlapping(
                     c_keys.as_ptr().add(split_idx),
                     s_keys.as_mut_ptr(),
-                    count
+                    count,
                 );
                 ptr::copy_nonoverlapping(
                     c_vals.as_ptr().add(split_idx),
                     s_vals.as_mut_ptr(),
-                    count
+                    count,
                 );
 
                 *c_len = split_idx as u16;
@@ -389,12 +478,22 @@ impl<'brand, K, V> BrandedBPlusTree<'brand, K, V> {
         }
     }
 
-    fn insert_non_full(&mut self, token: &mut GhostToken<'brand>, node_idx: usize, key: K, value: V) -> Option<V>
-    where K: Ord + Clone {
+    fn insert_non_full(
+        &mut self,
+        token: &mut GhostToken<'brand>,
+        node_idx: usize,
+        key: K,
+        value: V,
+    ) -> Option<V>
+    where
+        K: Ord + Clone,
+    {
         let node = self.get_node_mut(token, node_idx);
 
         match node {
-            Node::Leaf { len, keys, vals, .. } => {
+            Node::Leaf {
+                len, keys, vals, ..
+            } => {
                 let l = *len as usize;
                 let mut idx = 0;
                 while idx < l {
@@ -402,11 +501,11 @@ impl<'brand, K, V> BrandedBPlusTree<'brand, K, V> {
                     match key.cmp(k) {
                         std::cmp::Ordering::Greater => idx += 1,
                         std::cmp::Ordering::Equal => {
-                             let cell = unsafe { vals.get_unchecked_mut(idx).assume_init_mut() };
-                             // We have exclusive access, so use get_mut() to swap without token
-                             let val_mut = cell.get_mut();
-                             let old = std::mem::replace(val_mut, value);
-                             return Some(old);
+                            let cell = unsafe { vals.get_unchecked_mut(idx).assume_init_mut() };
+                            // We have exclusive access, so use get_mut() to swap without token
+                            let val_mut = cell.get_mut();
+                            let old = std::mem::replace(val_mut, value);
+                            return Some(old);
                         }
                         std::cmp::Ordering::Less => break,
                     }
@@ -414,29 +513,33 @@ impl<'brand, K, V> BrandedBPlusTree<'brand, K, V> {
                 node.leaf_insert(idx, key, GhostCell::new(value));
                 None
             }
-            Node::Internal { len, keys, children } => {
-                 let l = *len as usize;
-                 let mut idx = 0;
-                 while idx < l {
+            Node::Internal {
+                len,
+                keys,
+                children,
+            } => {
+                let l = *len as usize;
+                let mut idx = 0;
+                while idx < l {
                     let k = unsafe { keys.get_unchecked(idx).assume_init_ref() };
                     if key < *k {
                         break;
                     }
                     idx += 1;
-                 }
-                 let child_idx = children[idx];
+                }
+                let child_idx = children[idx];
 
-                 if self.get_node(token, child_idx).is_full() {
-                     self.split_child(token, node_idx, idx);
-                     let k = unsafe { self.get_node(token, node_idx).key_at(idx) };
-                     if key > *k {
-                         idx += 1;
-                     }
-                     let new_child_idx = self.get_node(token, node_idx).child_at(idx);
-                     self.insert_non_full(token, new_child_idx, key, value)
-                 } else {
-                     self.insert_non_full(token, child_idx, key, value)
-                 }
+                if self.get_node(token, child_idx).is_full() {
+                    self.split_child(token, node_idx, idx);
+                    let k = unsafe { self.get_node(token, node_idx).key_at(idx) };
+                    if key > *k {
+                        idx += 1;
+                    }
+                    let new_child_idx = self.get_node(token, node_idx).child_at(idx);
+                    self.insert_non_full(token, new_child_idx, key, value)
+                } else {
+                    self.insert_non_full(token, child_idx, key, value)
+                }
             }
         }
     }
@@ -460,10 +563,20 @@ impl<'a, 'brand, K, V> Iterator for Iter<'a, 'brand, K, V> {
     fn next(&mut self) -> Option<Self::Item> {
         let idx = self.leaf_idx?;
         let node = self.tree.get_node(self.token, idx);
-        if let Node::Leaf { len, keys, vals, next } = node {
+        if let Node::Leaf {
+            len,
+            keys,
+            vals,
+            next,
+        } = node
+        {
             if self.key_idx < *len as usize {
                 let k = unsafe { keys.get_unchecked(self.key_idx).assume_init_ref() };
-                let v = unsafe { vals.get_unchecked(self.key_idx).assume_init_ref().borrow(self.token) };
+                let v = unsafe {
+                    vals.get_unchecked(self.key_idx)
+                        .assume_init_ref()
+                        .borrow(self.token)
+                };
                 self.key_idx += 1;
                 return Some((k, v));
             } else {
@@ -472,8 +585,8 @@ impl<'a, 'brand, K, V> Iterator for Iter<'a, 'brand, K, V> {
                 return self.next();
             }
         } else {
-             self.leaf_idx = None;
-             return None;
+            self.leaf_idx = None;
+            return None;
         }
     }
 }

@@ -64,7 +64,9 @@ unsafe impl<'brand, T: Send> Send for GhostCell<'brand, T> {}
 unsafe impl<'brand, T: Sync> Sync for GhostCell<'brand, T> {}
 
 #[cfg(feature = "proptest")]
-impl<'brand, T: proptest::arbitrary::Arbitrary> proptest::arbitrary::Arbitrary for GhostCell<'brand, T> {
+impl<'brand, T: proptest::arbitrary::Arbitrary> proptest::arbitrary::Arbitrary
+    for GhostCell<'brand, T>
+{
     type Parameters = T::Parameters;
     type Strategy = proptest::strategy::Map<T::Strategy, fn(T) -> Self>;
 
@@ -73,4 +75,3 @@ impl<'brand, T: proptest::arbitrary::Arbitrary> proptest::arbitrary::Arbitrary f
         T::arbitrary_with(args).prop_map(GhostCell::new)
     }
 }
-

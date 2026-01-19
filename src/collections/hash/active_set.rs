@@ -3,10 +3,10 @@
 //! This wrapper significantly reduces "token redundancy" when performing multiple operations
 //! in a single scope.
 
-use crate::GhostToken;
 use super::BrandedHashSet;
-use std::hash::{Hash, BuildHasher};
+use crate::GhostToken;
 use std::collections::hash_map::RandomState;
+use std::hash::{BuildHasher, Hash};
 
 /// A wrapper around a mutable reference to a `BrandedHashSet` and a mutable reference to a `GhostToken`.
 pub struct ActiveHashSet<'a, 'brand, K, S = RandomState> {
@@ -20,7 +20,10 @@ where
     S: BuildHasher,
 {
     /// Creates a new active set handle.
-    pub fn new(set: &'a mut BrandedHashSet<'brand, K, S>, token: &'a mut GhostToken<'brand>) -> Self {
+    pub fn new(
+        set: &'a mut BrandedHashSet<'brand, K, S>,
+        token: &'a mut GhostToken<'brand>,
+    ) -> Self {
         Self { set, token }
     }
 
@@ -58,7 +61,10 @@ where
 /// Extension trait to easily create ActiveHashSet from BrandedHashSet.
 pub trait ActivateHashSet<'brand, K, S> {
     /// Activates the set with the given token.
-    fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveHashSet<'a, 'brand, K, S>;
+    fn activate<'a>(
+        &'a mut self,
+        token: &'a mut GhostToken<'brand>,
+    ) -> ActiveHashSet<'a, 'brand, K, S>;
 }
 
 impl<'brand, K, S> ActivateHashSet<'brand, K, S> for BrandedHashSet<'brand, K, S>
@@ -66,7 +72,10 @@ where
     K: Eq + Hash,
     S: BuildHasher,
 {
-    fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveHashSet<'a, 'brand, K, S> {
+    fn activate<'a>(
+        &'a mut self,
+        token: &'a mut GhostToken<'brand>,
+    ) -> ActiveHashSet<'a, 'brand, K, S> {
         ActiveHashSet::new(self, token)
     }
 }

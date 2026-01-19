@@ -1,5 +1,5 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BatchSize};
-use halo::{GhostToken, BrandedSegmentTree};
+use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
+use halo::{BrandedSegmentTree, GhostToken};
 
 fn bench_segment_tree(c: &mut Criterion) {
     let mut group = c.benchmark_group("Segment Tree");
@@ -22,25 +22,25 @@ fn bench_segment_tree(c: &mut Criterion) {
 
     group.bench_function("update", |b| {
         GhostToken::new(|mut token| {
-             let mut st = BrandedSegmentTree::new(n, |a, b| a + b, 0);
-             let data: Vec<_> = (0..n).collect();
-             st.build(&mut token, &data);
+            let mut st = BrandedSegmentTree::new(n, |a, b| a + b, 0);
+            let data: Vec<_> = (0..n).collect();
+            st.build(&mut token, &data);
 
-             b.iter(|| {
-                 st.update(&mut token, black_box(n/2), black_box(100));
-             });
+            b.iter(|| {
+                st.update(&mut token, black_box(n / 2), black_box(100));
+            });
         });
     });
 
     group.bench_function("query", |b| {
         GhostToken::new(|mut token| {
-             let mut st = BrandedSegmentTree::new(n, |a, b| a + b, 0);
-             let data: Vec<_> = (0..n).collect();
-             st.build(&mut token, &data);
+            let mut st = BrandedSegmentTree::new(n, |a, b| a + b, 0);
+            let data: Vec<_> = (0..n).collect();
+            st.build(&mut token, &data);
 
-             b.iter(|| {
-                 st.query(&token, black_box(n/4), black_box(3*n/4));
-             });
+            b.iter(|| {
+                st.query(&token, black_box(n / 4), black_box(3 * n / 4));
+            });
         });
     });
 
@@ -48,8 +48,8 @@ fn bench_segment_tree(c: &mut Criterion) {
     group.bench_function("naive_vec_query", |b| {
         let data: Vec<usize> = (0..n).collect();
         b.iter(|| {
-            let start = black_box(n/4);
-            let end = black_box(3*n/4);
+            let start = black_box(n / 4);
+            let end = black_box(3 * n / 4);
             let sum: usize = data[start..end].iter().sum();
             sum
         });

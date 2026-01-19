@@ -104,5 +104,3 @@ impl<'brand> VisitedFlags<'brand> {
             .is_ok()
     }
 }
-
-

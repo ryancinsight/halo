@@ -84,15 +84,22 @@ impl<'a, 'brand, T> BrandedSlice<'a, 'brand, T> {
     pub fn split_at(&self, mid: usize) -> (Self, Self) {
         let (left, right) = self.slice.split_at(mid);
         (
-            Self { slice: left, token: self.token },
-            Self { slice: right, token: self.token },
+            Self {
+                slice: left,
+                token: self.token,
+            },
+            Self {
+                slice: right,
+                token: self.token,
+            },
         )
     }
 
     /// Returns a sub-slice.
     pub fn sub_slice<R>(&self, range: R) -> Self
     where
-        R: std::ops::RangeBounds<usize> + std::slice::SliceIndex<[GhostCell<'brand, T>], Output = [GhostCell<'brand, T>]>,
+        R: std::ops::RangeBounds<usize>
+            + std::slice::SliceIndex<[GhostCell<'brand, T>], Output = [GhostCell<'brand, T>]>,
     {
         Self {
             slice: &self.slice[range],
@@ -178,7 +185,9 @@ impl<'a, 'brand, T> BrandedSliceMut<'a, 'brand, T> {
         // So `as_slice` is INVALID for `BrandedSliceMut` unless we pass a token.
         // But `BrandedSliceMut` is designed to work *without* a token (for mutation).
         // So we cannot implement `as_slice` here.
-        panic!("BrandedSliceMut cannot produce &[T] without a token. Use as_mut_slice for &mut [T].");
+        panic!(
+            "BrandedSliceMut cannot produce &[T] without a token. Use as_mut_slice for &mut [T]."
+        );
     }
 
     /// Returns the underlying mutable slice as a standard `&mut [T]`.
@@ -214,16 +223,14 @@ impl<'a, 'brand, T> BrandedSliceMut<'a, 'brand, T> {
     /// Divides one mutable slice into two at an index.
     pub fn split_at_mut(self, mid: usize) -> (Self, Self) {
         let (left, right) = self.slice.split_at_mut(mid);
-        (
-            Self { slice: left },
-            Self { slice: right },
-        )
+        (Self { slice: left }, Self { slice: right })
     }
 
     /// Returns a mutable sub-slice.
     pub fn sub_slice_mut<R>(self, range: R) -> Self
     where
-        R: std::ops::RangeBounds<usize> + std::slice::SliceIndex<[GhostCell<'brand, T>], Output = [GhostCell<'brand, T>]>,
+        R: std::ops::RangeBounds<usize>
+            + std::slice::SliceIndex<[GhostCell<'brand, T>], Output = [GhostCell<'brand, T>]>,
     {
         Self {
             slice: &mut self.slice[range],
@@ -263,7 +270,7 @@ impl<'a, 'brand, T> IntoIterator for BrandedSliceMut<'a, 'brand, T> {
 
     fn into_iter(self) -> Self::IntoIter {
         // unsafe cast the whole slice
-         unsafe {
+        unsafe {
             let ptr = self.slice.as_mut_ptr() as *mut T;
             slice::from_raw_parts_mut(ptr, self.slice.len()).iter_mut()
         }
@@ -299,7 +306,7 @@ mod tests {
 
     #[test]
     fn test_branded_slice_mut_as_mut_slice() {
-         GhostToken::new(|mut token| {
+        GhostToken::new(|mut token| {
             let mut vec = BrandedVec::new();
             vec.push(3);
             vec.push(1);

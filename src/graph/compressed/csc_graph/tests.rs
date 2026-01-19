@@ -41,7 +41,6 @@ fn csc_graph_dfs_traversal() {
         // Incoming traversal: nodes that can reach `start` in the original graph.
         assert_eq!(csc.dfs_reachable_count(0, &stack), 1);
         assert_eq!(csc.dfs_reachable_count(2, &stack), 3);
-
     });
 }
 
@@ -66,11 +65,7 @@ fn csc_graph_bfs_traversal() {
 #[test]
 fn csc_graph_to_csr_conversion() {
     GhostToken::new(|_token| {
-        let adjacency = vec![
-            vec![1, 2],
-            vec![2],
-            vec![],
-        ];
+        let adjacency = vec![vec![1, 2], vec![2], vec![]];
 
         let csc = GhostCscGraph::<1024>::from_adjacency(&adjacency);
         let csr = csc.to_csr();
@@ -88,11 +83,7 @@ fn csc_graph_to_csr_conversion() {
 #[test]
 fn csc_graph_degrees_and_membership() {
     GhostToken::new(|_token| {
-        let adjacency = vec![
-            vec![1, 2],
-            vec![2],
-            vec![],
-        ];
+        let adjacency = vec![vec![1, 2], vec![2], vec![]];
 
         let csc = GhostCscGraph::<1024>::from_adjacency(&adjacency);
 
@@ -101,10 +92,9 @@ fn csc_graph_degrees_and_membership() {
         assert_eq!(csc.in_degree(2), 2); // two incoming edges (0->2, 1->2)
 
         assert!(!csc.has_edge(0, 0)); // no self-loops
-        assert!(csc.has_edge(0, 1));  // 0->1 exists
-        assert!(csc.has_edge(0, 2));  // 0->2 exists
-        assert!(csc.has_edge(1, 2));  // 1->2 exists
+        assert!(csc.has_edge(0, 1)); // 0->1 exists
+        assert!(csc.has_edge(0, 2)); // 0->2 exists
+        assert!(csc.has_edge(1, 2)); // 1->2 exists
         assert!(!csc.has_edge(2, 0)); // 2->0 doesn't exist
     });
 }
-

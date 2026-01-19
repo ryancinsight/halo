@@ -1,9 +1,9 @@
 //! Active wrappers for `other` collections.
 
-use crate::GhostToken;
-use super::{BrandedDoublyLinkedList, BrandedBinaryHeap, BrandedDeque};
-use super::doubly_linked_list::{BrandedDoublyLinkedListIter, BrandedDoublyLinkedListIterMut};
 use super::deque::BrandedDequeIter;
+use super::doubly_linked_list::{BrandedDoublyLinkedListIter, BrandedDoublyLinkedListIterMut};
+use super::{BrandedBinaryHeap, BrandedDeque, BrandedDoublyLinkedList};
+use crate::GhostToken;
 use core::cmp::Ord;
 
 /// A wrapper around a mutable reference to a `BrandedDoublyLinkedList` and a mutable reference to a `GhostToken`.
@@ -14,7 +14,10 @@ pub struct ActiveDoublyLinkedList<'a, 'brand, T> {
 
 impl<'a, 'brand, T> ActiveDoublyLinkedList<'a, 'brand, T> {
     /// Creates a new active list handle.
-    pub fn new(list: &'a mut BrandedDoublyLinkedList<'brand, T>, token: &'a mut GhostToken<'brand>) -> Self {
+    pub fn new(
+        list: &'a mut BrandedDoublyLinkedList<'brand, T>,
+        token: &'a mut GhostToken<'brand>,
+    ) -> Self {
         Self { list, token }
     }
 
@@ -96,15 +99,20 @@ impl<'a, 'brand, T> ActiveDoublyLinkedList<'a, 'brand, T> {
 
 /// Extension trait to easily create ActiveDoublyLinkedList from BrandedDoublyLinkedList.
 pub trait ActivateDoublyLinkedList<'brand, T> {
-    fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveDoublyLinkedList<'a, 'brand, T>;
+    fn activate<'a>(
+        &'a mut self,
+        token: &'a mut GhostToken<'brand>,
+    ) -> ActiveDoublyLinkedList<'a, 'brand, T>;
 }
 
 impl<'brand, T> ActivateDoublyLinkedList<'brand, T> for BrandedDoublyLinkedList<'brand, T> {
-    fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveDoublyLinkedList<'a, 'brand, T> {
+    fn activate<'a>(
+        &'a mut self,
+        token: &'a mut GhostToken<'brand>,
+    ) -> ActiveDoublyLinkedList<'a, 'brand, T> {
         ActiveDoublyLinkedList::new(self, token)
     }
 }
-
 
 /// A wrapper around a mutable reference to a `BrandedBinaryHeap` and a mutable reference to a `GhostToken`.
 pub struct ActiveBinaryHeap<'a, 'brand, T> {
@@ -114,7 +122,10 @@ pub struct ActiveBinaryHeap<'a, 'brand, T> {
 
 impl<'a, 'brand, T: Ord> ActiveBinaryHeap<'a, 'brand, T> {
     /// Creates a new active heap handle.
-    pub fn new(heap: &'a mut BrandedBinaryHeap<'brand, T>, token: &'a mut GhostToken<'brand>) -> Self {
+    pub fn new(
+        heap: &'a mut BrandedBinaryHeap<'brand, T>,
+        token: &'a mut GhostToken<'brand>,
+    ) -> Self {
         Self { heap, token }
     }
 
@@ -161,11 +172,17 @@ impl<'a, 'brand, T: Ord> ActiveBinaryHeap<'a, 'brand, T> {
 
 /// Extension trait to easily create ActiveBinaryHeap from BrandedBinaryHeap.
 pub trait ActivateBinaryHeap<'brand, T> {
-    fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveBinaryHeap<'a, 'brand, T>;
+    fn activate<'a>(
+        &'a mut self,
+        token: &'a mut GhostToken<'brand>,
+    ) -> ActiveBinaryHeap<'a, 'brand, T>;
 }
 
 impl<'brand, T: Ord> ActivateBinaryHeap<'brand, T> for BrandedBinaryHeap<'brand, T> {
-    fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveBinaryHeap<'a, 'brand, T> {
+    fn activate<'a>(
+        &'a mut self,
+        token: &'a mut GhostToken<'brand>,
+    ) -> ActiveBinaryHeap<'a, 'brand, T> {
         ActiveBinaryHeap::new(self, token)
     }
 }
@@ -178,7 +195,10 @@ pub struct ActiveDeque<'a, 'brand, T, const CAPACITY: usize> {
 
 impl<'a, 'brand, T, const CAPACITY: usize> ActiveDeque<'a, 'brand, T, CAPACITY> {
     /// Creates a new active deque handle.
-    pub fn new(deque: &'a mut BrandedDeque<'brand, T, CAPACITY>, token: &'a mut GhostToken<'brand>) -> Self {
+    pub fn new(
+        deque: &'a mut BrandedDeque<'brand, T, CAPACITY>,
+        token: &'a mut GhostToken<'brand>,
+    ) -> Self {
         Self { deque, token }
     }
 
@@ -266,11 +286,19 @@ impl<'a, 'brand, T, const CAPACITY: usize> ActiveDeque<'a, 'brand, T, CAPACITY> 
 
 /// Extension trait to easily create ActiveDeque from BrandedDeque.
 pub trait ActivateDeque<'brand, T, const CAPACITY: usize> {
-    fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveDeque<'a, 'brand, T, CAPACITY>;
+    fn activate<'a>(
+        &'a mut self,
+        token: &'a mut GhostToken<'brand>,
+    ) -> ActiveDeque<'a, 'brand, T, CAPACITY>;
 }
 
-impl<'brand, T, const CAPACITY: usize> ActivateDeque<'brand, T, CAPACITY> for BrandedDeque<'brand, T, CAPACITY> {
-    fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveDeque<'a, 'brand, T, CAPACITY> {
+impl<'brand, T, const CAPACITY: usize> ActivateDeque<'brand, T, CAPACITY>
+    for BrandedDeque<'brand, T, CAPACITY>
+{
+    fn activate<'a>(
+        &'a mut self,
+        token: &'a mut GhostToken<'brand>,
+    ) -> ActiveDeque<'a, 'brand, T, CAPACITY> {
         ActiveDeque::new(self, token)
     }
 }

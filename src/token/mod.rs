@@ -13,11 +13,11 @@
 
 use core::marker::PhantomData;
 
-pub mod shared;
 pub mod invariant;
+pub mod shared;
 
-pub use shared::SharedGhostToken;
 pub use invariant::InvariantLifetime;
+pub use shared::SharedGhostToken;
 
 /// A zero-sized token that controls access to GhostCells
 ///

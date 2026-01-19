@@ -84,6 +84,3 @@ pub(crate) unsafe fn drop_in_place_ptr<T>(slot: *mut MaybeUninit<T>) {
     // SAFETY: caller asserts initialization and drop uniqueness.
     unsafe { ptr::drop_in_place(slot.cast::<T>()) }
 }
-
-
-

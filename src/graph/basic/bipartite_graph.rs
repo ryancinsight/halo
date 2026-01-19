@@ -14,8 +14,7 @@
 use core::sync::atomic::Ordering;
 
 use crate::{
-    collections::ChunkedVec,
-    concurrency::worklist::GhostChaseLevDeque,
+    collections::ChunkedVec, concurrency::worklist::GhostChaseLevDeque,
     graph::access::visited::VisitedSet,
 };
 
@@ -162,7 +161,10 @@ impl<'brand, const EDGE_CHUNK: usize> GhostBipartiteGraph<'brand, EDGE_CHUNK> {
 
     /// Returns the left neighbors of a right vertex.
     pub fn right_neighbors(&self, right: usize) -> impl Iterator<Item = usize> + '_ {
-        assert!(right < self.right_count, "right vertex {right} out of bounds");
+        assert!(
+            right < self.right_count,
+            "right vertex {right} out of bounds"
+        );
         let start = self.right_to_left_offsets[right];
         let end = self.right_to_left_offsets[right + 1];
         (start..end).map(move |i| unsafe { *self.right_to_left_edges.get_unchecked(i) })
@@ -178,7 +180,10 @@ impl<'brand, const EDGE_CHUNK: usize> GhostBipartiteGraph<'brand, EDGE_CHUNK> {
 
     /// Returns the degree of a right vertex.
     pub fn right_degree(&self, right: usize) -> usize {
-        assert!(right < self.right_count, "right vertex {right} out of bounds");
+        assert!(
+            right < self.right_count,
+            "right vertex {right} out of bounds"
+        );
         let start = self.right_to_left_offsets[right];
         let end = self.right_to_left_offsets[right + 1];
         end - start
@@ -187,7 +192,10 @@ impl<'brand, const EDGE_CHUNK: usize> GhostBipartiteGraph<'brand, EDGE_CHUNK> {
     /// Checks if an edge exists from left to right vertex.
     pub fn has_edge(&self, left: usize, right: usize) -> bool {
         assert!(left < self.left_count, "left vertex {left} out of bounds");
-        assert!(right < self.right_count, "right vertex {right} out of bounds");
+        assert!(
+            right < self.right_count,
+            "right vertex {right} out of bounds"
+        );
         self.left_neighbors(left).any(|r| r == right)
     }
 
@@ -293,7 +301,10 @@ impl<'brand, const EDGE_CHUNK: usize> GhostBipartiteGraph<'brand, EDGE_CHUNK> {
     ///
     /// Uses work-stealing for load balancing. Returns reachable vertex count.
     pub fn bfs_from_left(&self, start_left: usize, deque: &GhostChaseLevDeque<'brand>) -> usize {
-        assert!(start_left < self.left_count, "left vertex {start_left} out of bounds");
+        assert!(
+            start_left < self.left_count,
+            "left vertex {start_left} out of bounds"
+        );
 
         self.reset_visited();
         debug_assert!(self.visited_left.try_visit(start_left, Ordering::Relaxed));
@@ -330,7 +341,10 @@ impl<'brand, const EDGE_CHUNK: usize> GhostBipartiteGraph<'brand, EDGE_CHUNK> {
 
     /// Concurrent BFS traversal starting from a right vertex.
     pub fn bfs_from_right(&self, start_right: usize, deque: &GhostChaseLevDeque<'brand>) -> usize {
-        assert!(start_right < self.right_count, "right vertex {start_right} out of bounds");
+        assert!(
+            start_right < self.right_count,
+            "right vertex {start_right} out of bounds"
+        );
 
         self.reset_visited();
         debug_assert!(self.visited_right.try_visit(start_right, Ordering::Relaxed));
@@ -423,11 +437,7 @@ mod tests {
     #[test]
     fn bipartite_graph_neighbors() {
         GhostToken::new(|_token| {
-            let left_adjacency = vec![
-                vec![0, 1],
-                vec![0],
-                vec![1],
-            ];
+            let left_adjacency = vec![vec![0, 1], vec![0], vec![1]];
 
             let graph = GhostBipartiteGraph::<1024>::from_left_adjacency(&left_adjacency, 2);
 
@@ -438,18 +448,15 @@ mod tests {
 
             // Test right neighbors
             assert_eq!(graph.right_neighbors(0).collect::<Vec<_>>(), vec![0, 1]); // lefts 0,1 point to right 0
-            assert_eq!(graph.right_neighbors(1).collect::<Vec<_>>(), vec![0, 2]); // lefts 0,2 point to right 1
+            assert_eq!(graph.right_neighbors(1).collect::<Vec<_>>(), vec![0, 2]);
+            // lefts 0,2 point to right 1
         });
     }
 
     #[test]
     fn bipartite_graph_degrees() {
         GhostToken::new(|_token| {
-            let left_adjacency = vec![
-                vec![0, 1],
-                vec![0],
-                vec![1],
-            ];
+            let left_adjacency = vec![vec![0, 1], vec![0], vec![1]];
 
             let graph = GhostBipartiteGraph::<1024>::from_left_adjacency(&left_adjacency, 2);
 
@@ -465,11 +472,7 @@ mod tests {
     #[test]
     fn bipartite_graph_has_edge() {
         GhostToken::new(|_token| {
-            let left_adjacency = vec![
-                vec![0, 1],
-                vec![0],
-                vec![1],
-            ];
+            let left_adjacency = vec![vec![0, 1], vec![0], vec![1]];
 
             let graph = GhostBipartiteGraph::<1024>::from_left_adjacency(&left_adjacency, 2);
 
@@ -507,11 +510,7 @@ mod tests {
     #[test]
     fn bipartite_graph_bfs_traversal() {
         GhostToken::new(|_token| {
-            let left_adjacency = vec![
-                vec![0, 1],
-                vec![0],
-                vec![1],
-            ];
+            let left_adjacency = vec![vec![0, 1], vec![0], vec![1]];
 
             let graph = GhostBipartiteGraph::<1024>::from_left_adjacency(&left_adjacency, 2);
             let deque = GhostChaseLevDeque::new(32);
@@ -529,10 +528,7 @@ mod tests {
     #[test]
     fn bipartite_graph_to_csr() {
         GhostToken::new(|_token| {
-            let left_adjacency = vec![
-                vec![0],
-                vec![1],
-            ];
+            let left_adjacency = vec![vec![0], vec![1]];
 
             let bipartite = GhostBipartiteGraph::<1024>::from_left_adjacency(&left_adjacency, 2);
             let csr = bipartite.to_csr_graph();

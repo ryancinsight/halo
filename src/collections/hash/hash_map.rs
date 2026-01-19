@@ -14,13 +14,13 @@
 //! - **SWAR (SIMD Within A Register)**: Uses `u64` operations to check 8 slots in parallel.
 //! - **GhostToken Gating**: Values are wrapped in `GhostCell`, ensuring zero-cost safety.
 
-use core::hash::{Hash, Hasher, BuildHasher};
-use core::mem::MaybeUninit;
-use std::collections::hash_map::RandomState;
 use crate::{GhostCell, GhostToken};
+use core::hash::{BuildHasher, Hash, Hasher};
+use core::mem::MaybeUninit;
 use std::alloc::{self, Layout};
-use std::ptr::NonNull;
+use std::collections::hash_map::RandomState;
 use std::marker::PhantomData;
+use std::ptr::NonNull;
 
 // Control byte constants
 const EMPTY: u8 = 0xFF;
@@ -213,10 +213,10 @@ where
                     let slot_idx = (idx + trailing as usize) & mask;
 
                     unsafe {
-                         let k = self.keys.get_unchecked(slot_idx).assume_init_ref();
-                         if *k == *key {
-                             return (slot_idx, true);
-                         }
+                        let k = self.keys.get_unchecked(slot_idx).assume_init_ref();
+                        if *k == *key {
+                            return (slot_idx, true);
+                        }
                     }
 
                     // Clear lowest set bit
@@ -241,11 +241,11 @@ where
 
             // Check for deleted slots to remember the first one
             if first_deleted.is_none() {
-                 let deleted_mask = match_byte(group_word, DELETED);
-                 if deleted_mask != 0 {
-                     let trailing = deleted_mask.trailing_zeros() / 8;
-                     first_deleted = Some((idx + trailing as usize) & mask);
-                 }
+                let deleted_mask = match_byte(group_word, DELETED);
+                if deleted_mask != 0 {
+                    let trailing = deleted_mask.trailing_zeros() / 8;
+                    first_deleted = Some((idx + trailing as usize) & mask);
+                }
             }
 
             // Quadratic probing
@@ -255,23 +255,30 @@ where
 
             // Safety break for full table (should not happen if grown correctly)
             if probes > self.capacity {
-                 // If we probed the whole table and found nothing, return failure or first deleted.
-                 return match first_deleted {
-                     Some(d) => (d, false),
-                     None => (0, false), // Should panic or be handled, but (0, false) signals insert at 0 if unchecked
-                 };
+                // If we probed the whole table and found nothing, return failure or first deleted.
+                return match first_deleted {
+                    Some(d) => (d, false),
+                    None => (0, false), // Should panic or be handled, but (0, false) signals insert at 0 if unchecked
+                };
             }
         }
     }
 
     #[inline]
     pub fn get<'a>(&'a self, token: &'a GhostToken<'brand>, key: &K) -> Option<&'a V> {
-        if self.capacity == 0 { return None; }
+        if self.capacity == 0 {
+            return None;
+        }
         let (h1, h2) = self.hash(key);
         let (idx, found) = self.find_slot(key, h1, h2);
         if found {
             unsafe {
-                Some(self.values.get_unchecked(idx).assume_init_ref().borrow(token))
+                Some(
+                    self.values
+                        .get_unchecked(idx)
+                        .assume_init_ref()
+                        .borrow(token),
+                )
             }
         } else {
             None
@@ -280,12 +287,19 @@ where
 
     #[inline]
     pub fn get_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>, key: &K) -> Option<&'a mut V> {
-        if self.capacity == 0 { return None; }
+        if self.capacity == 0 {
+            return None;
+        }
         let (h1, h2) = self.hash(key);
         let (idx, found) = self.find_slot(key, h1, h2);
         if found {
             unsafe {
-                Some(self.values.get_unchecked(idx).assume_init_ref().borrow_mut(token))
+                Some(
+                    self.values
+                        .get_unchecked(idx)
+                        .assume_init_ref()
+                        .borrow_mut(token),
+                )
             }
         } else {
             None
@@ -294,13 +308,16 @@ where
 
     #[inline]
     pub fn contains_key(&self, key: &K) -> bool {
-        if self.capacity == 0 { return false; }
+        if self.capacity == 0 {
+            return false;
+        }
         let (h1, h2) = self.hash(key);
         self.find_slot(key, h1, h2).1
     }
 
     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
-        if self.capacity == 0 || self.items_count >= self.capacity * 7 / 8 { // Load factor 0.875
+        if self.capacity == 0 || self.items_count >= self.capacity * 7 / 8 {
+            // Load factor 0.875
             let new_cap = (self.capacity * 2).max(8);
             self.grow(new_cap);
         }
@@ -325,7 +342,9 @@ where
                 let was_deleted = *ctrl_byte == DELETED;
 
                 self.keys.get_unchecked_mut(idx).write(key);
-                self.values.get_unchecked_mut(idx).write(GhostCell::new(value));
+                self.values
+                    .get_unchecked_mut(idx)
+                    .write(GhostCell::new(value));
                 self.ctrl[idx] = h2;
                 if idx < GROUP_WIDTH {
                     self.ctrl[self.capacity + idx] = h2;
@@ -341,7 +360,9 @@ where
     }
 
     pub fn remove(&mut self, key: &K) -> Option<V> {
-        if self.capacity == 0 { return None; }
+        if self.capacity == 0 {
+            return None;
+        }
         let (h1, h2) = self.hash(key);
         let (idx, found) = self.find_slot(key, h1, h2);
 
@@ -392,7 +413,8 @@ where
 
         // Rehash
         for i in 0..old_cap {
-            if old_ctrl[i] & 0x80 == 0 { // Is occupied (0..127)
+            if old_ctrl[i] & 0x80 == 0 {
+                // Is occupied (0..127)
                 unsafe {
                     let key = old_keys.get_unchecked(i).assume_init_read();
                     let val = old_values.get_unchecked(i).assume_init_read();
@@ -418,10 +440,10 @@ where
 
             let empty_mask = match_byte(group_word, EMPTY);
             if empty_mask != 0 {
-                 let trailing = empty_mask.trailing_zeros() / 8;
-                 let empty_idx = (idx + trailing as usize) & mask;
+                let trailing = empty_mask.trailing_zeros() / 8;
+                let empty_idx = (idx + trailing as usize) & mask;
 
-                 unsafe {
+                unsafe {
                     self.keys.get_unchecked_mut(empty_idx).write(key);
                     self.values.get_unchecked_mut(empty_idx).write(value);
                     self.ctrl[empty_idx] = h2;
@@ -440,21 +462,23 @@ where
     }
 
     pub fn clear(&mut self) {
-        if self.len == 0 { return; }
+        if self.len == 0 {
+            return;
+        }
         for i in 0..self.capacity {
-             if self.ctrl[i] & 0x80 == 0 {
-                 unsafe {
-                     self.keys.get_unchecked_mut(i).assume_init_drop();
-                     self.values.get_unchecked_mut(i).assume_init_drop();
-                 }
-             }
-             self.ctrl[i] = EMPTY;
+            if self.ctrl[i] & 0x80 == 0 {
+                unsafe {
+                    self.keys.get_unchecked_mut(i).assume_init_drop();
+                    self.values.get_unchecked_mut(i).assume_init_drop();
+                }
+            }
+            self.ctrl[i] = EMPTY;
         }
         // Restore padding
         for i in 0..GROUP_WIDTH {
-             if i < self.ctrl.len() && self.capacity > 0 {
-                  self.ctrl[self.capacity + i] = EMPTY;
-             }
+            if i < self.ctrl.len() && self.capacity > 0 {
+                self.ctrl[self.capacity + i] = EMPTY;
+            }
         }
 
         self.len = 0;
@@ -464,10 +488,10 @@ where
     pub fn reserve(&mut self, additional: usize) {
         let needed = self.len + additional;
         if needed > self.capacity * 7 / 8 {
-             let new_cap = (needed * 8 / 7).next_power_of_two().max(8);
-             if new_cap > self.capacity {
-                 self.grow(new_cap);
-             }
+            let new_cap = (needed * 8 / 7).next_power_of_two().max(8);
+            if new_cap > self.capacity {
+                self.grow(new_cap);
+            }
         }
     }
 
@@ -475,25 +499,32 @@ where
 
     pub fn keys(&self) -> impl Iterator<Item = &K> {
         // Iterate only up to capacity, ignore padding
-        self.ctrl[0..self.capacity].iter().enumerate().filter_map(move |(i, &c)| {
-            if c & 0x80 == 0 {
-                unsafe { Some(self.keys.get_unchecked(i).assume_init_ref()) }
-            } else {
-                None
-            }
-        })
+        self.ctrl[0..self.capacity]
+            .iter()
+            .enumerate()
+            .filter_map(move |(i, &c)| {
+                if c & 0x80 == 0 {
+                    unsafe { Some(self.keys.get_unchecked(i).assume_init_ref()) }
+                } else {
+                    None
+                }
+            })
     }
 
-    pub fn values<'a>(&'a self, token: &'a GhostToken<'brand>) -> impl Iterator<Item = &'a V> + use<'a, 'brand, K, V, S> {
-        self.ctrl[0..self.capacity].iter().enumerate().filter_map(move |(i, &c)| {
-            if c & 0x80 == 0 {
-                unsafe {
-                    Some(self.values.get_unchecked(i).assume_init_ref().borrow(token))
+    pub fn values<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+    ) -> impl Iterator<Item = &'a V> + use<'a, 'brand, K, V, S> {
+        self.ctrl[0..self.capacity]
+            .iter()
+            .enumerate()
+            .filter_map(move |(i, &c)| {
+                if c & 0x80 == 0 {
+                    unsafe { Some(self.values.get_unchecked(i).assume_init_ref().borrow(token)) }
+                } else {
+                    None
                 }
-            } else {
-                None
-            }
-        })
+            })
     }
 
     /// Applies `f` to all entries in the map, allowing mutation of values.
@@ -505,7 +536,11 @@ where
             if self.ctrl[i] & 0x80 == 0 {
                 unsafe {
                     let k = self.keys.get_unchecked(i).assume_init_ref();
-                    let v = self.values.get_unchecked(i).assume_init_ref().borrow_mut(token);
+                    let v = self
+                        .values
+                        .get_unchecked(i)
+                        .assume_init_ref()
+                        .borrow_mut(token);
                     f(k, v);
                 }
             }
@@ -596,7 +631,9 @@ impl<'brand, K, V, S> Drop for BrandedHashMap<'brand, K, V, S> {
 }
 
 impl<'brand, K, V, S> Default for BrandedHashMap<'brand, K, V, S>
-where K: Eq + Hash, S: BuildHasher + Default
+where
+    K: Eq + Hash,
+    S: BuildHasher + Default,
 {
     fn default() -> Self {
         Self::with_capacity_and_hasher(0, S::default())
@@ -607,15 +644,22 @@ where K: Eq + Hash, S: BuildHasher + Default
 use crate::collections::{BrandedCollection, ZeroCopyMapOps};
 
 impl<'brand, K, V, S> BrandedCollection<'brand> for BrandedHashMap<'brand, K, V, S> {
-    fn len(&self) -> usize { self.len }
-    fn is_empty(&self) -> bool { self.len == 0 }
+    fn len(&self) -> usize {
+        self.len
+    }
+    fn is_empty(&self) -> bool {
+        self.len == 0
+    }
 }
 
 impl<'brand, K, V, S> ZeroCopyMapOps<'brand, K, V> for BrandedHashMap<'brand, K, V, S>
-where K: Eq + Hash, S: BuildHasher
+where
+    K: Eq + Hash,
+    S: BuildHasher,
 {
     fn find_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<(&'a K, &'a V)>
-    where F: Fn(&K, &V) -> bool
+    where
+        F: Fn(&K, &V) -> bool,
     {
         for i in 0..self.capacity {
             if self.ctrl[i] & 0x80 == 0 {
@@ -632,23 +676,27 @@ where K: Eq + Hash, S: BuildHasher
     }
 
     fn any_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
-    where F: Fn(&K, &V) -> bool
+    where
+        F: Fn(&K, &V) -> bool,
     {
-         self.find_ref(token, f).is_some()
+        self.find_ref(token, f).is_some()
     }
 
     fn all_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
-    where F: Fn(&K, &V) -> bool
+    where
+        F: Fn(&K, &V) -> bool,
     {
-        if self.is_empty() { return true; }
+        if self.is_empty() {
+            return true;
+        }
         for i in 0..self.capacity {
             if self.ctrl[i] & 0x80 == 0 {
                 unsafe {
-                     let k = self.keys.get_unchecked(i).assume_init_ref();
-                     let v = self.values.get_unchecked(i).assume_init_ref().borrow(token);
-                     if !f(k, v) {
-                         return false;
-                     }
+                    let k = self.keys.get_unchecked(i).assume_init_ref();
+                    let v = self.values.get_unchecked(i).assume_init_ref().borrow(token);
+                    if !f(k, v) {
+                        return false;
+                    }
                 }
             }
         }
@@ -670,7 +718,8 @@ impl<'brand, K, V> Iterator for IntoIter<'brand, K, V> {
     type Item = (K, V);
 
     fn next(&mut self) -> Option<Self::Item> {
-        while self.index < self.capacity { // Only up to capacity
+        while self.index < self.capacity {
+            // Only up to capacity
             let i = self.index;
             self.index += 1;
             if self.ctrl[i] & 0x80 == 0 {
@@ -689,14 +738,14 @@ impl<'brand, K, V> Iterator for IntoIter<'brand, K, V> {
 impl<'brand, K, V> Drop for IntoIter<'brand, K, V> {
     fn drop(&mut self) {
         while self.index < self.capacity {
-             let i = self.index;
-             self.index += 1;
-             if self.ctrl[i] & 0x80 == 0 {
-                 unsafe {
-                     self.keys.get_unchecked_mut(i).assume_init_drop();
-                     self.values.get_unchecked_mut(i).assume_init_drop();
-                 }
-             }
+            let i = self.index;
+            self.index += 1;
+            if self.ctrl[i] & 0x80 == 0 {
+                unsafe {
+                    self.keys.get_unchecked_mut(i).assume_init_drop();
+                    self.values.get_unchecked_mut(i).assume_init_drop();
+                }
+            }
         }
     }
 }
@@ -717,7 +766,12 @@ impl<'brand, K, V, S> IntoIterator for BrandedHashMap<'brand, K, V, S> {
         self.len = 0;
 
         IntoIter {
-            ctrl, keys, values, index: 0, len, capacity
+            ctrl,
+            keys,
+            values,
+            index: 0,
+            len,
+            capacity,
         }
     }
 }
@@ -748,88 +802,101 @@ where
     }
 }
 
-    /// Tests for zero-copy operations and advanced features.
-    #[cfg(test)]
-    mod zero_copy_tests {
-        use super::*;
-        use crate::GhostToken;
+/// Tests for zero-copy operations and advanced features.
+#[cfg(test)]
+mod zero_copy_tests {
+    use super::*;
+    use crate::GhostToken;
 
-        #[test]
-        fn test_zero_copy_map_operations() {
-            GhostToken::new(|token| {
-                let mut map = BrandedHashMap::new();
-                map.insert("key1", 1);
-                map.insert("key2", 2);
-                map.insert("key3", 3);
+    #[test]
+    fn test_zero_copy_map_operations() {
+        GhostToken::new(|token| {
+            let mut map = BrandedHashMap::new();
+            map.insert("key1", 1);
+            map.insert("key2", 2);
+            map.insert("key3", 3);
 
-                // Test find_ref
-                let found = map.find_ref(&token, |k, v| *k == "key2" && *v == 2);
-                assert_eq!(found, Some((&"key2", &2)));
+            // Test find_ref
+            let found = map.find_ref(&token, |k, v| *k == "key2" && *v == 2);
+            assert_eq!(found, Some((&"key2", &2)));
 
-                let not_found = map.find_ref(&token, |k, _| *k == "nonexistent");
-                assert_eq!(not_found, None);
+            let not_found = map.find_ref(&token, |k, _| *k == "nonexistent");
+            assert_eq!(not_found, None);
 
-                // Test any_ref
-                assert!(map.any_ref(&token, |_, v| *v > 2));
-                assert!(!map.any_ref(&token, |_, v| *v > 10));
+            // Test any_ref
+            assert!(map.any_ref(&token, |_, v| *v > 2));
+            assert!(!map.any_ref(&token, |_, v| *v > 10));
 
-                // Test all_ref
-                assert!(map.all_ref(&token, |_, v| *v > 0));
-                assert!(!map.all_ref(&token, |_, v| *v > 1));
-            });
-        }
-
-        #[test]
-        fn test_zero_copy_map_empty() {
-            GhostToken::new(|token| {
-                let map: BrandedHashMap<&str, i32> = BrandedHashMap::new();
-
-                assert_eq!(map.find_ref(&token, |_, _| true), None);
-                assert!(!map.any_ref(&token, |_, _| true));
-                assert!(map.all_ref(&token, |_, _| false)); // vacuously true
-            });
-        }
-
-        #[test]
-        fn test_zero_copy_map_single_entry() {
-            GhostToken::new(|token| {
-                let mut map = BrandedHashMap::new();
-                map.insert("single", 42);
-
-                assert_eq!(map.find_ref(&token, |k, v| *k == "single" && *v == 42), Some((&"single", &42)));
-                assert!(map.any_ref(&token, |k, v| *k == "single" && *v == 42));
-                assert!(map.all_ref(&token, |k, v| *k == "single" && *v == 42));
-            });
-        }
-
-        #[test]
-        fn test_zero_copy_map_collision_handling() {
-            GhostToken::new(|token| {
-                let mut map = BrandedHashMap::new();
-
-                // Insert entries that might collide
-                map.insert("key1", 1);
-                map.insert("key2", 2);
-                map.insert("key3", 3);
-
-                // All should be findable despite potential collisions
-                assert!(map.find_ref(&token, |k, v| *k == "key1" && *v == 1).is_some());
-                assert!(map.find_ref(&token, |k, v| *k == "key2" && *v == 2).is_some());
-                assert!(map.find_ref(&token, |k, v| *k == "key3" && *v == 3).is_some());
-
-                // Test removal and tombstone handling
-                assert_eq!(map.remove(&"key2"), Some(2));
-                assert_eq!(map.find_ref(&token, |k, _| *k == "key2"), None);
-
-                // Other entries should still be accessible
-                assert!(map.find_ref(&token, |k, v| *k == "key1" && *v == 1).is_some());
-                assert!(map.find_ref(&token, |k, v| *k == "key3" && *v == 3).is_some());
-            });
-        }
+            // Test all_ref
+            assert!(map.all_ref(&token, |_, v| *v > 0));
+            assert!(!map.all_ref(&token, |_, v| *v > 1));
+        });
     }
 
-    #[cfg(test)]
-    mod tests {
+    #[test]
+    fn test_zero_copy_map_empty() {
+        GhostToken::new(|token| {
+            let map: BrandedHashMap<&str, i32> = BrandedHashMap::new();
+
+            assert_eq!(map.find_ref(&token, |_, _| true), None);
+            assert!(!map.any_ref(&token, |_, _| true));
+            assert!(map.all_ref(&token, |_, _| false)); // vacuously true
+        });
+    }
+
+    #[test]
+    fn test_zero_copy_map_single_entry() {
+        GhostToken::new(|token| {
+            let mut map = BrandedHashMap::new();
+            map.insert("single", 42);
+
+            assert_eq!(
+                map.find_ref(&token, |k, v| *k == "single" && *v == 42),
+                Some((&"single", &42))
+            );
+            assert!(map.any_ref(&token, |k, v| *k == "single" && *v == 42));
+            assert!(map.all_ref(&token, |k, v| *k == "single" && *v == 42));
+        });
+    }
+
+    #[test]
+    fn test_zero_copy_map_collision_handling() {
+        GhostToken::new(|token| {
+            let mut map = BrandedHashMap::new();
+
+            // Insert entries that might collide
+            map.insert("key1", 1);
+            map.insert("key2", 2);
+            map.insert("key3", 3);
+
+            // All should be findable despite potential collisions
+            assert!(map
+                .find_ref(&token, |k, v| *k == "key1" && *v == 1)
+                .is_some());
+            assert!(map
+                .find_ref(&token, |k, v| *k == "key2" && *v == 2)
+                .is_some());
+            assert!(map
+                .find_ref(&token, |k, v| *k == "key3" && *v == 3)
+                .is_some());
+
+            // Test removal and tombstone handling
+            assert_eq!(map.remove(&"key2"), Some(2));
+            assert_eq!(map.find_ref(&token, |k, _| *k == "key2"), None);
+
+            // Other entries should still be accessible
+            assert!(map
+                .find_ref(&token, |k, v| *k == "key1" && *v == 1)
+                .is_some());
+            assert!(map
+                .find_ref(&token, |k, v| *k == "key3" && *v == 3)
+                .is_some());
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
     use super::*;
     use crate::GhostToken;
 

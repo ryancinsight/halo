@@ -32,4 +32,3 @@ impl<'a> Iterator for CompressedNeighborIter<'a> {
         }
     }
 }
-

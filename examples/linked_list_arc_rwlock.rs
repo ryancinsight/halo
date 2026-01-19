@@ -13,7 +13,10 @@ struct Node {
 
 fn main() {
     // Build a 3-node list: 1 -> 2 -> 3
-    let n3 = Arc::new(RwLock::new(Node { value: 3, next: None }));
+    let n3 = Arc::new(RwLock::new(Node {
+        value: 3,
+        next: None,
+    }));
     let n2 = Arc::new(RwLock::new(Node {
         value: 2,
         next: Some(Arc::clone(&n3)),
@@ -46,5 +49,3 @@ fn main() {
     assert_eq!(v2, 20);
     assert_eq!(v3, 30);
 }
-
-
