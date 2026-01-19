@@ -1,6 +1,3 @@
-pub mod wait_queue;
-pub mod mutex;
-pub mod condvar;
+pub mod mpmc;
 
-pub use mutex::{GhostMutex, GhostMutexGuard};
-pub use condvar::GhostCondvar;
+pub use mpmc::GhostRingBuffer;

@@ -1,95 +1,56 @@
-use halo::concurrency::sync::{GhostMutex, GhostCondvar};
-use halo::GhostToken;
-use std::sync::Arc;
+use halo::concurrency::sync::GhostRingBuffer;
 use std::thread;
-use std::time::Duration;
+use std::sync::Arc;
 
 #[test]
-fn test_mutex_basic() {
-    GhostToken::new(|token| {
-        let mutex = GhostMutex::new(token);
-        {
-            let guard = mutex.lock();
-            assert!(guard.is_valid());
-        }
-        {
-            let guard = mutex.lock();
-             assert!(guard.is_valid());
-        }
-    });
+fn test_ring_buffer_basic() {
+    let buffer = GhostRingBuffer::<'static, i32>::new(4);
+    assert!(buffer.push(1).is_ok());
+    assert!(buffer.push(2).is_ok());
+    assert_eq!(buffer.pop(), Some(1));
+    assert_eq!(buffer.pop(), Some(2));
+    assert_eq!(buffer.pop(), None);
 }
 
 #[test]
-fn test_mutex_contention() {
-    GhostToken::new(|token| {
-        let mutex = Arc::new(GhostMutex::new(token));
-        let m1 = mutex.clone();
-        let m2 = mutex.clone();
+fn test_ring_buffer_full() {
+    let buffer = GhostRingBuffer::<'static, i32>::new(2);
+    assert!(buffer.push(1).is_ok());
+    assert!(buffer.push(2).is_ok());
+    assert!(buffer.push(3).is_err()); // Full
+    assert_eq!(buffer.pop(), Some(1));
+    assert!(buffer.push(3).is_ok());
+    assert_eq!(buffer.pop(), Some(2));
+    assert_eq!(buffer.pop(), Some(3));
+}
 
-        thread::scope(|s| {
-            let t1 = s.spawn(move || {
-                for _ in 0..100 {
-                    let _g = m1.lock();
+#[test]
+fn test_ring_buffer_concurrent() {
+    let buffer = Arc::new(GhostRingBuffer::<'static, i32>::new(16));
+    let b1 = buffer.clone();
+    let b2 = buffer.clone();
+
+    thread::scope(|s| {
+        s.spawn(move || {
+            for i in 0..100 {
+                while b1.push(i).is_err() {
+                    thread::yield_now();
                 }
-            });
-
-            let t2 = s.spawn(move || {
-                 for _ in 0..100 {
-                     let _g = m2.lock();
-                 }
-            });
-
-            t1.join().unwrap();
-            t2.join().unwrap();
-        });
-    });
-}
-
-#[test]
-fn test_condvar() {
-    GhostToken::new(|token| {
-        let mutex = Arc::new(GhostMutex::new(token));
-        let cond = Arc::new(GhostCondvar::new());
-
-        let m1 = mutex.clone();
-        let c1 = cond.clone();
-
-        thread::scope(|s| {
-            let t = s.spawn(move || {
-                let guard = m1.lock();
-                let _guard = c1.wait(guard);
-            });
-
-            thread::sleep(Duration::from_millis(50));
-            cond.notify_one();
-            t.join().unwrap();
-        });
-    });
-}
-
-#[test]
-fn test_condvar_notify_all() {
-    GhostToken::new(|token| {
-        let mutex = Arc::new(GhostMutex::new(token));
-        let cond = Arc::new(GhostCondvar::new());
-
-        thread::scope(|s| {
-            let mut handles = vec![];
-            for _ in 0..5 {
-                let m = mutex.clone();
-                let c = cond.clone();
-                handles.push(s.spawn(move || {
-                    let guard = m.lock();
-                    let _g = c.wait(guard);
-                }));
             }
+        });
 
-            thread::sleep(Duration::from_millis(100));
-            cond.notify_all();
-
-            for h in handles {
-                h.join().unwrap();
+        s.spawn(move || {
+            let mut count = 0;
+            let mut sum = 0;
+            while count < 100 {
+                if let Some(i) = b2.pop() {
+                    sum += i;
+                    count += 1;
+                } else {
+                    thread::yield_now();
+                }
             }
+            assert_eq!(sum, (0..100).sum());
         });
     });
 }

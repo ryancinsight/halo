@@ -1,75 +1,83 @@
 use criterion::{criterion_group, criterion_main, Criterion, black_box};
-use halo::concurrency::sync::{GhostMutex};
-use halo::GhostToken;
+use halo::concurrency::sync::{GhostRingBuffer};
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-fn bench_mutex(c: &mut Criterion) {
-    let mut group = c.benchmark_group("mutex");
+fn bench_mpmc(c: &mut Criterion) {
+    let mut group = c.benchmark_group("mpmc");
 
-    group.bench_function("std_mutex_uncontended", |b| {
-        let mutex = Mutex::new(0);
+    const CAP: usize = 128;
+    const ITEMS: usize = 1000;
+
+    group.bench_function("std_mutex_vec_deque", |b| {
+        let queue = Arc::new(Mutex::new(VecDeque::with_capacity(CAP)));
         b.iter(|| {
-            let mut guard = mutex.lock().unwrap();
-            *guard += 1;
-            black_box(*guard);
-        })
-    });
+            let q1 = queue.clone();
+            let q2 = queue.clone();
 
-    group.bench_function("ghost_mutex_uncontended", |b| {
-        GhostToken::new(|token| {
-            let mutex = GhostMutex::new(token);
-            b.iter(|| {
-                let mut guard = mutex.lock();
-                black_box(&mut *guard);
-            })
-        })
-    });
-
-    group.bench_function("std_mutex_contended", |b| {
-        let mutex = Arc::new(Mutex::new(0));
-        b.iter(|| {
-            let m = mutex.clone();
             thread::scope(|s| {
-                let t = s.spawn(move || {
-                    for _ in 0..1000 {
-                        let mut guard = m.lock().unwrap();
-                        *guard += 1;
+                s.spawn(move || {
+                    for i in 0..ITEMS {
+                        loop {
+                            let mut g = q1.lock().unwrap();
+                            if g.len() < CAP {
+                                g.push_back(i);
+                                break;
+                            }
+                            drop(g);
+                            thread::yield_now();
+                        }
                     }
                 });
-                for _ in 0..1000 {
-                    let mut guard = mutex.lock().unwrap();
-                    *guard += 1;
-                }
-                t.join().unwrap();
+
+                s.spawn(move || {
+                    let mut count = 0;
+                    while count < ITEMS {
+                         let mut g = q2.lock().unwrap();
+                         if let Some(i) = g.pop_front() {
+                             black_box(i);
+                             count += 1;
+                         }
+                         drop(g);
+                         if count < ITEMS {
+                              // Don't spin too hard
+                         }
+                    }
+                });
             });
         })
     });
 
-    group.bench_function("ghost_mutex_contended", |b| {
-        GhostToken::new(|token| {
-             let mutex = Arc::new(GhostMutex::new(token));
-             b.iter(|| {
-                 let m = mutex.clone();
-                 thread::scope(|s| {
-                     let t = s.spawn(move || {
-                         for _ in 0..1000 {
-                             let mut guard = m.lock();
-                             black_box(&mut *guard);
+    group.bench_function("ghost_ring_buffer", |b| {
+         b.iter(|| {
+             let buffer = GhostRingBuffer::new(CAP);
+             let buffer = &buffer;
+
+             thread::scope(|s| {
+                 s.spawn(move || {
+                     for i in 0..ITEMS {
+                         while buffer.push(i).is_err() {
+                             std::hint::spin_loop();
                          }
-                     });
-                     for _ in 0..1000 {
-                         let mut guard = mutex.lock();
-                         black_box(&mut *guard);
                      }
-                     t.join().unwrap();
                  });
-             })
-        })
+
+                 s.spawn(move || {
+                     let mut count = 0;
+                     while count < ITEMS {
+                         if let Some(i) = buffer.pop() {
+                             black_box(i);
+                             count += 1;
+                         }
+                     }
+                 });
+             });
+         })
     });
 
     group.finish();
 }
 
-criterion_group!(benches, bench_mutex);
+criterion_group!(benches, bench_mpmc);
 criterion_main!(benches);
