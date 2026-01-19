@@ -427,7 +427,10 @@ impl<'brand, T> Extend<T> for BrandedVecDeque<'brand, T> {
 impl<'brand, T> BrandedVecDeque<'brand, T> {
     /// Creates a draining iterator that removes the specified range in the deque
     /// and yields the removed items.
-    pub fn drain<R>(&mut self, range: R) -> std::vec::IntoIter<T>
+    ///
+    /// The iterator yields the elements in the range. When the iterator is dropped,
+    /// the remaining elements in the deque are shifted to close the gap.
+    pub fn drain<R>(&mut self, range: R) -> Drain<'_, 'brand, T>
     where
         R: std::ops::RangeBounds<usize>,
     {
@@ -444,26 +447,239 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
         };
 
         if start >= end || start >= len {
-            return Vec::new().into_iter();
+            // Empty range or out of bounds (effectively empty if start >= len)
+            return Drain {
+                deque: self,
+                start,
+                count: 0,
+                iter_pos: 0,
+                drained: 0,
+            };
         }
         let end = std::cmp::min(end, len);
         let count = end - start;
 
-        let mut new_dq = Self::with_capacity(self.cap);
-        let mut drain_items = Vec::with_capacity(count);
+        Drain {
+            deque: self,
+            start,
+            count,
+            iter_pos: 0,
+            drained: 0,
+        }
+    }
+}
 
-        // We can iterate efficiently using index
-        for i in 0..len {
-            let item = self.pop_front().unwrap().into_inner();
-            if i >= start && i < end {
-                drain_items.push(item);
-            } else {
-                new_dq.push_back(item);
+/// A draining iterator for `BrandedVecDeque`.
+pub struct Drain<'a, 'brand, T> {
+    deque: &'a mut BrandedVecDeque<'brand, T>,
+    /// Index of the start of the drain range (logical index)
+    start: usize,
+    /// Number of elements to drain
+    count: usize,
+    /// Current iteration position relative to `start`
+    iter_pos: usize,
+    /// Number of elements actually drained (yielded or dropped)
+    drained: usize,
+}
+
+impl<'a, 'brand, T> Iterator for Drain<'a, 'brand, T> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.iter_pos < self.count {
+            // Get element at start + iter_pos
+            // This is just a read + logical remove (but we don't shift yet)
+            // We use `ptr::read` to take the value out.
+            // The slot becomes logically uninitialized until we shift.
+
+            let idx = self.start + self.iter_pos;
+            let actual_idx = (self.deque.head + idx) % self.deque.cap;
+
+            unsafe {
+                let ptr = self.deque.ptr.as_ptr().add(actual_idx);
+                let cell = ptr::read(ptr);
+                self.iter_pos += 1;
+                self.drained += 1; // Mark as drained
+                Some(cell.into_inner())
+            }
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.count - self.iter_pos;
+        (remaining, Some(remaining))
+    }
+}
+
+impl<'a, 'brand, T> Drop for Drain<'a, 'brand, T> {
+    fn drop(&mut self) {
+        // Drop remaining elements in the range
+        while self.iter_pos < self.count {
+             let idx = self.start + self.iter_pos;
+             let actual_idx = (self.deque.head + idx) % self.deque.cap;
+             unsafe {
+                 let ptr = self.deque.ptr.as_ptr().add(actual_idx);
+                 ptr::drop_in_place(ptr);
+             }
+             self.iter_pos += 1;
+             // self.drained does not need increment here as we handle total range
+        }
+
+        // Shift elements to close the gap
+        // The gap is `[start, start + count)`.
+        // We need to move elements after `start + count` to `start`.
+        // Or move elements before `start` to `start + count`?
+        // std::VecDeque chooses the smaller move.
+
+        let start = self.start;
+        let count = self.count;
+        let deque_len = self.deque.len;
+        let tail_len = deque_len - (start + count);
+        let head_len = start;
+
+        // We removed `count` elements.
+        // New length will be deque_len - count.
+
+        if head_len < tail_len {
+            // Move head part forward (towards gap)
+            // Gap is at `start`. We move `0..start` to `count..start+count`.
+            // Wait, we move `0..start` to `0+count..start+count`?
+            // No, we shift `0..start` RIGHT by `count` positions?
+            // No, we removed `count`. We want to close the gap.
+            // If we shift head, we shift it RIGHT? No, that opens a gap at 0.
+            // Wait.
+            // Old state: [H...H] [G...G] [T...T]
+            //             0..start  start..end  end..len
+            // We want:   [H...H] [T...T]
+            //
+            // If we move T to left: [H...H] [T...T] ...
+            // If we move H to right: ... [H...H] [T...T]
+            //
+            // If we move H to right: head moves right by `count`.
+
+            // Move 0..start to 0+count..start+count
+            // Since ring buffer, we use `wrap_copy`.
+
+            unsafe {
+                self.deque.wrap_copy(self.deque.head, self.deque.head + count, head_len);
+                self.deque.head = (self.deque.head + count) % self.deque.cap;
+            }
+        } else {
+            // Move tail part left
+            // Move start+count..len to start..len-count
+            let src_logical = start + count;
+            let dst_logical = start;
+            let len = tail_len;
+
+            // Calculate actual indices
+            // We need `wrap_copy`. But logical indices are easier.
+            // Implementation of `wrap_copy` is needed.
+            // Wait, I don't have `wrap_copy`. I need to implement it or inline it.
+
+            // Inline logic for moving tail left
+            unsafe {
+                // We want to copy from `src_logical` to `dst_logical` for `len` items.
+                // We iterate? No, bulk copy.
+                // Since it's ring buffer, we might have 1 or 2 chunks.
+                // It's effectively `copy_overlapping` (memmove) logic but with wrap.
+
+                // Simplified: use a helper for logical range copy.
+                // But logical indices are relative to `self.deque.head`.
+
+                self.deque.copy_range(src_logical, dst_logical, len);
             }
         }
 
-        *self = new_dq;
-        drain_items.into_iter()
+        self.deque.len -= count;
+    }
+}
+
+impl<'brand, T> BrandedVecDeque<'brand, T> {
+    /// Copies `len` elements from logical index `src` to logical index `dst`.
+    /// Handles wrapping.
+    unsafe fn copy_range(&mut self, src: usize, dst: usize, len: usize) {
+        if len == 0 { return; }
+
+        // Convert to physical indices
+        let head = self.head;
+        let cap = self.cap;
+        let ptr = self.ptr.as_ptr();
+
+        // We can't easily do a single copy if wrapped.
+        // We effectively perform `ptr::copy` (memmove).
+        // Since it's a ring buffer, src and dst ranges might wrap.
+        // And they might overlap.
+
+        // To handle overlap correctly with wrapping is tricky.
+        // But `ptr::copy` handles overlap. We just need to handle wrapping.
+        // A simple way is to copy element by element if we don't want to optimize yet?
+        // No, we want performance.
+
+        // Since we are inside `drain`, we know the gap size.
+        // But `copy_range` is generic.
+
+        // Let's implement element-wise copy for simplicity and correctness first?
+        // Or handle the 4 cases of wrapping (src wrapped, dst wrapped, etc).
+
+        // Actually, std::VecDeque implementation is complex.
+        // Given constraints, maybe element-wise loop is safer than buggy memcpy logic for now,
+        // and still O(N) (just higher constant).
+        // But we want "optimizing performance".
+
+        // Let's try to do it right.
+        // We can construct slices for src range and dst range.
+        // But `as_mut_slices` gives whole deque.
+        // We want specific ranges.
+
+        // We can do it in two passes max (contiguous or wrapped).
+        // If src wraps, we have 2 src chunks.
+        // If dst wraps, we have 2 dst chunks.
+        // This is generic copy on ring buffer.
+
+        // Let's implement `wrap_copy` properly.
+        // We assume `src` and `dst` are logical indices relative to `head`.
+
+        // But wait, `copy_range` is hard.
+        // Let's look at `wrap_copy` in logic above:
+        // `self.deque.wrap_copy(self.deque.head, self.deque.head + count, head_len);`
+        // Here arguments are physical indices (modulo cap logic handled inside or outside?).
+        // `self.deque.head` is physical. `count` is offset.
+        // So `wrap_copy` should take physical indices (unwrapped) or handle wrap?
+        // "logical index" usually means 0..len.
+
+        // Let's assume `copy_range` takes logical indices 0..len.
+
+        for i in 0..len {
+            let s_idx = (head + src + i) % cap;
+            let d_idx = (head + dst + i) % cap;
+            let s_ptr = ptr.add(s_idx);
+            let d_ptr = ptr.add(d_idx);
+            ptr::copy(s_ptr, d_ptr, 1);
+        }
+    }
+
+    // Helper for shifting head right
+    unsafe fn wrap_copy(&mut self, src_physical: usize, dst_physical: usize, len: usize) {
+         let cap = self.cap;
+         let ptr = self.ptr.as_ptr();
+
+         // This is used for shifting head.
+         // We copy `len` items from `src_physical` to `dst_physical`.
+         // Both indices might wrap conceptually, but `src_physical` is `head`.
+         // `dst_physical` is `head + count`.
+
+         // Use backward copy to be safe?
+         // When shifting head right, we move 0->count, 1->count+1...
+         // If we iterate forward, we overwrite if count < len.
+         // We should use `ptr::copy` which handles overlap.
+
+         for i in (0..len).rev() {
+             let s_idx = (src_physical + i) % cap;
+             let d_idx = (dst_physical + i) % cap;
+             ptr::copy(ptr.add(s_idx), ptr.add(d_idx), 1);
+         }
     }
 }
 
@@ -569,6 +785,46 @@ mod tests {
             // s2: buffer[0..1] -> [5]
             assert_eq!(s1, &[2, 3, 4]);
             assert_eq!(s2, &[5]);
+        });
+    }
+
+    #[test]
+    fn branded_vec_deque_drain() {
+        GhostToken::new(|mut token| {
+            let mut dq = BrandedVecDeque::new();
+            for i in 0..10 {
+                dq.push_back(i);
+            }
+
+            // Drain middle [3, 4, 5, 6]
+            let drained: Vec<_> = dq.drain(3..7).collect();
+            assert_eq!(drained, vec![3, 4, 5, 6]);
+
+            // Remaining: [0, 1, 2, 7, 8, 9]
+            let remaining: Vec<_> = dq.iter(&token).copied().collect();
+            assert_eq!(remaining, vec![0, 1, 2, 7, 8, 9]);
+            assert_eq!(dq.len(), 6);
+        });
+    }
+
+    #[test]
+    fn branded_vec_deque_drain_wrap() {
+        GhostToken::new(|mut token| {
+            // Force wrap: cap 8
+            let mut dq = BrandedVecDeque::with_capacity(8);
+            for i in 0..5 { dq.push_back(i); } // [0,1,2,3,4]
+            for _ in 0..2 { dq.pop_front(); } // [_,_,2,3,4] head=2
+            for i in 5..8 { dq.push_back(i); } // [5,6,7,_,_,2,3,4] wrapped
+
+            // Current logical: [2, 3, 4, 5, 6, 7]
+            // Drain [3, 4, 5] -> indices 1..4 (exclusive)
+
+            let drained: Vec<_> = dq.drain(1..4).collect();
+            assert_eq!(drained, vec![3, 4, 5]);
+
+            // Remaining: [2, 6, 7]
+            let remaining: Vec<_> = dq.iter(&token).copied().collect();
+            assert_eq!(remaining, vec![2, 6, 7]);
         });
     }
 }
