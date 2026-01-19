@@ -111,25 +111,15 @@ pub mod graph;
 pub mod token;
 
 pub use alloc::BrandedArena;
-pub use cell::{GhostCell, GhostLazyCell, GhostLazyLock, GhostOnceCell, GhostUnsafeCell, RawGhostCell, GhostRefCell};
+pub use cell::{
+    GhostCell, GhostLazyCell, GhostLazyLock, GhostOnceCell, GhostRefCell, GhostUnsafeCell,
+    RawGhostCell,
+};
 pub use collections::{
-    BrandedVec,
-    BrandedArray,
-    BrandedVecDeque,
-    BrandedHashMap,
-    BrandedHashSet,
-    BrandedCowStrings,
-    BrandedString,
-    BrandedDoublyLinkedList,
-    BrandedIntervalMap,
-    BrandedSegmentTree,
-    BrandedSegmentTreeViewMut,
-    ActivateVec,
-    ActiveVec,
-    BrandedSlice,
-    BrandedSliceMut,
-    BrandedMatrix,
-    BrandedMatrixViewMut,
+    ActivateVec, ActiveVec, BrandedArray, BrandedCowStrings, BrandedDoublyLinkedList,
+    BrandedHashMap, BrandedHashSet, BrandedIntervalMap, BrandedMatrix, BrandedMatrixViewMut,
+    BrandedSegmentTree, BrandedSegmentTreeViewMut, BrandedSlice, BrandedSliceMut, BrandedString,
+    BrandedVec, BrandedVecDeque,
 };
 pub use graph::{GhostAdjacencyGraph, GhostBipartiteGraph, GhostCscGraph, GhostCsrGraph, GhostDag};
 pub use token::{GhostToken, SharedGhostToken};
@@ -149,15 +139,23 @@ const _: () = {
     // `GhostUnsafeCell` is `repr(transparent)` over `UnsafeCell<T>` (brand is a ZST),
     // therefore it must match size + alignment exactly.
     assert!(
-        mem::size_of::<GhostUnsafeCell<'static, i32>>() == mem::size_of::<core::cell::UnsafeCell<i32>>()
+        mem::size_of::<GhostUnsafeCell<'static, i32>>()
+            == mem::size_of::<core::cell::UnsafeCell<i32>>()
     );
     assert!(
-        mem::align_of::<GhostUnsafeCell<'static, i32>>() == mem::align_of::<core::cell::UnsafeCell<i32>>()
+        mem::align_of::<GhostUnsafeCell<'static, i32>>()
+            == mem::align_of::<core::cell::UnsafeCell<i32>>()
     );
 
     // `GhostCell` must remain a thin wrapper around the raw cell.
-    assert!(mem::size_of::<GhostCell<'static, i32>>() == mem::size_of::<GhostUnsafeCell<'static, i32>>());
-    assert!(mem::align_of::<GhostCell<'static, i32>>() == mem::align_of::<GhostUnsafeCell<'static, i32>>());
+    assert!(
+        mem::size_of::<GhostCell<'static, i32>>()
+            == mem::size_of::<GhostUnsafeCell<'static, i32>>()
+    );
+    assert!(
+        mem::align_of::<GhostCell<'static, i32>>()
+            == mem::align_of::<GhostUnsafeCell<'static, i32>>()
+    );
 
     // Lazy/once primitives should remain small and allocation-free (struct size).
     // These are intentionally loose upper bounds to avoid platform brittleness,

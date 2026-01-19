@@ -3,11 +3,11 @@
 //! This implementation uses a `BrandedHashMap` for O(1) lookups and a
 //! `BrandedDoublyLinkedList` for O(1) maintenance of the LRU order.
 
-use crate::GhostToken;
 use crate::collections::hash::BrandedHashMap;
 use crate::collections::other::BrandedDoublyLinkedList;
-use core::hash::Hash;
+use crate::GhostToken;
 use core::fmt;
+use core::hash::Hash;
 
 /// A Least Recently Used (LRU) cache.
 ///
@@ -66,7 +66,11 @@ where
     }
 
     /// A version of `get` that allows mutating the value.
-    pub fn get_mut<'a>(&'a mut self, token: &'a mut GhostToken<'brand>, key: &K) -> Option<&'a mut V> {
+    pub fn get_mut<'a>(
+        &'a mut self,
+        token: &'a mut GhostToken<'brand>,
+        key: &K,
+    ) -> Option<&'a mut V> {
         if let Some(&index) = self.map.get(token, key) {
             self.list.move_to_front(token, index);
             let (_, v) = self.list.get_mut(token, index).unwrap();
@@ -79,8 +83,8 @@ where
     /// Returns a reference to the value without updating the LRU order.
     pub fn peek<'a>(&'a self, token: &'a GhostToken<'brand>, key: &K) -> Option<&'a V> {
         if let Some(&index) = self.map.get(token, key) {
-             let (_, v) = self.list.get(token, index).unwrap();
-             Some(v)
+            let (_, v) = self.list.get(token, index).unwrap();
+            Some(v)
         } else {
             None
         }
@@ -163,8 +167,8 @@ mod tests {
             // Order should still be b, a. "a" was not moved.
 
             cache.put(&mut token, "c", 3); // Should evict "a" if order was preserved
-            // If peek moved "a", it would be a, b -> evict b.
-            // If peek didn't move, it is b, a -> evict a.
+                                           // If peek moved "a", it would be a, b -> evict b.
+                                           // If peek didn't move, it is b, a -> evict a.
 
             assert_eq!(cache.get(&mut token, &"a"), None);
             assert_eq!(cache.get(&mut token, &"b"), Some(&2));

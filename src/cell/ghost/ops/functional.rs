@@ -1,5 +1,5 @@
-use crate::GhostToken;
 use super::super::GhostCell;
+use crate::GhostToken;
 
 impl<'brand, T> GhostCell<'brand, T> {
     /// Applies a function to the shared borrow and returns its result.
@@ -46,10 +46,3 @@ impl<'brand, T: Clone> GhostCell<'brand, T> {
         self.borrow(token).clone()
     }
 }
-
-
-
-
-
-
-

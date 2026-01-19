@@ -10,8 +10,8 @@ use core::{
     ptr,
 };
 
-use crate::{GhostToken, GhostUnsafeCell};
 use crate::cell::raw::access::ghost_unsafe_cell as guc;
+use crate::{GhostToken, GhostUnsafeCell};
 use inner::{Inner, State};
 
 /// A token-gated one-shot lazy value.
@@ -114,5 +114,3 @@ unsafe impl<'brand, T: Sync, F: Sync> Sync for GhostLazyLock<'brand, T, F> {}
 const _: () = {
     let _ = MaybeUninit::<GhostLazyLock<'static, u64, fn() -> u64>>::uninit();
 };
-
-

@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BatchSize};
+use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 use halo::alloc::BrandedBumpAllocator;
 use halo::GhostToken;
 
@@ -29,17 +29,17 @@ fn bench_alloc_batch(c: &mut Criterion) {
     group.bench_function("BrandedBumpAllocator", |b| {
         b.iter_batched(
             || {
-                 // We need to return the allocator setup, but we can't easily pass the token.
-                 // So we will create the token inside the measurement.
-                 // This adds token creation overhead to the benchmark, but it should be minimal (ZST).
+                // We need to return the allocator setup, but we can't easily pass the token.
+                // So we will create the token inside the measurement.
+                // This adds token creation overhead to the benchmark, but it should be minimal (ZST).
             },
             |()| {
-                 GhostToken::new(|mut token| {
+                GhostToken::new(|mut token| {
                     let allocator = BrandedBumpAllocator::new();
                     for i in 0..BATCH_SIZE {
                         black_box(allocator.alloc(i, &mut token));
                     }
-                 });
+                });
             },
             BatchSize::SmallInput,
         )
@@ -74,5 +74,10 @@ fn bench_alloc_mixed(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_alloc_single, bench_alloc_batch, bench_alloc_mixed);
+criterion_group!(
+    benches,
+    bench_alloc_single,
+    bench_alloc_batch,
+    bench_alloc_mixed
+);
 criterion_main!(benches);

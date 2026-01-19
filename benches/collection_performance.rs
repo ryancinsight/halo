@@ -6,13 +6,13 @@
 //! Results are automatically exported to JSON for analysis and presentation.
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use std::sync::{Mutex, RwLock, Arc};
-use std::cell::{RefCell, Cell};
+use halo::collections::{ZeroCopyMapOps, ZeroCopyOps};
+use halo::{BrandedHashMap, BrandedVec, GhostToken};
+use serde::{Deserialize, Serialize};
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
-use halo::{GhostToken, BrandedVec, BrandedHashMap};
-use halo::collections::{ZeroCopyOps, ZeroCopyMapOps};
-use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct BenchmarkResult {
@@ -34,9 +34,16 @@ struct BenchmarkResults {
 
 static RESULTS: Mutex<Vec<BenchmarkResult>> = Mutex::new(Vec::new());
 
-fn record_result(collection: &str, operation: &str, time_ns: f64, std_dev_ns: f64,
-                 refcell_time: Option<f64>, cell_time: Option<f64>,
-                 mutex_time: Option<f64>, rwlock_time: Option<f64>) {
+fn record_result(
+    collection: &str,
+    operation: &str,
+    time_ns: f64,
+    std_dev_ns: f64,
+    refcell_time: Option<f64>,
+    cell_time: Option<f64>,
+    mutex_time: Option<f64>,
+    rwlock_time: Option<f64>,
+) {
     let mut results = RESULTS.lock().unwrap();
     results.push(BenchmarkResult {
         collection: collection.to_string(),
@@ -78,7 +85,10 @@ fn export_results() {
 
     let mut by_operation: HashMap<String, Vec<&BenchmarkResult>> = HashMap::new();
     for result in results.iter() {
-        by_operation.entry(result.operation.clone()).or_insert(Vec::new()).push(result);
+        by_operation
+            .entry(result.operation.clone())
+            .or_insert(Vec::new())
+            .push(result);
     }
 
     for (operation, results) in by_operation {
@@ -112,7 +122,7 @@ fn export_results() {
             if let Some(ratio) = result.vs_rwlock {
                 if ratio > 1.0 {
                     print!(" {:.1}x faster than RwLock", ratio);
-                    }
+                }
             }
 
             println!();
@@ -165,7 +175,7 @@ fn bench_vec_interior_mutability(c: &mut Criterion) {
                     }
                     black_box(sum);
                 },
-                criterion::BatchSize::SmallInput
+                criterion::BatchSize::SmallInput,
             );
         });
     });
@@ -180,7 +190,7 @@ fn bench_vec_interior_mutability(c: &mut Criterion) {
                 }
                 black_box(sum);
             },
-            criterion::BatchSize::SmallInput
+            criterion::BatchSize::SmallInput,
         );
     });
 
@@ -194,7 +204,7 @@ fn bench_vec_interior_mutability(c: &mut Criterion) {
                 }
                 black_box(sum);
             },
-            criterion::BatchSize::SmallInput
+            criterion::BatchSize::SmallInput,
         );
     });
 
@@ -208,7 +218,7 @@ fn bench_vec_interior_mutability(c: &mut Criterion) {
                         *branded_vec.get_mut(&mut token, i % 1000).unwrap() += 1;
                     }
                 },
-                criterion::BatchSize::SmallInput
+                criterion::BatchSize::SmallInput,
             );
         });
     });
@@ -221,7 +231,7 @@ fn bench_vec_interior_mutability(c: &mut Criterion) {
                     *refcell_vec[i % 1000].borrow_mut() += 1;
                 }
             },
-            criterion::BatchSize::SmallInput
+            criterion::BatchSize::SmallInput,
         );
     });
 
@@ -233,7 +243,7 @@ fn bench_vec_interior_mutability(c: &mut Criterion) {
                     cell_vec[i % 1000].set(cell_vec[i % 1000].get() + 1);
                 }
             },
-            criterion::BatchSize::SmallInput
+            criterion::BatchSize::SmallInput,
         );
     });
 
@@ -241,10 +251,28 @@ fn bench_vec_interior_mutability(c: &mut Criterion) {
 
     // Note: In a real implementation, we'd capture the actual timing data
     // For now, we'll use approximate values based on our previous benchmark results
-    record_result("BrandedVec", "read", 21.768, 1.0, Some(227.28), Some(18.981), None, None);
+    record_result(
+        "BrandedVec",
+        "read",
+        21.768,
+        1.0,
+        Some(227.28),
+        Some(18.981),
+        None,
+        None,
+    );
     record_result("RefCell", "read", 227.28, 5.0, None, None, None, None);
     record_result("Cell", "read", 18.981, 1.0, None, None, None, None);
-    record_result("BrandedVec", "write", 36.326, 2.0, Some(255.30), Some(33.529), None, None);
+    record_result(
+        "BrandedVec",
+        "write",
+        36.326,
+        2.0,
+        Some(255.30),
+        Some(33.529),
+        None,
+        None,
+    );
     record_result("RefCell", "write", 255.30, 8.0, None, None, None, None);
     record_result("Cell", "write", 33.529, 2.0, None, None, None, None);
 }
@@ -447,22 +475,121 @@ fn bench_concurrent_access(c: &mut Criterion) {
     group.finish();
 
     // Note: Similar recording for hashmap benchmarks
-    record_result("BrandedHashMap", "get", 4.758, 0.2, None, None, Some(9.796), Some(11.292));
+    record_result(
+        "BrandedHashMap",
+        "get",
+        4.758,
+        0.2,
+        None,
+        None,
+        Some(9.796),
+        Some(11.292),
+    );
     record_result("Mutex<HashMap>", "get", 9.796, 0.5, None, None, None, None);
-    record_result("RwLock<HashMap>", "get", 11.292, 0.6, None, None, None, None);
-    record_result("BrandedHashMap", "insert", 3.464, 0.15, None, None, Some(2.444), Some(1.973));
-    record_result("Mutex<HashMap>", "insert", 2.444, 0.1, None, None, None, None);
-    record_result("RwLock<HashMap>", "insert", 1.973, 0.08, None, None, None, None);
+    record_result(
+        "RwLock<HashMap>",
+        "get",
+        11.292,
+        0.6,
+        None,
+        None,
+        None,
+        None,
+    );
+    record_result(
+        "BrandedHashMap",
+        "insert",
+        3.464,
+        0.15,
+        None,
+        None,
+        Some(2.444),
+        Some(1.973),
+    );
+    record_result(
+        "Mutex<HashMap>",
+        "insert",
+        2.444,
+        0.1,
+        None,
+        None,
+        None,
+        None,
+    );
+    record_result(
+        "RwLock<HashMap>",
+        "insert",
+        1.973,
+        0.08,
+        None,
+        None,
+        None,
+        None,
+    );
 
     // Memory efficiency benchmarks
-    record_result("BrandedVec", "memory_layout", 665.96, 10.0, Some(990.21), Some(674.02), None, None);
-    record_result("RefCell<Vec>", "memory_layout", 990.21, 15.0, None, None, None, None);
-    record_result("Cell<Vec>", "memory_layout", 674.02, 12.0, None, None, None, None);
+    record_result(
+        "BrandedVec",
+        "memory_layout",
+        665.96,
+        10.0,
+        Some(990.21),
+        Some(674.02),
+        None,
+        None,
+    );
+    record_result(
+        "RefCell<Vec>",
+        "memory_layout",
+        990.21,
+        15.0,
+        None,
+        None,
+        None,
+        None,
+    );
+    record_result(
+        "Cell<Vec>",
+        "memory_layout",
+        674.02,
+        12.0,
+        None,
+        None,
+        None,
+        None,
+    );
 
     // Concurrent access benchmarks
-    record_result("BrandedVec", "single_thread", 31.221, 1.0, None, None, Some(9340.5), Some(9249.3));
-    record_result("Mutex<Vec>", "single_thread", 9340.5, 50.0, None, None, None, None);
-    record_result("RwLock<Vec>", "single_thread", 9249.3, 48.0, None, None, None, None);
+    record_result(
+        "BrandedVec",
+        "single_thread",
+        31.221,
+        1.0,
+        None,
+        None,
+        Some(9340.5),
+        Some(9249.3),
+    );
+    record_result(
+        "Mutex<Vec>",
+        "single_thread",
+        9340.5,
+        50.0,
+        None,
+        None,
+        None,
+        None,
+    );
+    record_result(
+        "RwLock<Vec>",
+        "single_thread",
+        9249.3,
+        48.0,
+        None,
+        None,
+        None,
+        None,
+    );
 
     // Export results
     export_results();

@@ -2,12 +2,7 @@ use super::*;
 
 #[test]
 fn lel_graph_basic_operations() {
-    let adjacency = vec![
-        vec![1, 2, 3],
-        vec![0, 2],
-        vec![0, 1, 3],
-        vec![0, 2],
-    ];
+    let adjacency = vec![vec![1, 2, 3], vec![0, 2], vec![0, 1, 3], vec![0, 2]];
 
     let graph = GhostLelGraph::from_adjacency(&adjacency);
 
@@ -44,12 +39,7 @@ fn lel_compression_stats() {
 
 #[test]
 fn lel_graph_bfs() {
-    let adjacency = vec![
-        vec![1, 2],
-        vec![0, 2, 3],
-        vec![0, 1],
-        vec![1],
-    ];
+    let adjacency = vec![vec![1, 2], vec![0, 2, 3], vec![0, 1], vec![1]];
     let graph = GhostLelGraph::from_adjacency(&adjacency);
     let traversal = graph.bfs(0);
     assert!(!traversal.is_empty());
@@ -58,6 +48,3 @@ fn lel_graph_bfs() {
     assert!(traversal.contains(&2));
     assert!(traversal.contains(&3));
 }
-
-
-

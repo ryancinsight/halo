@@ -12,12 +12,12 @@
 //!
 //! Access is controlled via `GhostToken`.
 
-use crate::{GhostToken, BrandedVec};
+use crate::collections::{BrandedCollection, ZeroCopyMapOps};
+use crate::{BrandedVec, GhostToken};
 use std::borrow::Borrow;
 use std::cmp::Ordering;
-use std::mem::MaybeUninit;
 use std::marker::PhantomData;
-use crate::collections::{BrandedCollection, ZeroCopyMapOps};
+use std::mem::MaybeUninit;
 
 const MAX_LEVEL: usize = 16;
 const CHUNK_SIZE: usize = 16;
@@ -62,7 +62,9 @@ struct XorShift64 {
 
 impl XorShift64 {
     fn new(seed: u64) -> Self {
-        Self { state: if seed == 0 { 0xDEAD_BEEF_CAFE } else { seed } }
+        Self {
+            state: if seed == 0 { 0xDEAD_BEEF_CAFE } else { seed },
+        }
     }
 
     fn next(&mut self) -> u64 {
@@ -174,7 +176,11 @@ where
     }
 
     /// Finds the entry.
-    fn find_entry<'a, Q: ?Sized>(&'a self, token: &'a GhostToken<'brand>, key: &Q) -> Option<(&'a K, &'a V)>
+    fn find_entry<'a, Q: ?Sized>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+        key: &Q,
+    ) -> Option<(&'a K, &'a V)>
     where
         K: Borrow<Q>,
         Q: Ord,
@@ -190,9 +196,7 @@ where
             // Find next chunk
             // Optimization: if level is 0, use next_chunk directly if we are at a node
             let next_idx = if level == 0 && curr.is_some() {
-                unsafe {
-                    self.nodes.get_unchecked(token, curr.index()).next_chunk
-                }
+                unsafe { self.nodes.get_unchecked(token, curr.index()).next_chunk }
             } else {
                 self.get_next_unchecked(token, curr, level)
             };
@@ -236,7 +240,11 @@ where
         None
     }
 
-    pub fn get_mut<'a, Q: ?Sized>(&'a self, token: &'a mut GhostToken<'brand>, key: &Q) -> Option<&'a mut V>
+    pub fn get_mut<'a, Q: ?Sized>(
+        &'a self,
+        token: &'a mut GhostToken<'brand>,
+        key: &Q,
+    ) -> Option<&'a mut V>
     where
         K: Borrow<Q>,
         Q: Ord,
@@ -251,9 +259,7 @@ where
 
         loop {
             let next_idx = if level == 0 && curr.is_some() {
-                unsafe {
-                    self.nodes.get_unchecked(token, curr.index()).next_chunk
-                }
+                unsafe { self.nodes.get_unchecked(token, curr.index()).next_chunk }
             } else {
                 self.get_next_unchecked(token, curr, level)
             };
@@ -267,7 +273,9 @@ where
                     }
                 }
             }
-            if level == 0 { break; }
+            if level == 0 {
+                break;
+            }
             level -= 1;
         }
 
@@ -288,11 +296,21 @@ where
     }
 
     // Helper
-    fn get_next(&self, token: &GhostToken<'brand>, curr: NodeIdx<'brand>, level: usize) -> NodeIdx<'brand> {
+    fn get_next(
+        &self,
+        token: &GhostToken<'brand>,
+        curr: NodeIdx<'brand>,
+        level: usize,
+    ) -> NodeIdx<'brand> {
         self.get_next_unchecked(token, curr, level)
     }
 
-    fn get_next_unchecked(&self, token: &GhostToken<'brand>, curr: NodeIdx<'brand>, level: usize) -> NodeIdx<'brand> {
+    fn get_next_unchecked(
+        &self,
+        token: &GhostToken<'brand>,
+        curr: NodeIdx<'brand>,
+        level: usize,
+    ) -> NodeIdx<'brand> {
         if curr.is_some() {
             unsafe {
                 let node = self.nodes.get_unchecked(token, curr.index());
@@ -330,7 +348,9 @@ where
                     }
                 }
                 update[level] = curr;
-                if level == 0 { break; }
+                if level == 0 {
+                    break;
+                }
                 level -= 1;
             }
         }
@@ -371,18 +391,18 @@ where
 
         let first_node_idx = self.head_links[0];
         if first_node_idx.is_some() {
-             // Insert into first node
-             unsafe {
-                 let node = self.nodes.get_unchecked_mut(token, first_node_idx.index());
-                 if (node.len as usize) < CHUNK_SIZE {
-                     self.insert_into_leaf(token, first_node_idx, key, value);
-                     self.len += 1;
-                     return None;
-                 }
-             }
-             self.split_and_insert(token, first_node_idx, &mut update, key, value);
-             self.len += 1;
-             return None;
+            // Insert into first node
+            unsafe {
+                let node = self.nodes.get_unchecked_mut(token, first_node_idx.index());
+                if (node.len as usize) < CHUNK_SIZE {
+                    self.insert_into_leaf(token, first_node_idx, key, value);
+                    self.len += 1;
+                    return None;
+                }
+            }
+            self.split_and_insert(token, first_node_idx, &mut update, key, value);
+            self.len += 1;
+            return None;
         }
 
         self.create_first_node(token, key, value);
@@ -414,7 +434,13 @@ where
         self.nodes.push(node);
     }
 
-    fn insert_into_leaf(&mut self, token: &mut GhostToken<'brand>, node_idx: NodeIdx<'brand>, key: K, value: V) {
+    fn insert_into_leaf(
+        &mut self,
+        token: &mut GhostToken<'brand>,
+        node_idx: NodeIdx<'brand>,
+        key: K,
+        value: V,
+    ) {
         unsafe {
             let node = self.nodes.get_unchecked_mut(token, node_idx.index());
             // Find position
@@ -431,12 +457,12 @@ where
                 std::ptr::copy(
                     node.keys.as_ptr().add(pos),
                     node.keys.as_mut_ptr().add(pos + 1),
-                    node.len as usize - pos
+                    node.len as usize - pos,
                 );
                 std::ptr::copy(
                     node.vals.as_ptr().add(pos),
                     node.vals.as_mut_ptr().add(pos + 1),
-                    node.len as usize - pos
+                    node.len as usize - pos,
                 );
             }
 
@@ -446,7 +472,14 @@ where
         }
     }
 
-    fn split_and_insert(&mut self, token: &mut GhostToken<'brand>, node_idx: NodeIdx<'brand>, update: &mut [NodeIdx<'brand>], key: K, value: V) {
+    fn split_and_insert(
+        &mut self,
+        token: &mut GhostToken<'brand>,
+        node_idx: NodeIdx<'brand>,
+        update: &mut [NodeIdx<'brand>],
+        key: K,
+        value: V,
+    ) {
         // 1. Create new node
         let new_level = self.random_level();
         if new_level > self.max_level {
@@ -490,30 +523,29 @@ where
                 std::ptr::copy_nonoverlapping(
                     node.keys.as_ptr().add(src_start),
                     new_node.keys.as_mut_ptr(),
-                    move_count
+                    move_count,
                 );
                 std::ptr::copy_nonoverlapping(
                     node.vals.as_ptr().add(src_start),
                     new_node.vals.as_mut_ptr(),
-                    move_count
+                    move_count,
                 );
                 new_node.len = move_count as u8;
                 node.len = src_start as u8;
 
                 // Insert key into node
                 self.insert_into_leaf(token, node_idx, key, value);
-
             } else {
                 let move_count = CHUNK_SIZE - split_idx;
                 std::ptr::copy_nonoverlapping(
                     node.keys.as_ptr().add(split_idx),
                     new_node.keys.as_mut_ptr(),
-                    move_count
+                    move_count,
                 );
                 std::ptr::copy_nonoverlapping(
                     node.vals.as_ptr().add(split_idx),
                     new_node.vals.as_mut_ptr(),
-                    move_count
+                    move_count,
                 );
                 new_node.len = move_count as u8;
                 node.len = split_idx as u8;
@@ -521,15 +553,15 @@ where
                 // Insert key into new_node
                 let rel_pos = pos - split_idx;
                 if rel_pos < new_node.len as usize {
-                     std::ptr::copy(
+                    std::ptr::copy(
                         new_node.keys.as_ptr().add(rel_pos),
                         new_node.keys.as_mut_ptr().add(rel_pos + 1),
-                        new_node.len as usize - rel_pos
+                        new_node.len as usize - rel_pos,
                     );
                     std::ptr::copy(
                         new_node.vals.as_ptr().add(rel_pos),
                         new_node.vals.as_mut_ptr().add(rel_pos + 1),
-                        new_node.len as usize - rel_pos
+                        new_node.len as usize - rel_pos,
                     );
                 }
                 new_node.keys[rel_pos].write(key);
@@ -547,7 +579,9 @@ where
             if pred_idx.is_none() {
                 let old_head = self.head_links[i];
                 unsafe {
-                    *self.links.get_unchecked_mut(token, new_link_offset as usize + i) = old_head;
+                    *self
+                        .links
+                        .get_unchecked_mut(token, new_link_offset as usize + i) = old_head;
                 }
                 self.head_links[i] = new_node_idx;
             } else {
@@ -556,7 +590,9 @@ where
                     let offset = pred_node.link_offset as usize + i;
                     let old_next = *self.links.get_unchecked(token, offset);
 
-                    *self.links.get_unchecked_mut(token, new_link_offset as usize + i) = old_next;
+                    *self
+                        .links
+                        .get_unchecked_mut(token, new_link_offset as usize + i) = old_next;
                     *self.links.get_unchecked_mut(token, offset) = new_node_idx;
                 }
             }
@@ -607,7 +643,7 @@ impl<'brand, K, V> ZeroCopyMapOps<'brand, K, V> for BrandedSkipList<'brand, K, V
     where
         F: Fn(&K, &V) -> bool,
     {
-         let mut curr = self.head_links[0];
+        let mut curr = self.head_links[0];
         while curr.is_some() {
             unsafe {
                 let node = self.nodes.get_unchecked(token, curr.index());
@@ -671,7 +707,10 @@ impl<'a, 'brand, K, V> Iterator for IterMut<'a, 'brand, K, V> {
         }
 
         unsafe {
-            let node = self.list.nodes.get_unchecked_mut(self.token, self.curr.index());
+            let node = self
+                .list
+                .nodes
+                .get_unchecked_mut(self.token, self.curr.index());
 
             if self.idx < node.len as usize {
                 let k_ptr = node.key_at(self.idx) as *const K;

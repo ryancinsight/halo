@@ -1,5 +1,8 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BatchSize};
-use halo::{GhostToken, collections::{BrandedString, ActiveString, ActivateString}};
+use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
+use halo::{
+    collections::{ActivateString, ActiveString, BrandedString},
+    GhostToken,
+};
 
 fn bench_string_push(c: &mut Criterion) {
     let mut group = c.benchmark_group("String Push (100x 'abc')");
@@ -25,7 +28,7 @@ fn bench_string_push(c: &mut Criterion) {
     });
 
     group.bench_function("ActiveString", |b| {
-         b.iter_batched(
+        b.iter_batched(
             || {},
             |()| {
                 GhostToken::new(|mut token| {
@@ -52,14 +55,16 @@ fn bench_string_read(c: &mut Criterion) {
         b.iter_batched(
             || {
                 let mut s = String::new();
-                for _ in 0..100 { s.push_str("abc"); }
+                for _ in 0..100 {
+                    s.push_str("abc");
+                }
                 s
             },
             |s| {
                 black_box(s.as_str().len());
                 black_box(s.chars().count());
             },
-            BatchSize::SmallInput
+            BatchSize::SmallInput,
         )
     });
 
@@ -68,30 +73,34 @@ fn bench_string_read(c: &mut Criterion) {
             || {},
             |()| {
                 GhostToken::new(|token| {
-                     let mut s = BrandedString::new();
-                     for _ in 0..100 { s.push_str("abc"); }
-                     black_box(s.as_str(&token).len());
-                     black_box(s.as_str(&token).chars().count());
+                    let mut s = BrandedString::new();
+                    for _ in 0..100 {
+                        s.push_str("abc");
+                    }
+                    black_box(s.as_str(&token).len());
+                    black_box(s.as_str(&token).chars().count());
                 })
             },
-            BatchSize::SmallInput
+            BatchSize::SmallInput,
         )
     });
 
-     group.bench_function("ActiveString", |b| {
+    group.bench_function("ActiveString", |b| {
         b.iter_batched(
             || {},
             |()| {
                 GhostToken::new(|mut token| {
-                     let mut s = BrandedString::new();
-                     for _ in 0..100 { s.push_str("abc"); }
-                     let active = s.activate(&mut token);
+                    let mut s = BrandedString::new();
+                    for _ in 0..100 {
+                        s.push_str("abc");
+                    }
+                    let active = s.activate(&mut token);
 
-                     black_box(active.as_str().len());
-                     black_box(active.chars().count());
+                    black_box(active.as_str().len());
+                    black_box(active.chars().count());
                 })
             },
-            BatchSize::SmallInput
+            BatchSize::SmallInput,
         )
     });
 

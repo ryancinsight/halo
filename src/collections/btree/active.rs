@@ -4,8 +4,8 @@
 //! in a single scope. By holding the token exclusively, it can expose a standard `BTreeMap`-like
 //! API without requiring the token as an argument for every call.
 
-use crate::GhostToken;
 use super::{BrandedBTreeMap, BrandedBTreeSet};
+use crate::GhostToken;
 use std::borrow::Borrow;
 
 /// A wrapper around a mutable reference to a `BrandedBTreeMap` and a mutable reference to a `GhostToken`.
@@ -16,7 +16,10 @@ pub struct ActiveBTreeMap<'a, 'brand, K, V> {
 
 impl<'a, 'brand, K, V> ActiveBTreeMap<'a, 'brand, K, V> {
     /// Creates a new active map handle.
-    pub fn new(map: &'a mut BrandedBTreeMap<'brand, K, V>, token: &'a mut GhostToken<'brand>) -> Self {
+    pub fn new(
+        map: &'a mut BrandedBTreeMap<'brand, K, V>,
+        token: &'a mut GhostToken<'brand>,
+    ) -> Self {
         Self { map, token }
     }
 
@@ -93,11 +96,17 @@ where
 /// Extension trait to easily create ActiveBTreeMap from BrandedBTreeMap.
 pub trait ActivateBTreeMap<'brand, K, V> {
     /// Activates the map with the given token, returning a handle that bundles them.
-    fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveBTreeMap<'a, 'brand, K, V>;
+    fn activate<'a>(
+        &'a mut self,
+        token: &'a mut GhostToken<'brand>,
+    ) -> ActiveBTreeMap<'a, 'brand, K, V>;
 }
 
 impl<'brand, K, V> ActivateBTreeMap<'brand, K, V> for BrandedBTreeMap<'brand, K, V> {
-    fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveBTreeMap<'a, 'brand, K, V> {
+    fn activate<'a>(
+        &'a mut self,
+        token: &'a mut GhostToken<'brand>,
+    ) -> ActiveBTreeMap<'a, 'brand, K, V> {
         ActiveBTreeMap::new(self, token)
     }
 }
@@ -161,11 +170,17 @@ where
 /// Extension trait to easily create ActiveBTreeSet from BrandedBTreeSet.
 pub trait ActivateBTreeSet<'brand, T> {
     /// Activates the set with the given token, returning a handle that bundles them.
-    fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveBTreeSet<'a, 'brand, T>;
+    fn activate<'a>(
+        &'a mut self,
+        token: &'a mut GhostToken<'brand>,
+    ) -> ActiveBTreeSet<'a, 'brand, T>;
 }
 
 impl<'brand, T> ActivateBTreeSet<'brand, T> for BrandedBTreeSet<'brand, T> {
-    fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveBTreeSet<'a, 'brand, T> {
+    fn activate<'a>(
+        &'a mut self,
+        token: &'a mut GhostToken<'brand>,
+    ) -> ActiveBTreeSet<'a, 'brand, T> {
         ActiveBTreeSet::new(self, token)
     }
 }

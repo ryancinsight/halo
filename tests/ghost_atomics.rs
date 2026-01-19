@@ -28,5 +28,3 @@ fn branded_atomics_are_send_sync_and_work() {
     );
     assert_eq!(u.load(Ordering::Relaxed), 9);
 }
-
-

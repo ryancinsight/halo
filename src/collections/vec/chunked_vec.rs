@@ -20,9 +20,9 @@
 //! - Bulk operations: O(n) with optimal cache behavior
 //! - Memory: ~8 bytes overhead per chunk + cache-aligned allocation
 
-use core::mem::MaybeUninit;
-use crate::{GhostCell, GhostToken};
 use crate::collections::ZeroCopyOps;
+use crate::{GhostCell, GhostToken};
+use core::mem::MaybeUninit;
 use std::slice;
 
 /// Zero-cost iterator for BrandedChunkedVec.
@@ -225,10 +225,7 @@ pub struct BrandedChunkedVec<'brand, T, const CHUNK: usize> {
 impl<'brand, T, const CHUNK: usize> BrandedChunkedVec<'brand, T, CHUNK> {
     /// Creates an empty `BrandedChunkedVec`.
     pub const fn new() -> Self {
-        Self {
-            head: None,
-            len: 0,
-        }
+        Self { head: None, len: 0 }
     }
 
     /// Returns the total number of elements.
@@ -318,7 +315,11 @@ impl<'brand, T, const CHUNK: usize> BrandedChunkedVec<'brand, T, CHUNK> {
 
     /// Returns a token-gated mutable reference to the element at `index`.
     #[inline]
-    pub fn get_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>, index: usize) -> Option<&'a mut T> {
+    pub fn get_mut<'a>(
+        &'a self,
+        token: &'a mut GhostToken<'brand>,
+        index: usize,
+    ) -> Option<&'a mut T> {
         if index >= self.len {
             return None;
         }
@@ -367,7 +368,10 @@ impl<'brand, T, const CHUNK: usize> BrandedChunkedVec<'brand, T, CHUNK> {
 
     /// Iterates over the elements.
     #[inline]
-    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> BrandedChunkedVecIter<'a, 'brand, T, CHUNK> {
+    pub fn iter<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+    ) -> BrandedChunkedVecIter<'a, 'brand, T, CHUNK> {
         BrandedChunkedVecIter {
             current_node: self.head.as_deref(),
             chunk_index: 0,
@@ -384,7 +388,10 @@ impl<'brand, T, const CHUNK: usize> BrandedChunkedVec<'brand, T, CHUNK> {
     }
 
     /// Returns an iterator over chunks as mutable slices.
-    pub fn chunks_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>) -> ChunkMutIter<'a, 'brand, T, CHUNK> {
+    pub fn chunks_mut<'a>(
+        &'a self,
+        token: &'a mut GhostToken<'brand>,
+    ) -> ChunkMutIter<'a, 'brand, T, CHUNK> {
         ChunkMutIter {
             current: self.head.as_deref(),
             token: token as *mut _,
@@ -396,7 +403,12 @@ impl<'brand, T, const CHUNK: usize> BrandedChunkedVec<'brand, T, CHUNK> {
     ///
     /// This is much more efficient than individual element access.
     #[inline]
-    pub fn for_each_in_chunk(&self, chunk_idx: usize, token: &GhostToken<'brand>, mut f: impl FnMut(&T)) {
+    pub fn for_each_in_chunk(
+        &self,
+        chunk_idx: usize,
+        token: &GhostToken<'brand>,
+        mut f: impl FnMut(&T),
+    ) {
         let mut current = self.head.as_ref();
         let mut current_idx = 0;
 
@@ -415,7 +427,12 @@ impl<'brand, T, const CHUNK: usize> BrandedChunkedVec<'brand, T, CHUNK> {
     }
 
     /// Bulk operation: applies a mutable function to all elements in a chunk.
-    pub fn for_each_mut_in_chunk(&self, chunk_idx: usize, token: &mut GhostToken<'brand>, mut f: impl FnMut(&mut T)) {
+    pub fn for_each_mut_in_chunk(
+        &self,
+        chunk_idx: usize,
+        token: &mut GhostToken<'brand>,
+        mut f: impl FnMut(&mut T),
+    ) {
         let mut current = self.head.as_ref();
         let mut current_idx = 0;
 
@@ -471,7 +488,10 @@ impl<'brand, T, const CHUNK: usize> BrandedChunkedVec<'brand, T, CHUNK> {
     {
         let mut current = self.head.as_mut();
         while let Some(node) = current {
-            node.chunk.as_mut_slice_exclusive().iter_mut().for_each(&mut f);
+            node.chunk
+                .as_mut_slice_exclusive()
+                .iter_mut()
+                .for_each(&mut f);
             current = node.next.as_mut();
         }
     }
@@ -525,7 +545,9 @@ impl<'brand, T, const CHUNK: usize> ZeroCopyOps<'brand, T> for BrandedChunkedVec
     where
         F: Fn(&T) -> bool,
     {
-        self.chunks(token).flat_map(|c| c.iter()).find(|&item| f(item))
+        self.chunks(token)
+            .flat_map(|c| c.iter())
+            .find(|&item| f(item))
     }
 
     #[inline(always)]
@@ -533,7 +555,8 @@ impl<'brand, T, const CHUNK: usize> ZeroCopyOps<'brand, T> for BrandedChunkedVec
     where
         F: Fn(&T) -> bool,
     {
-        self.chunks(token).any(|chunk| chunk.iter().any(|item| f(item)))
+        self.chunks(token)
+            .any(|chunk| chunk.iter().any(|item| f(item)))
     }
 
     #[inline(always)]
@@ -541,7 +564,8 @@ impl<'brand, T, const CHUNK: usize> ZeroCopyOps<'brand, T> for BrandedChunkedVec
     where
         F: Fn(&T) -> bool,
     {
-        self.chunks(token).all(|chunk| chunk.iter().all(|item| f(item)))
+        self.chunks(token)
+            .all(|chunk| chunk.iter().all(|item| f(item)))
     }
 }
 

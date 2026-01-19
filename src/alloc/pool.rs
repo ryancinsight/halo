@@ -10,8 +10,8 @@
 //! - **Free List Reuse**: Frees slots are reused O(1).
 //! - **Token Gated**: Access to values requires a `GhostToken`, ensuring safety.
 
-use crate::{GhostCell, GhostToken};
 use crate::collections::vec::BrandedVec;
+use crate::{GhostCell, GhostToken};
 
 /// A slot in the pool.
 #[derive(Copy, Clone)]
@@ -71,7 +71,11 @@ impl<'brand, T> BrandedPool<'brand, T> {
 
                 // Read next_free from the slot (it was free)
                 if let PoolSlot::Free(next) = slot {
-                    state.free_head = if *next == usize::MAX { None } else { Some(*next) };
+                    state.free_head = if *next == usize::MAX {
+                        None
+                    } else {
+                        Some(*next)
+                    };
                 } else {
                     // Should be unreachable if free_head invariant holds
                     debug_assert!(false, "Free head pointed to occupied slot");
@@ -120,7 +124,8 @@ impl<'brand, T> BrandedPool<'brand, T> {
         let slot = state.storage.get_unchecked_mut_exclusive(index);
 
         // Take the value - requires replacing the slot
-        let old_slot = std::mem::replace(slot, PoolSlot::Free(state.free_head.unwrap_or(usize::MAX)));
+        let old_slot =
+            std::mem::replace(slot, PoolSlot::Free(state.free_head.unwrap_or(usize::MAX)));
         state.free_head = Some(index);
 
         match old_slot {
@@ -145,7 +150,11 @@ impl<'brand, T> BrandedPool<'brand, T> {
     ///
     /// Returns `None` if the slot is free or index is out of bounds.
     #[inline]
-    pub fn get_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>, index: usize) -> Option<&'a mut T> {
+    pub fn get_mut<'a>(
+        &'a self,
+        token: &'a mut GhostToken<'brand>,
+        index: usize,
+    ) -> Option<&'a mut T> {
         let state = self.state.borrow_mut(token);
         // We need get_mut_exclusive here because we borrowed state
         unsafe {
@@ -197,7 +206,10 @@ impl<'brand, T> BrandedPool<'brand, T> {
 
     /// Returns a reference to the underlying storage.
     #[inline]
-    pub fn storage<'a>(&'a self, token: &'a GhostToken<'brand>) -> &'a BrandedVec<'brand, PoolSlot<T>> {
+    pub fn storage<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+    ) -> &'a BrandedVec<'brand, PoolSlot<T>> {
         &self.state.borrow(token).storage
     }
 

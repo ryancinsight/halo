@@ -22,11 +22,11 @@
 //!   - Waits for the sum of *all* shard counters to be zero (with backoff).
 
 use crate::GhostToken;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::cell::{Cell, UnsafeCell};
-use std::ops::{Deref, DerefMut};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::ops::{Deref, DerefMut};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread;
 
 /// Number of stripes for the reader counters.

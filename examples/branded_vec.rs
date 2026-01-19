@@ -22,5 +22,3 @@ fn main() {
         assert_eq!(out, vec![10, 20, 30]);
     });
 }
-
-

@@ -54,11 +54,8 @@
 //! chunked_vec.for_each_mut(|x| *x *= 2);
 //! ```
 
-use core::{
-    mem::MaybeUninit,
-    ptr,
-};
 use core::iter::FusedIterator;
+use core::{mem::MaybeUninit, ptr};
 
 /// A vector backed by fixed-size chunks of `MaybeUninit<T>`.
 ///
@@ -203,10 +200,7 @@ impl<T, const CHUNK: usize> ChunkedVec<T, CHUNK> {
     /// Returns an iterator over `&T`.
     #[inline]
     pub fn iter(&self) -> ChunkedIter<'_, T, CHUNK> {
-        ChunkedIter {
-            vec: self,
-            idx: 0,
-        }
+        ChunkedIter { vec: self, idx: 0 }
     }
 
     /// Applies a function to all elements in the ChunkedVec.
@@ -489,12 +483,12 @@ mod tests {
 
         // Test normal range
         v.for_each_mut_range(2, 8, |x| *x *= 2);
-        assert_eq!(*v.get(0).unwrap(), 0);  // unchanged
-        assert_eq!(*v.get(1).unwrap(), 1);  // unchanged
-        assert_eq!(*v.get(2).unwrap(), 4);  // 2 * 2
-        assert_eq!(*v.get(3).unwrap(), 6);  // 3 * 2
+        assert_eq!(*v.get(0).unwrap(), 0); // unchanged
+        assert_eq!(*v.get(1).unwrap(), 1); // unchanged
+        assert_eq!(*v.get(2).unwrap(), 4); // 2 * 2
+        assert_eq!(*v.get(3).unwrap(), 6); // 3 * 2
         assert_eq!(*v.get(7).unwrap(), 14); // 7 * 2
-        assert_eq!(*v.get(8).unwrap(), 8);  // unchanged
+        assert_eq!(*v.get(8).unwrap(), 8); // unchanged
         assert_eq!(*v.get(11).unwrap(), 11); // unchanged
 
         // Test out-of-bounds clamping: start > end should be handled correctly
@@ -539,8 +533,12 @@ mod tests {
 
         // Verify no values were modified
         for i in 0..10 {
-            assert_eq!(*v.get(i).unwrap(), original_values[i],
-                      "Element at index {} should be unchanged", i);
+            assert_eq!(
+                *v.get(i).unwrap(),
+                original_values[i],
+                "Element at index {} should be unchanged",
+                i
+            );
         }
 
         // Test that valid ranges still work after bounds clamping
@@ -573,5 +571,3 @@ fn new_uninit_chunk<T, const CHUNK: usize>() -> Box<[MaybeUninit<T>; CHUNK]> {
     // write elements individually and only drop the initialized prefix.
     unsafe { Box::<[MaybeUninit<T>; CHUNK]>::new_uninit().assume_init() }
 }
-
-

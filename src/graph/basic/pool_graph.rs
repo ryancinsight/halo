@@ -11,8 +11,8 @@
 //! - `remove_edge`: O(degree) (scan adjacency lists)
 //! - `neighbors`: O(1) to get iterator
 
-use crate::{GhostToken, GhostCell};
 use crate::alloc::pool::BrandedPool;
+use crate::{GhostCell, GhostToken};
 use std::marker::PhantomData;
 
 /// A strongly-typed index for a node in a specific branded graph.
@@ -36,7 +36,7 @@ impl<'brand> NodeIdx<'brand> {
 struct NodeData<V, E> {
     value: V,
     outgoing: Vec<(usize, E)>, // (target_idx, edge_data)
-    incoming: Vec<usize>,       // source_idx
+    incoming: Vec<usize>,      // source_idx
 }
 
 /// A dynamic graph backed by a branded pool.
@@ -74,8 +74,14 @@ impl<'brand, V, E> BrandedPoolGraph<'brand, V, E> {
     ///
     /// # Panics
     /// Panics if source or target nodes do not exist.
-    pub fn add_edge(&self, token: &mut GhostToken<'brand>, source: NodeIdx<'brand>, target: NodeIdx<'brand>, weight: E)
-    where E: Clone
+    pub fn add_edge(
+        &self,
+        token: &mut GhostToken<'brand>,
+        source: NodeIdx<'brand>,
+        target: NodeIdx<'brand>,
+        weight: E,
+    ) where
+        E: Clone,
     {
         let u = source.index();
         let v = target.index();
@@ -83,12 +89,12 @@ impl<'brand, V, E> BrandedPoolGraph<'brand, V, E> {
         let storage = self.pool.as_mut_slice(token);
 
         if u == v {
-             if let Some(crate::alloc::pool::PoolSlot::Occupied(node)) = storage.get_mut(u) {
-                 node.outgoing.push((v, weight));
-                 node.incoming.push(u);
-             } else {
-                 panic!("Node invalid");
-             }
+            if let Some(crate::alloc::pool::PoolSlot::Occupied(node)) = storage.get_mut(u) {
+                node.outgoing.push((v, weight));
+                node.incoming.push(u);
+            } else {
+                panic!("Node invalid");
+            }
         } else {
             assert!(u < storage.len());
             assert!(v < storage.len());
@@ -98,7 +104,11 @@ impl<'brand, V, E> BrandedPoolGraph<'brand, V, E> {
                 let node_u = &mut *ptr.add(u);
                 let node_v = &mut *ptr.add(v);
 
-                if let (crate::alloc::pool::PoolSlot::Occupied(data_u), crate::alloc::pool::PoolSlot::Occupied(data_v)) = (node_u, node_v) {
+                if let (
+                    crate::alloc::pool::PoolSlot::Occupied(data_u),
+                    crate::alloc::pool::PoolSlot::Occupied(data_v),
+                ) = (node_u, node_v)
+                {
                     data_u.outgoing.push((v, weight));
                     data_v.incoming.push(u);
                 } else {
@@ -109,7 +119,11 @@ impl<'brand, V, E> BrandedPoolGraph<'brand, V, E> {
     }
 
     /// Removes a node and all incident edges.
-    pub fn remove_node(&self, token: &mut GhostToken<'brand>, node_idx: NodeIdx<'brand>) -> Option<V> {
+    pub fn remove_node(
+        &self,
+        token: &mut GhostToken<'brand>,
+        node_idx: NodeIdx<'brand>,
+    ) -> Option<V> {
         let u = node_idx.index();
 
         if self.pool.get(token, u).is_none() {
@@ -123,35 +137,44 @@ impl<'brand, V, E> BrandedPoolGraph<'brand, V, E> {
 
         // Remove `u` from incoming neighbors' outgoing lists
         for &inc_idx in &node_data.incoming {
-             if inc_idx == u { continue; }
-             unsafe {
-                 let neighbor = &mut *ptr.add(inc_idx);
-                 if let crate::alloc::pool::PoolSlot::Occupied(data) = neighbor {
-                     if let Some(pos) = data.outgoing.iter().position(|(target, _)| *target == u) {
-                         data.outgoing.swap_remove(pos);
-                     }
-                 }
-             }
+            if inc_idx == u {
+                continue;
+            }
+            unsafe {
+                let neighbor = &mut *ptr.add(inc_idx);
+                if let crate::alloc::pool::PoolSlot::Occupied(data) = neighbor {
+                    if let Some(pos) = data.outgoing.iter().position(|(target, _)| *target == u) {
+                        data.outgoing.swap_remove(pos);
+                    }
+                }
+            }
         }
 
         // Remove `u` from outgoing neighbors' incoming lists
         for (out_idx, _) in &node_data.outgoing {
-             if *out_idx == u { continue; }
-             unsafe {
-                 let neighbor = &mut *ptr.add(*out_idx);
-                 if let crate::alloc::pool::PoolSlot::Occupied(data) = neighbor {
-                     if let Some(pos) = data.incoming.iter().position(|&source| source == u) {
-                         data.incoming.swap_remove(pos);
-                     }
-                 }
-             }
+            if *out_idx == u {
+                continue;
+            }
+            unsafe {
+                let neighbor = &mut *ptr.add(*out_idx);
+                if let crate::alloc::pool::PoolSlot::Occupied(data) = neighbor {
+                    if let Some(pos) = data.incoming.iter().position(|&source| source == u) {
+                        data.incoming.swap_remove(pos);
+                    }
+                }
+            }
         }
 
         Some(node_data.value)
     }
 
     /// Removes an edge.
-    pub fn remove_edge(&self, token: &mut GhostToken<'brand>, source: NodeIdx<'brand>, target: NodeIdx<'brand>) -> Option<E> {
+    pub fn remove_edge(
+        &self,
+        token: &mut GhostToken<'brand>,
+        source: NodeIdx<'brand>,
+        target: NodeIdx<'brand>,
+    ) -> Option<E> {
         let u = source.index();
         let v = target.index();
 
@@ -174,11 +197,11 @@ impl<'brand, V, E> BrandedPoolGraph<'brand, V, E> {
             // Remove from target incoming
             if removed_data.is_some() && v < storage.len() {
                 let node_v = &mut *ptr.add(v);
-                 if let crate::alloc::pool::PoolSlot::Occupied(data_v) = node_v {
-                     if let Some(pos) = data_v.incoming.iter().position(|&s| s == u) {
-                         data_v.incoming.swap_remove(pos);
-                     }
-                 }
+                if let crate::alloc::pool::PoolSlot::Occupied(data_v) = node_v {
+                    if let Some(pos) = data_v.incoming.iter().position(|&s| s == u) {
+                        data_v.incoming.swap_remove(pos);
+                    }
+                }
             }
         }
 
@@ -186,26 +209,44 @@ impl<'brand, V, E> BrandedPoolGraph<'brand, V, E> {
     }
 
     /// Get reference to node value.
-    pub fn get<'a>(&'a self, token: &'a GhostToken<'brand>, node: NodeIdx<'brand>) -> Option<&'a V> {
+    pub fn get<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+        node: NodeIdx<'brand>,
+    ) -> Option<&'a V> {
         self.pool.get(token, node.index()).map(|n| &n.value)
     }
 
     /// Get mutable reference to node value.
-    pub fn get_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>, node: NodeIdx<'brand>) -> Option<&'a mut V> {
+    pub fn get_mut<'a>(
+        &'a self,
+        token: &'a mut GhostToken<'brand>,
+        node: NodeIdx<'brand>,
+    ) -> Option<&'a mut V> {
         self.pool.get_mut(token, node.index()).map(|n| &mut n.value)
     }
 
     /// Get neighbors (outgoing edges).
-    pub fn neighbors<'a>(&'a self, token: &'a GhostToken<'brand>, node: NodeIdx<'brand>) -> impl Iterator<Item = (NodeIdx<'brand>, &'a E)> + 'a {
-        self.pool.get(token, node.index())
+    pub fn neighbors<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+        node: NodeIdx<'brand>,
+    ) -> impl Iterator<Item = (NodeIdx<'brand>, &'a E)> + 'a {
+        self.pool
+            .get(token, node.index())
             .map(|n| n.outgoing.iter().map(|(idx, w)| (NodeIdx::new(*idx), w)))
             .into_iter()
             .flatten()
     }
 
     /// Get incoming neighbors.
-    pub fn incoming_neighbors<'a>(&'a self, token: &'a GhostToken<'brand>, node: NodeIdx<'brand>) -> impl Iterator<Item = NodeIdx<'brand>> + 'a {
-         self.pool.get(token, node.index())
+    pub fn incoming_neighbors<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+        node: NodeIdx<'brand>,
+    ) -> impl Iterator<Item = NodeIdx<'brand>> + 'a {
+        self.pool
+            .get(token, node.index())
             .map(|n| n.incoming.iter().map(|idx| NodeIdx::new(*idx)))
             .into_iter()
             .flatten()
@@ -217,14 +258,21 @@ impl<'brand, V, E> BrandedPoolGraph<'brand, V, E> {
     }
 
     /// Iterates over all active nodes.
-    pub fn iter_nodes<'a>(&'a self, token: &'a GhostToken<'brand>) -> impl Iterator<Item = (NodeIdx<'brand>, &'a V)> + 'a {
-        self.pool.storage(token).iter(token).enumerate().filter_map(|(i, slot)| {
-            if let crate::alloc::pool::PoolSlot::Occupied(data) = slot {
-                Some((NodeIdx::new(i), &data.value))
-            } else {
-                None
-            }
-        })
+    pub fn iter_nodes<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+    ) -> impl Iterator<Item = (NodeIdx<'brand>, &'a V)> + 'a {
+        self.pool
+            .storage(token)
+            .iter(token)
+            .enumerate()
+            .filter_map(|(i, slot)| {
+                if let crate::alloc::pool::PoolSlot::Occupied(data) = slot {
+                    Some((NodeIdx::new(i), &data.value))
+                } else {
+                    None
+                }
+            })
     }
 }
 

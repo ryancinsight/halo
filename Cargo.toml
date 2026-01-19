@@ -138,5 +138,11 @@ name = "segment_tree_benchmark"
 harness = false
 
 [[bench]]
+<<<<<<< HEAD
 name = "rope_benchmark"
 harness = false
+
+=======
+name = "tripod_list_benchmark"
+harness = false
+>>>>>>> origin/main

@@ -38,14 +38,14 @@ fn bench_lru_cache(c: &mut Criterion) {
         }
         b.iter(|| {
             for i in 0..1000 {
-                 black_box(map.get(&i));
+                black_box(map.get(&i));
             }
         });
     });
 
     group.bench_function("branded_lru_cache_get", |b| {
         b.iter(|| {
-             GhostToken::new(|mut token| {
+            GhostToken::new(|mut token| {
                 let mut cache = BrandedLruCache::new(1000);
                 for i in 0..1000 {
                     cache.put(&mut token, i, i);

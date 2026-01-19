@@ -1,12 +1,14 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use halo::{GhostToken, BrandedHashSet};
-use halo::collections::hash::active::ActivateHashSet;
 use halo::collections::btree::BrandedBTreeSet;
-use halo::collections::other::{BrandedDoublyLinkedList, BrandedBinaryHeap, BrandedDeque};
-use halo::collections::other::active::{ActivateDoublyLinkedList, ActivateBinaryHeap, ActivateDeque};
-use halo::collections::vec::BrandedVecDeque;
+use halo::collections::hash::active::ActivateHashSet;
+use halo::collections::other::active::{
+    ActivateBinaryHeap, ActivateDeque, ActivateDoublyLinkedList,
+};
+use halo::collections::other::{BrandedBinaryHeap, BrandedDeque, BrandedDoublyLinkedList};
 use halo::collections::vec::active::ActivateVecDeque;
-use std::collections::{HashSet, BTreeSet, LinkedList, BinaryHeap, VecDeque};
+use halo::collections::vec::BrandedVecDeque;
+use halo::{BrandedHashSet, GhostToken};
+use std::collections::{BTreeSet, BinaryHeap, HashSet, LinkedList, VecDeque};
 
 fn bench_set_insert(c: &mut Criterion) {
     let mut group = c.benchmark_group("Set Insert");
@@ -23,7 +25,7 @@ fn bench_set_insert(c: &mut Criterion) {
 
     group.bench_function("ActiveHashSet", |b| {
         b.iter(|| {
-             GhostToken::new(|mut token| {
+            GhostToken::new(|mut token| {
                 let mut set = BrandedHashSet::new();
                 {
                     let mut active = set.activate(&mut token);
@@ -119,7 +121,7 @@ fn bench_binary_heap_push(c: &mut Criterion) {
 
     group.bench_function("ActiveBinaryHeap", |b| {
         b.iter(|| {
-             GhostToken::new(|mut token| {
+            GhostToken::new(|mut token| {
                 let mut heap = BrandedBinaryHeap::new();
                 {
                     let mut active = heap.activate(&mut token);
@@ -149,7 +151,7 @@ fn bench_vec_deque_push(c: &mut Criterion) {
 
     group.bench_function("ActiveVecDeque", |b| {
         b.iter(|| {
-             GhostToken::new(|mut token| {
+            GhostToken::new(|mut token| {
                 let mut deque = BrandedVecDeque::new();
                 {
                     let mut active = deque.activate(&mut token);
@@ -164,7 +166,7 @@ fn bench_vec_deque_push(c: &mut Criterion) {
     // Also benchmark the fixed-size ring buffer implementation
     group.bench_function("ActiveDeque (Fixed Ring Buffer)", |b| {
         b.iter(|| {
-             GhostToken::new(|mut token| {
+            GhostToken::new(|mut token| {
                 // Must ensure capacity is enough for the test
                 let mut deque: BrandedDeque<'_, i32, 1024> = BrandedDeque::new();
                 {
@@ -180,5 +182,12 @@ fn bench_vec_deque_push(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_set_insert, bench_btree_set_iter, bench_linked_list_push, bench_binary_heap_push, bench_vec_deque_push);
+criterion_group!(
+    benches,
+    bench_set_insert,
+    bench_btree_set_iter,
+    bench_linked_list_push,
+    bench_binary_heap_push,
+    bench_vec_deque_push
+);
 criterion_main!(benches);

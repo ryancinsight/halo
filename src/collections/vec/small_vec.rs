@@ -10,8 +10,8 @@
 //! - **Token-gated safety** via `GhostCell`
 //! - **Zero-copy operations** via `ZeroCopyOps`
 
+use crate::collections::{BrandedCollection, BrandedVec, ZeroCopyOps};
 use crate::{GhostCell, GhostToken};
-use crate::collections::{BrandedVec, ZeroCopyOps, BrandedCollection};
 use core::mem::MaybeUninit;
 use core::ptr;
 
@@ -34,12 +34,11 @@ impl<'brand, T, const N: usize> BrandedSmallVec<'brand, T, N> {
     pub fn new() -> Self {
         // SAFETY: An array of MaybeUninit is safe to create uninitialized.
         // We use a safe way to create the uninitialized array.
-        let data = unsafe { MaybeUninit::<[MaybeUninit<GhostCell<'brand, T>>; N]>::uninit().assume_init() };
+        let data = unsafe {
+            MaybeUninit::<[MaybeUninit<GhostCell<'brand, T>>; N]>::uninit().assume_init()
+        };
         Self {
-            inner: SmallVecInner::Inline {
-                len: 0,
-                data,
-            },
+            inner: SmallVecInner::Inline { len: 0, data },
         }
     }
 
@@ -123,8 +122,12 @@ impl<'brand, T, const N: usize> BrandedSmallVec<'brand, T, N> {
 
     /// Returns a mutable reference to the element at `index`.
     #[inline]
-    pub fn get_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>, index: usize) -> Option<&'a mut T> {
-         match &self.inner {
+    pub fn get_mut<'a>(
+        &'a self,
+        token: &'a mut GhostToken<'brand>,
+        index: usize,
+    ) -> Option<&'a mut T> {
+        match &self.inner {
             SmallVecInner::Inline { len, data } => {
                 if index < *len {
                     // SAFETY: index checked against len
@@ -139,7 +142,10 @@ impl<'brand, T, const N: usize> BrandedSmallVec<'brand, T, N> {
     }
 
     /// Iterates over elements by shared reference.
-    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> impl Iterator<Item = &'a T> + 'a + use<'a, 'brand, T, N> {
+    pub fn iter<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+    ) -> impl Iterator<Item = &'a T> + 'a + use<'a, 'brand, T, N> {
         BrandedSmallVecIter {
             vec: self,
             index: 0,
@@ -267,11 +273,11 @@ impl<'brand, T, const N: usize> Iterator for BrandedSmallVecIntoIter<'brand, T, 
         match self {
             BrandedSmallVecIntoIter::Inline { len, data, index } => {
                 if *index < *len {
-                     // SAFETY: index checked against len.
-                     // We are reading out the value, effectively moving it.
-                     let cell = unsafe { data.get_unchecked(*index).assume_init_read() };
-                     *index += 1;
-                     Some(cell.into_inner())
+                    // SAFETY: index checked against len.
+                    // We are reading out the value, effectively moving it.
+                    let cell = unsafe { data.get_unchecked(*index).assume_init_read() };
+                    *index += 1;
+                    Some(cell.into_inner())
                 } else {
                     None
                 }
@@ -286,8 +292,8 @@ impl<'brand, T, const N: usize> Drop for BrandedSmallVecIntoIter<'brand, T, N> {
         match self {
             BrandedSmallVecIntoIter::Inline { len, data, index } => {
                 while *index < *len {
-                     unsafe { ptr::drop_in_place(data[*index].as_mut_ptr()) };
-                     *index += 1;
+                    unsafe { ptr::drop_in_place(data[*index].as_mut_ptr()) };
+                    *index += 1;
                 }
             }
             BrandedSmallVecIntoIter::Heap(_) => {

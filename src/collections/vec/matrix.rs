@@ -11,8 +11,8 @@
 //!   This view acts as a "subtoken" that grants exclusive access to its specific cells
 //!   without requiring the global `GhostToken`. This enables splitting the matrix recursively.
 
+use crate::collections::vec::{slice::BrandedSlice, slice::BrandedSliceMut, BrandedVec};
 use crate::{GhostCell, GhostToken};
-use crate::collections::vec::{BrandedVec, slice::BrandedSlice, slice::BrandedSliceMut};
 use std::marker::PhantomData;
 use std::slice;
 
@@ -62,8 +62,16 @@ impl<'brand, T> BrandedMatrix<'brand, T> {
     /// # Panics
     /// Panics if `vec.len() != rows * cols`.
     pub fn from_vec(vec: BrandedVec<'brand, T>, rows: usize, cols: usize) -> Self {
-        assert_eq!(vec.len(), rows * cols, "Vector length must match dimensions");
-        Self { data: vec, rows, cols }
+        assert_eq!(
+            vec.len(),
+            rows * cols,
+            "Vector length must match dimensions"
+        );
+        Self {
+            data: vec,
+            rows,
+            cols,
+        }
     }
 
     /// Returns the number of rows.
@@ -80,12 +88,15 @@ impl<'brand, T> BrandedMatrix<'brand, T> {
 
     /// Returns a shared reference to the element at (row, col).
     #[inline(always)]
-    pub fn get<'a>(&'a self, token: &'a GhostToken<'brand>, row: usize, col: usize) -> Option<&'a T> {
+    pub fn get<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+        row: usize,
+        col: usize,
+    ) -> Option<&'a T> {
         if row < self.rows && col < self.cols {
             // SAFETY: bounds checked above.
-            unsafe {
-                Some(self.data.get_unchecked(token, row * self.cols + col))
-            }
+            unsafe { Some(self.data.get_unchecked(token, row * self.cols + col)) }
         } else {
             None
         }
@@ -93,19 +104,26 @@ impl<'brand, T> BrandedMatrix<'brand, T> {
 
     /// Returns a mutable reference to the element at (row, col).
     #[inline(always)]
-    pub fn get_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>, row: usize, col: usize) -> Option<&'a mut T> {
+    pub fn get_mut<'a>(
+        &'a self,
+        token: &'a mut GhostToken<'brand>,
+        row: usize,
+        col: usize,
+    ) -> Option<&'a mut T> {
         if row < self.rows && col < self.cols {
             // SAFETY: bounds checked above.
-            unsafe {
-                Some(self.data.get_unchecked_mut(token, row * self.cols + col))
-            }
+            unsafe { Some(self.data.get_unchecked_mut(token, row * self.cols + col)) }
         } else {
             None
         }
     }
 
     /// Returns a row as a `BrandedSlice`.
-    pub fn row<'a>(&'a self, token: &'a GhostToken<'brand>, row: usize) -> Option<BrandedSlice<'a, 'brand, T>> {
+    pub fn row<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+        row: usize,
+    ) -> Option<BrandedSlice<'a, 'brand, T>> {
         if row < self.rows {
             let start = row * self.cols;
             let end = start + self.cols;
@@ -120,7 +138,10 @@ impl<'brand, T> BrandedMatrix<'brand, T> {
     /// Returns a mutable row as a `BrandedSliceMut`.
     ///
     /// This gives exclusive access to the row without needing `&mut GhostToken` if you have `&mut self`.
-    pub fn row_mut_exclusive<'a>(&'a mut self, row: usize) -> Option<BrandedSliceMut<'a, 'brand, T>> {
+    pub fn row_mut_exclusive<'a>(
+        &'a mut self,
+        row: usize,
+    ) -> Option<BrandedSliceMut<'a, 'brand, T>> {
         if row < self.rows {
             let start = row * self.cols;
             let end = start + self.cols;
@@ -238,7 +259,8 @@ impl<'a, 'brand, T> BrandedMatrixViewMut<'a, 'brand, T> {
     /// This is possible because elements within a row are always contiguous in memory,
     /// even if the view represents a sub-set of columns.
     pub fn rows_mut<'b>(&'b mut self) -> impl Iterator<Item = BrandedSliceMut<'b, 'brand, T>> + 'b
-    where 'a: 'b
+    where
+        'a: 'b,
     {
         // We iterate `rows` times.
         // Each time we return a BrandedSliceMut starting at `ptr + r*stride` with len `cols`.
@@ -281,7 +303,8 @@ impl<'a, 'brand, T> BrandedMatrixViewMut<'a, 'brand, T> {
     ///
     /// Optimized to use `slice::fill` per row.
     pub fn fill(&mut self, value: T)
-    where T: Clone
+    where
+        T: Clone,
     {
         for mut row in self.rows_mut() {
             row.as_mut_slice().fill(value.clone());
@@ -293,7 +316,8 @@ impl<'a, 'brand, T> BrandedMatrixViewMut<'a, 'brand, T> {
     /// # Panics
     /// Panics if dimensions do not match.
     pub fn copy_from(&mut self, other: &BrandedMatrixViewMut<'_, 'brand, T>)
-    where T: Clone
+    where
+        T: Clone,
     {
         assert_eq!(self.rows, other.rows);
         assert_eq!(self.cols, other.cols);
@@ -383,8 +407,10 @@ mod tests {
             let (mut tl, mut tr, mut bl, mut br) = view.split_quadrants(2, 2);
 
             // Check dimensions
-            assert_eq!(tl.rows(), 2); assert_eq!(tl.cols(), 2);
-            assert_eq!(tr.rows(), 2); assert_eq!(tr.cols(), 2);
+            assert_eq!(tl.rows(), 2);
+            assert_eq!(tl.cols(), 2);
+            assert_eq!(tr.rows(), 2);
+            assert_eq!(tr.cols(), 2);
 
             // Mutate independently
             *tl.get_mut(0, 0).unwrap() += 100; // 0 -> 100

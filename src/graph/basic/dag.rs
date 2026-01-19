@@ -11,41 +11,41 @@
 
 use crate::concurrency::worklist::{GhostChaseLevDeque, GhostTreiberStack};
 
-pub mod math_proofs;
 mod math_assert;
+pub mod math_proofs;
 
 use math_assert::math_assert_msg;
 
-    /// A DAG whose visited bitmap is branded.
-    ///
-    /// Provides topological ordering and DAG-specific algorithms.
-    /// The underlying representation includes both CSR and CSC for efficient traversal in both directions.
-    ///
-    /// ### Performance Characteristics
-    /// | Operation | Complexity | Notes |
-    /// |-----------|------------|-------|
-    /// | `from_adjacency` | \(O(n + m)\) | Builds CSR and CSC representation |
-    /// | `topological_sort` | \(O(n + m)\) | Kahn's algorithm (cached) |
-    /// | `longest_path_lengths` | \(O(n + m)\) | DP on DAG with SIMD optimization |
-    /// | `dp_compute` | \(O(n + m)\) | General DP framework with vectorization |
-    /// | `critical_path` | \(O(n + m)\) | Fastest path computation |
-    ///
-    /// ### Advanced Optimizations
-    /// - **SIMD processing**: Vectorized DP computations for better performance
-    /// - **Cache-aware traversal**: Optimized memory access patterns
-    /// - **Lazy computation**: Topological sort cached after first computation
-    /// - **Memory-efficient**: Compact representations with adaptive chunking
-    ///
-    /// ### Zero-cost Abstractions
-    /// - **Const generics**: Compile-time chunk sizing for optimal memory layout
-    /// - **Branded types**: Compile-time separation of graph instances
-    /// - **GhostCell safety**: Compile-time borrow checking without runtime overhead
-    #[repr(C)]
-    pub struct GhostDag<'brand, const EDGE_CHUNK: usize> {
-        graph: crate::graph::GhostCsrGraph<'brand, EDGE_CHUNK>,
-        transpose: crate::graph::GhostCscGraph<'brand, EDGE_CHUNK>,
-        topo_order: Option<Vec<usize>>,
-    }
+/// A DAG whose visited bitmap is branded.
+///
+/// Provides topological ordering and DAG-specific algorithms.
+/// The underlying representation includes both CSR and CSC for efficient traversal in both directions.
+///
+/// ### Performance Characteristics
+/// | Operation | Complexity | Notes |
+/// |-----------|------------|-------|
+/// | `from_adjacency` | \(O(n + m)\) | Builds CSR and CSC representation |
+/// | `topological_sort` | \(O(n + m)\) | Kahn's algorithm (cached) |
+/// | `longest_path_lengths` | \(O(n + m)\) | DP on DAG with SIMD optimization |
+/// | `dp_compute` | \(O(n + m)\) | General DP framework with vectorization |
+/// | `critical_path` | \(O(n + m)\) | Fastest path computation |
+///
+/// ### Advanced Optimizations
+/// - **SIMD processing**: Vectorized DP computations for better performance
+/// - **Cache-aware traversal**: Optimized memory access patterns
+/// - **Lazy computation**: Topological sort cached after first computation
+/// - **Memory-efficient**: Compact representations with adaptive chunking
+///
+/// ### Zero-cost Abstractions
+/// - **Const generics**: Compile-time chunk sizing for optimal memory layout
+/// - **Branded types**: Compile-time separation of graph instances
+/// - **GhostCell safety**: Compile-time borrow checking without runtime overhead
+#[repr(C)]
+pub struct GhostDag<'brand, const EDGE_CHUNK: usize> {
+    graph: crate::graph::GhostCsrGraph<'brand, EDGE_CHUNK>,
+    transpose: crate::graph::GhostCscGraph<'brand, EDGE_CHUNK>,
+    topo_order: Option<Vec<usize>>,
+}
 
 impl<'brand, const EDGE_CHUNK: usize> GhostDag<'brand, EDGE_CHUNK> {
     /// Validates mathematical invariants of the DAG structure.
@@ -401,9 +401,8 @@ impl<'brand, const EDGE_CHUNK: usize> GhostDag<'brand, EDGE_CHUNK> {
             let pred_indices: Vec<usize> = self.transpose.in_neighbors(u).collect();
 
             // Create pairs with borrowed values (safe since we're not modifying values[u] yet)
-            let pred_pairs: Vec<(usize, &T)> = pred_indices.iter()
-                .map(|&p| (p, &values[p]))
-                .collect();
+            let pred_pairs: Vec<(usize, &T)> =
+                pred_indices.iter().map(|&p| (p, &values[p])).collect();
 
             // Compute value using SIMD-friendly operations
             let result = f(u, &pred_pairs);
@@ -475,9 +474,9 @@ mod tests {
         GhostToken::new(|_token| {
             // Simple chain: 0 -> 1 -> 2
             let adjacency = vec![
-                vec![1],    // 0 -> 1
-                vec![2],    // 1 -> 2
-                vec![],     // 2
+                vec![1], // 0 -> 1
+                vec![2], // 1 -> 2
+                vec![],  // 2
             ];
 
             let mut dag = GhostDag::<1024>::from_adjacency(&adjacency);
@@ -521,9 +520,9 @@ mod tests {
         GhostToken::new(|_token| {
             // Cycle: 0 -> 1 -> 2 -> 0
             let adjacency = vec![
-                vec![1],    // 0 -> 1
-                vec![2],    // 1 -> 2
-                vec![0],    // 2 -> 0 (cycle!)
+                vec![1], // 0 -> 1
+                vec![2], // 1 -> 2
+                vec![0], // 2 -> 0 (cycle!)
             ];
 
             let mut dag = GhostDag::<1024>::from_adjacency(&adjacency);
@@ -536,12 +535,7 @@ mod tests {
     fn dag_longest_path() {
         GhostToken::new(|_token| {
             // Chain: 0 -> 1 -> 2 -> 3
-            let adjacency = vec![
-                vec![1],
-                vec![2],
-                vec![3],
-                vec![],
-            ];
+            let adjacency = vec![vec![1], vec![2], vec![3], vec![]];
 
             let mut dag = GhostDag::<1024>::from_adjacency(&adjacency);
             let lengths = dag.longest_path_lengths().unwrap();
@@ -553,12 +547,7 @@ mod tests {
     fn dag_shortest_path() {
         GhostToken::new(|_token| {
             // Chain: 0 -> 1 -> 2 -> 3
-            let adjacency = vec![
-                vec![1],
-                vec![2],
-                vec![3],
-                vec![],
-            ];
+            let adjacency = vec![vec![1], vec![2], vec![3], vec![]];
 
             let mut dag = GhostDag::<1024>::from_adjacency(&adjacency);
             let lengths = dag.shortest_path_lengths().unwrap();
@@ -570,12 +559,7 @@ mod tests {
     fn dag_critical_path() {
         GhostToken::new(|_token| {
             // Diamond: 0 -> 1 -> 3, 0 -> 2 -> 3
-            let adjacency = vec![
-                vec![1, 2],
-                vec![3],
-                vec![3],
-                vec![],
-            ];
+            let adjacency = vec![vec![1, 2], vec![3], vec![3], vec![]];
 
             let mut dag = GhostDag::<1024>::from_adjacency(&adjacency);
             let (length, path) = dag.critical_path().unwrap();
@@ -591,14 +575,7 @@ mod tests {
     fn dag_dp_compute() {
         GhostToken::new(|_token| {
             // Tree: 0 -> 1,2; 1 -> 3,4; 2 -> 5
-            let adjacency = vec![
-                vec![1, 2],
-                vec![3, 4],
-                vec![5],
-                vec![],
-                vec![],
-                vec![],
-            ];
+            let adjacency = vec![vec![1, 2], vec![3, 4], vec![5], vec![], vec![], vec![]];
 
             let mut dag = GhostDag::<1024>::from_adjacency(&adjacency);
             // Number of paths from sources to each node.
@@ -625,12 +602,7 @@ mod tests {
     #[test]
     fn dag_traversal() {
         GhostToken::new(|_token| {
-            let adjacency = vec![
-                vec![1, 2],
-                vec![3],
-                vec![3],
-                vec![],
-            ];
+            let adjacency = vec![vec![1, 2], vec![3], vec![3], vec![]];
 
             let dag = GhostDag::<1024>::from_adjacency(&adjacency);
             let stack = GhostTreiberStack::new(10);
@@ -650,11 +622,7 @@ mod tests {
     fn dag_critical_path_bounds_check() {
         GhostToken::new(|_token| {
             // Test that bounds checking prevents invalid access
-            let adjacency = vec![
-                vec![1],
-                vec![2],
-                vec![],
-            ];
+            let adjacency = vec![vec![1], vec![2], vec![]];
 
             let mut dag = GhostDag::<1024>::from_adjacency(&adjacency);
             let result = dag.critical_path();
@@ -688,7 +656,9 @@ pub struct ConstDag<'brand, const N: usize, const M: usize, const EDGE_CHUNK: us
     has_valid_topo: bool,
 }
 
-impl<'brand, const N: usize, const M: usize, const EDGE_CHUNK: usize> ConstDag<'brand, N, M, EDGE_CHUNK> {
+impl<'brand, const N: usize, const M: usize, const EDGE_CHUNK: usize>
+    ConstDag<'brand, N, M, EDGE_CHUNK>
+{
     /// Creates a compile-time DAG from a statically-known adjacency list.
     ///
     /// # Compile-Time Requirements

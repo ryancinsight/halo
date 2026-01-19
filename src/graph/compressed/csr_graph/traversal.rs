@@ -93,7 +93,11 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCsrGraph<'brand, EDGE_CHUNK> {
                             let word_idx = match found {
                                 Some(idx) => idx,
                                 None => {
-                                    words.push(WordEntry { word: w, mask: m, prev: 0 });
+                                    words.push(WordEntry {
+                                        word: w,
+                                        mask: m,
+                                        prev: 0,
+                                    });
                                     words.len() - 1
                                 }
                             };
@@ -461,4 +465,3 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCsrGraph<'brand, EDGE_CHUNK> {
         self.parallel_reachable_count_workstealing_with_deques(start, &deques)
     }
 }
-

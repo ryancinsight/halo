@@ -30,9 +30,3 @@ fn chunked_vec_non_pow2() {
     let sum: u32 = v.iter().copied().sum();
     assert_eq!(sum, (0..100u32).sum());
 }
-
-
-
-
-
-

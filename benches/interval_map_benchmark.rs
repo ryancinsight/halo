@@ -16,7 +16,12 @@ fn bench_interval_map(c: &mut Criterion) {
                 let mut map = BrandedIntervalMap::new();
                 for i in 0..1000 {
                     // [i*10, i*10 + 5)
-                    map.insert(&mut token, black_box(i * 10), black_box(i * 10 + 5), black_box(i));
+                    map.insert(
+                        &mut token,
+                        black_box(i * 10),
+                        black_box(i * 10 + 5),
+                        black_box(i),
+                    );
                 }
             });
         });
@@ -60,7 +65,8 @@ fn bench_interval_map(c: &mut Criterion) {
             for i in 0..1000 {
                 let point = black_box(i * 10 + 2);
                 // Standard way to find interval in BTreeMap: find key <= point
-                let entry = map.range((Bound::Unbounded, Bound::Included(point)))
+                let entry = map
+                    .range((Bound::Unbounded, Bound::Included(point)))
                     .next_back();
 
                 if let Some((_, (end, val))) = entry {

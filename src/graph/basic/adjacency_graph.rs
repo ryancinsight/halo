@@ -11,8 +11,8 @@
 use core::sync::atomic::Ordering;
 
 use crate::{
-    concurrency::worklist::{GhostChaseLevDeque, GhostTreiberStack},
     collections::vec::BrandedVec,
+    concurrency::worklist::{GhostChaseLevDeque, GhostTreiberStack},
     graph::access::visited::VisitedFlags,
     GhostToken,
 };
@@ -62,7 +62,10 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
             nbrs.sort_unstable();
             nbrs.dedup(); // Remove duplicate edges
             for &v in nbrs.iter() {
-                assert!(v < vertex_count, "edge {u}->{v} out of bounds for n={vertex_count}");
+                assert!(
+                    v < vertex_count,
+                    "edge {u}->{v} out of bounds for n={vertex_count}"
+                );
             }
         }
         let mut adjacency = BrandedVec::with_capacity(vertex_count);
@@ -92,7 +95,10 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
     ///
     /// For frequent node removals, consider `BrandedPoolGraph` which allows O(1) removal (amortized).
     pub fn remove_vertex(&mut self, token: &mut GhostToken<'brand>, vertex: usize) {
-        assert!(vertex < self.adjacency.len(), "vertex {vertex} out of bounds");
+        assert!(
+            vertex < self.adjacency.len(),
+            "vertex {vertex} out of bounds"
+        );
 
         // Remove incoming edges (u -> vertex), and shift indices above `vertex` down by 1.
         for u in 0..self.adjacency.len() {
@@ -126,7 +132,10 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
     /// Panics if `from` or `to` are out of bounds.
     #[inline]
     pub fn add_edge(&self, token: &mut GhostToken<'brand>, from: usize, to: usize) {
-        assert!(from < self.vertex_count(), "from vertex {from} out of bounds");
+        assert!(
+            from < self.vertex_count(),
+            "from vertex {from} out of bounds"
+        );
         assert!(to < self.vertex_count(), "to vertex {to} out of bounds");
         let nbrs = self.adjacency.borrow_mut(token, from);
 
@@ -142,7 +151,10 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
     /// Panics if `from` or `to` are out of bounds.
     #[inline]
     pub fn remove_edge(&self, token: &mut GhostToken<'brand>, from: usize, to: usize) -> bool {
-        assert!(from < self.vertex_count(), "from vertex {from} out of bounds");
+        assert!(
+            from < self.vertex_count(),
+            "from vertex {from} out of bounds"
+        );
         assert!(to < self.vertex_count(), "to vertex {to} out of bounds");
         let nbrs = self.adjacency.borrow_mut(token, from);
 
@@ -170,13 +182,19 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
     /// Returns the out-degree of a vertex.
     #[inline]
     pub fn out_degree(&self, token: &GhostToken<'brand>, vertex: usize) -> usize {
-        assert!(vertex < self.vertex_count(), "vertex {vertex} out of bounds");
+        assert!(
+            vertex < self.vertex_count(),
+            "vertex {vertex} out of bounds"
+        );
         self.adjacency.borrow(token, vertex).len()
     }
 
     /// Returns the in-degree of a vertex.
     pub fn in_degree(&self, token: &GhostToken<'brand>, vertex: usize) -> usize {
-        assert!(vertex < self.vertex_count(), "vertex {vertex} out of bounds");
+        assert!(
+            vertex < self.vertex_count(),
+            "vertex {vertex} out of bounds"
+        );
         let mut deg = 0usize;
         for u in 0..self.vertex_count() {
             if self.has_edge(token, u, vertex) {
@@ -191,7 +209,10 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
     /// Uses binary search (O(log d)).
     #[inline]
     pub fn has_edge(&self, token: &GhostToken<'brand>, from: usize, to: usize) -> bool {
-        assert!(from < self.vertex_count(), "from vertex {from} out of bounds");
+        assert!(
+            from < self.vertex_count(),
+            "from vertex {from} out of bounds"
+        );
         assert!(to < self.vertex_count(), "to vertex {to} out of bounds");
         let nbrs = self.adjacency.borrow(token, from);
         nbrs.binary_search(&to).is_ok()
@@ -204,13 +225,19 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
         token: &'a GhostToken<'brand>,
         vertex: usize,
     ) -> impl Iterator<Item = usize> + 'a {
-        assert!(vertex < self.vertex_count(), "vertex {vertex} out of bounds");
+        assert!(
+            vertex < self.vertex_count(),
+            "vertex {vertex} out of bounds"
+        );
         self.adjacency.borrow(token, vertex).iter().copied()
     }
 
     /// Returns the in-neighbors of a vertex.
     pub fn in_neighbors(&self, token: &GhostToken<'brand>, vertex: usize) -> Vec<usize> {
-        assert!(vertex < self.vertex_count(), "vertex {vertex} out of bounds");
+        assert!(
+            vertex < self.vertex_count(),
+            "vertex {vertex} out of bounds"
+        );
         let mut preds = Vec::new();
         for u in 0..self.vertex_count() {
             if self.has_edge(token, u, vertex) {
@@ -232,7 +259,10 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
         start: usize,
         stack: &GhostTreiberStack<'brand>,
     ) -> usize {
-        assert!(start < self.adjacency.len(), "start vertex {start} out of bounds");
+        assert!(
+            start < self.adjacency.len(),
+            "start vertex {start} out of bounds"
+        );
 
         self.reset_visited();
         self.visited.mark(start, Ordering::Relaxed);
@@ -259,7 +289,10 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
         start: usize,
         deque: &GhostChaseLevDeque<'brand>,
     ) -> usize {
-        assert!(start < self.adjacency.len(), "start vertex {start} out of bounds");
+        assert!(
+            start < self.adjacency.len(),
+            "start vertex {start} out of bounds"
+        );
 
         self.reset_visited();
         self.visited.mark(start, Ordering::Relaxed);
@@ -410,7 +443,9 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
         let vertex_count = self.vertex_count();
         let edge_count = self.edge_count(token);
 
-        let mut degrees: Vec<usize> = (0..vertex_count).map(|v| self.out_degree(token, v)).collect();
+        let mut degrees: Vec<usize> = (0..vertex_count)
+            .map(|v| self.out_degree(token, v))
+            .collect();
         degrees.sort_unstable();
 
         let (min_degree, max_degree) = match degrees.as_slice() {
@@ -433,7 +468,11 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
             min_degree,
             max_degree,
             median_degree,
-            average_degree: if vertex_count == 0 { 0.0 } else { edge_count as f64 / vertex_count as f64 },
+            average_degree: if vertex_count == 0 {
+                0.0
+            } else {
+                edge_count as f64 / vertex_count as f64
+            },
         }
     }
 }
@@ -505,17 +544,19 @@ mod tests {
     #[test]
     fn adjacency_graph_neighbors() {
         GhostToken::new(|token| {
-            let adjacency = vec![
-                vec![1, 2],
-                vec![2],
-                vec![],
-            ];
+            let adjacency = vec![vec![1, 2], vec![2], vec![]];
 
             let graph = GhostAdjacencyGraph::from_adjacency(adjacency);
 
-            assert_eq!(graph.out_neighbors(&token, 0).collect::<Vec<_>>(), vec![1, 2]);
+            assert_eq!(
+                graph.out_neighbors(&token, 0).collect::<Vec<_>>(),
+                vec![1, 2]
+            );
             assert_eq!(graph.out_neighbors(&token, 1).collect::<Vec<_>>(), vec![2]);
-            assert_eq!(graph.out_neighbors(&token, 2).collect::<Vec<_>>(), Vec::<usize>::new());
+            assert_eq!(
+                graph.out_neighbors(&token, 2).collect::<Vec<_>>(),
+                Vec::<usize>::new()
+            );
 
             assert_eq!(graph.in_neighbors(&token, 0), Vec::<usize>::new());
             assert_eq!(graph.in_neighbors(&token, 1), vec![0]);
@@ -526,11 +567,7 @@ mod tests {
     #[test]
     fn adjacency_graph_degrees() {
         GhostToken::new(|token| {
-            let adjacency = vec![
-                vec![1, 2],
-                vec![2],
-                vec![],
-            ];
+            let adjacency = vec![vec![1, 2], vec![2], vec![]];
 
             let graph = GhostAdjacencyGraph::from_adjacency(adjacency);
 
@@ -547,11 +584,7 @@ mod tests {
     #[test]
     fn adjacency_graph_traversal() {
         GhostToken::new(|token| {
-            let adjacency = vec![
-                vec![1, 2],
-                vec![2],
-                vec![],
-            ];
+            let adjacency = vec![vec![1, 2], vec![2], vec![]];
 
             let graph = GhostAdjacencyGraph::from_adjacency(adjacency);
             let stack = GhostTreiberStack::new(10);
@@ -591,9 +624,9 @@ mod tests {
     fn adjacency_graph_transitive_closure() {
         GhostToken::new(|token| {
             let adjacency = vec![
-                vec![1],    // 0 -> 1
-                vec![2],    // 1 -> 2
-                vec![],     // 2
+                vec![1], // 0 -> 1
+                vec![2], // 1 -> 2
+                vec![],  // 2
             ];
 
             let graph = GhostAdjacencyGraph::from_adjacency(adjacency);
@@ -613,12 +646,7 @@ mod tests {
     fn adjacency_graph_scc() {
         GhostToken::new(|token| {
             // Two SCCs: {0,1,2} cycle and {3} alone.
-            let adjacency = vec![
-                vec![1],
-                vec![2],
-                vec![0],
-                vec![],
-            ];
+            let adjacency = vec![vec![1], vec![2], vec![0], vec![]];
             let graph = GhostAdjacencyGraph::from_adjacency(adjacency);
             let comp = graph.strongly_connected_components(&token);
             assert_eq!(comp.len(), 4);

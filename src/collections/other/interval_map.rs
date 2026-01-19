@@ -8,8 +8,8 @@
 //! - Uses `GhostToken` to ensure safe access to the underlying storage.
 //! - Zero-copy iteration over intervals.
 
+use crate::collections::{BrandedCollection, BrandedVec};
 use crate::GhostToken;
-use crate::collections::{BrandedVec, BrandedCollection};
 use core::cmp::Ordering;
 use core::fmt::Debug;
 
@@ -93,7 +93,7 @@ where
             Ok(idx) => {
                 // binary_search finds *any* match. We need the first one.
                 let mut i = idx;
-                while i > 0 && slice[i-1].end > start {
+                while i > 0 && slice[i - 1].end > start {
                     i -= 1;
                 }
                 i
@@ -148,9 +148,9 @@ where
 
         // Optimize: verify if we can just update in place
         if to_remove == 1 && prefix.is_none() && suffix.is_none() {
-             // Perfect overlap replacement
-             *self.entries.borrow_mut(token, first_idx) = Interval { start, end, value };
-             return;
+            // Perfect overlap replacement
+            *self.entries.borrow_mut(token, first_idx) = Interval { start, end, value };
+            return;
         }
 
         // Generic approach: remove then insert
@@ -169,7 +169,8 @@ where
             current_idx += 1;
         }
 
-        self.entries.insert(current_idx, Interval { start, end, value });
+        self.entries
+            .insert(current_idx, Interval { start, end, value });
         current_idx += 1;
 
         if let Some(s) = suffix {
@@ -196,7 +197,10 @@ where
     }
 
     /// Iterates over all intervals.
-    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> impl Iterator<Item = &'a Interval<K, V>> + 'a {
+    pub fn iter<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+    ) -> impl Iterator<Item = &'a Interval<K, V>> + 'a {
         self.entries.iter(token)
     }
 
@@ -205,32 +209,33 @@ where
         &'a self,
         token: &'a GhostToken<'brand>,
         start: K,
-        end: K
+        end: K,
     ) -> impl Iterator<Item = &'a Interval<K, V>> + 'a {
         // Zero-copy slicing of the iterator
         let slice = self.entries.as_slice(token);
 
         // Find start index
         let start_idx = match slice.binary_search_by(|entry| {
-             if entry.end <= start {
-                 Ordering::Less
-             } else if entry.start >= end {
-                 Ordering::Greater
-             } else {
-                 Ordering::Equal
-             }
+            if entry.end <= start {
+                Ordering::Less
+            } else if entry.start >= end {
+                Ordering::Greater
+            } else {
+                Ordering::Equal
+            }
         }) {
             Ok(idx) => {
                 let mut i = idx;
-                while i > 0 && slice[i-1].end > start {
+                while i > 0 && slice[i - 1].end > start {
                     i -= 1;
                 }
                 i
-            },
+            }
             Err(idx) => idx,
         };
 
-        self.entries.iter(token)
+        self.entries
+            .iter(token)
             .skip(start_idx)
             .take_while(move |entry| entry.start < end)
     }

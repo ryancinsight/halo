@@ -140,6 +140,6 @@ impl<'brand> GhostEccGraph<'brand> {
 }
 
 mod storage;
-mod traversal;
 #[cfg(test)]
 mod tests;
+mod traversal;

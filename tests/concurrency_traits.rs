@@ -15,9 +15,3 @@ fn ghost_cell_send_sync_follows_t_bounds() {
     assert_send::<GhostCell<'static, u64>>();
     assert_sync::<GhostCell<'static, u64>>();
 }
-
-
-
-
-
-

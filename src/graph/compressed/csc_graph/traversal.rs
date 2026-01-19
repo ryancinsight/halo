@@ -119,4 +119,3 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCscGraph<'brand, EDGE_CHUNK> {
         crate::graph::GhostCsrGraph::from_adjacency(&adjacency)
     }
 }
-

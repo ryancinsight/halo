@@ -265,10 +265,7 @@ impl<'brand, T> BrandedVec<'brand, T> {
     /// Returns direct references to elements without indirection.
     ///
     /// Optimized to use slice iterator, bypassing per-element `GhostCell` borrowing overhead.
-    pub fn iter<'a>(
-        &'a self,
-        token: &'a GhostToken<'brand>,
-    ) -> slice::Iter<'a, T> {
+    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> slice::Iter<'a, T> {
         self.as_slice(token).iter()
     }
 
@@ -307,11 +304,7 @@ impl<'brand, T> BrandedVec<'brand, T> {
 
     /// Zero-copy find operation - returns reference without copying.
     #[inline(always)]
-    pub fn find_ref<'a, F>(
-        &'a self,
-        token: &'a GhostToken<'brand>,
-        f: F,
-    ) -> Option<&'a T>
+    pub fn find_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<&'a T>
     where
         F: Fn(&T) -> bool,
     {
@@ -320,11 +313,7 @@ impl<'brand, T> BrandedVec<'brand, T> {
 
     /// Zero-copy position finder with fused operations.
     #[inline(always)]
-    pub fn position_ref<F>(
-        &self,
-        token: &GhostToken<'brand>,
-        f: F,
-    ) -> Option<usize>
+    pub fn position_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> Option<usize>
     where
         F: Fn(&T) -> bool,
     {
@@ -332,12 +321,7 @@ impl<'brand, T> BrandedVec<'brand, T> {
     }
 
     /// Zero-cost fold operation with iterator fusion.
-    pub fn fold_ref<B, F>(
-        &self,
-        token: &GhostToken<'brand>,
-        init: B,
-        f: F,
-    ) -> B
+    pub fn fold_ref<B, F>(&self, token: &GhostToken<'brand>, init: B, f: F) -> B
     where
         F: FnMut(B, &T) -> B,
     {
@@ -346,11 +330,7 @@ impl<'brand, T> BrandedVec<'brand, T> {
 
     /// Zero-cost any/all operations with short-circuiting.
     #[inline(always)]
-    pub fn any_ref<F>(
-        &self,
-        token: &GhostToken<'brand>,
-        f: F,
-    ) -> bool
+    pub fn any_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
     where
         F: Fn(&T) -> bool,
     {
@@ -358,11 +338,7 @@ impl<'brand, T> BrandedVec<'brand, T> {
     }
 
     #[inline(always)]
-    pub fn all_ref<F>(
-        &self,
-        token: &GhostToken<'brand>,
-        f: F,
-    ) -> bool
+    pub fn all_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
     where
         F: Fn(&T) -> bool,
     {
@@ -371,11 +347,7 @@ impl<'brand, T> BrandedVec<'brand, T> {
 
     /// Zero-cost count operation.
     #[inline(always)]
-    pub fn count_ref<F>(
-        &self,
-        token: &GhostToken<'brand>,
-        f: F,
-    ) -> usize
+    pub fn count_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> usize
     where
         F: Fn(&T) -> bool,
     {
@@ -383,11 +355,7 @@ impl<'brand, T> BrandedVec<'brand, T> {
     }
 
     /// Zero-cost min_by operation with custom comparator.
-    pub fn min_by_ref<'a, F>(
-        &'a self,
-        token: &'a GhostToken<'brand>,
-        f: F,
-    ) -> Option<&'a T>
+    pub fn min_by_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<&'a T>
     where
         F: Fn(&T, &T) -> std::cmp::Ordering,
     {
@@ -395,11 +363,7 @@ impl<'brand, T> BrandedVec<'brand, T> {
     }
 
     /// Zero-cost max_by operation with custom comparator.
-    pub fn max_by_ref<'a, F>(
-        &'a self,
-        token: &'a GhostToken<'brand>,
-        f: F,
-    ) -> Option<&'a T>
+    pub fn max_by_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<&'a T>
     where
         F: Fn(&T, &T) -> std::cmp::Ordering,
     {
@@ -470,7 +434,8 @@ impl<'brand, T> FromIterator<T> for BrandedVec<'brand, T> {
 
 impl<'brand, T> IntoIterator for BrandedVec<'brand, T> {
     type Item = T;
-    type IntoIter = std::iter::Map<std::vec::IntoIter<GhostCell<'brand, T>>, fn(GhostCell<'brand, T>) -> T>;
+    type IntoIter =
+        std::iter::Map<std::vec::IntoIter<GhostCell<'brand, T>>, fn(GhostCell<'brand, T>) -> T>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.inner.into_iter().map(GhostCell::into_inner)
@@ -534,7 +499,10 @@ impl<'brand, T, const CAPACITY: usize> BrandedArray<'brand, T, CAPACITY> {
         &'a self,
         token: &'a GhostToken<'brand>,
     ) -> impl Iterator<Item = &'a T> + 'a + use<'a, 'brand, T, CAPACITY> {
-        self.inner.iter().take(self.len).map(|cell| cell.borrow(token))
+        self.inner
+            .iter()
+            .take(self.len)
+            .map(|cell| cell.borrow(token))
     }
 
     /// Returns the current number of elements in the array.
@@ -613,7 +581,11 @@ impl<'brand, T, const CAPACITY: usize> BrandedArray<'brand, T, CAPACITY> {
     }
 
     /// Returns a token-gated exclusive reference to element `idx`, if in bounds.
-    pub fn get_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>, idx: usize) -> Option<&'a mut T> {
+    pub fn get_mut<'a>(
+        &'a self,
+        token: &'a mut GhostToken<'brand>,
+        idx: usize,
+    ) -> Option<&'a mut T> {
         if idx < self.len {
             Some(self.inner[idx].borrow_mut(token))
         } else {
@@ -627,7 +599,12 @@ impl<'brand, T, const CAPACITY: usize> BrandedArray<'brand, T, CAPACITY> {
     /// Panics if `idx` is out of bounds.
     #[inline(always)]
     pub fn borrow<'a>(&'a self, token: &'a GhostToken<'brand>, idx: usize) -> &'a T {
-        assert!(idx < self.len, "index {} out of bounds for BrandedArray of len {}", idx, self.len);
+        assert!(
+            idx < self.len,
+            "index {} out of bounds for BrandedArray of len {}",
+            idx,
+            self.len
+        );
         self.inner[idx].borrow(token)
     }
 
@@ -637,7 +614,12 @@ impl<'brand, T, const CAPACITY: usize> BrandedArray<'brand, T, CAPACITY> {
     /// Panics if `idx` is out of bounds.
     #[inline(always)]
     pub fn borrow_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>, idx: usize) -> &'a mut T {
-        assert!(idx < self.len, "index {} out of bounds for BrandedArray of len {}", idx, self.len);
+        assert!(
+            idx < self.len,
+            "index {} out of bounds for BrandedArray of len {}",
+            idx,
+            self.len
+        );
         self.inner[idx].borrow_mut(token)
     }
 
@@ -660,7 +642,10 @@ impl<'brand, T, const CAPACITY: usize> BrandedArray<'brand, T, CAPACITY> {
     }
 
     /// Iterates over all elements by shared reference.
-    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> impl Iterator<Item = &'a T> + 'a + use<'a, 'brand, T, CAPACITY> {
+    pub fn iter<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+    ) -> impl Iterator<Item = &'a T> + 'a + use<'a, 'brand, T, CAPACITY> {
         self.inner[..self.len].iter().map(|cell| cell.borrow(token))
     }
 
@@ -696,110 +681,109 @@ impl<'brand, T: Default, const CAPACITY: usize> Default for BrandedArray<'brand,
     }
 }
 
-    /// Tests for zero-copy operations and advanced features.
-    #[cfg(test)]
-    mod zero_copy_tests {
-        use super::*;
-        use crate::GhostToken;
+/// Tests for zero-copy operations and advanced features.
+#[cfg(test)]
+mod zero_copy_tests {
+    use super::*;
+    use crate::GhostToken;
 
-        #[test]
-        fn test_zero_copy_iterator_operations() {
-            GhostToken::new(|token| {
-                let mut vec = BrandedVec::new();
-                vec.push(1);
-                vec.push(2);
-                vec.push(3);
-                vec.push(4);
-                vec.push(5);
+    #[test]
+    fn test_zero_copy_iterator_operations() {
+        GhostToken::new(|token| {
+            let mut vec = BrandedVec::new();
+            vec.push(1);
+            vec.push(2);
+            vec.push(3);
+            vec.push(4);
+            vec.push(5);
 
-                // Test find_ref
-                let found = vec.find_ref(&token, |&x| x == 3);
-                assert_eq!(found, Some(&3));
+            // Test find_ref
+            let found = vec.find_ref(&token, |&x| x == 3);
+            assert_eq!(found, Some(&3));
 
-                let not_found = vec.find_ref(&token, |&x| x == 99);
-                assert_eq!(not_found, None);
+            let not_found = vec.find_ref(&token, |&x| x == 99);
+            assert_eq!(not_found, None);
 
-                // Test any_ref
-                assert!(vec.any_ref(&token, |&x| x > 3));
-                assert!(!vec.any_ref(&token, |&x| x > 10));
+            // Test any_ref
+            assert!(vec.any_ref(&token, |&x| x > 3));
+            assert!(!vec.any_ref(&token, |&x| x > 10));
 
-                // Test all_ref
-                assert!(vec.all_ref(&token, |&x| x > 0));
-                assert!(!vec.all_ref(&token, |&x| x > 2));
+            // Test all_ref
+            assert!(vec.all_ref(&token, |&x| x > 0));
+            assert!(!vec.all_ref(&token, |&x| x > 2));
 
-                // Test count_ref
-                let count_even = vec.count_ref(&token, |&x| x % 2 == 0);
-                assert_eq!(count_even, 2); // 2, 4
+            // Test count_ref
+            let count_even = vec.count_ref(&token, |&x| x % 2 == 0);
+            assert_eq!(count_even, 2); // 2, 4
 
-                let count_gt_3 = vec.count_ref(&token, |&x| x > 3);
-                assert_eq!(count_gt_3, 2); // 4, 5
+            let count_gt_3 = vec.count_ref(&token, |&x| x > 3);
+            assert_eq!(count_gt_3, 2); // 4, 5
 
-                // Test min_by_ref and max_by_ref
-                let min = vec.min_by_ref(&token, |a, b| a.cmp(b));
-                assert_eq!(min, Some(&1));
+            // Test min_by_ref and max_by_ref
+            let min = vec.min_by_ref(&token, |a, b| a.cmp(b));
+            assert_eq!(min, Some(&1));
 
-                let max = vec.max_by_ref(&token, |a, b| a.cmp(b));
-                assert_eq!(max, Some(&5));
-            });
-        }
-
-        #[test]
-        fn test_zero_copy_empty_vector() {
-            GhostToken::new(|token| {
-                let vec: BrandedVec<i32> = BrandedVec::new();
-
-                // All operations should return expected results for empty vec
-                assert_eq!(vec.find_ref(&token, |_| true), None);
-                assert!(!vec.any_ref(&token, |_| true));
-                assert!(vec.all_ref(&token, |_| false)); // vacuously true
-                assert_eq!(vec.count_ref(&token, |_| true), 0);
-                assert_eq!(vec.min_by_ref(&token, |a, b| a.cmp(b)), None);
-                assert_eq!(vec.max_by_ref(&token, |a, b| a.cmp(b)), None);
-            });
-        }
-
-        #[test]
-        fn test_zero_copy_single_element() {
-            GhostToken::new(|token| {
-                let mut vec = BrandedVec::new();
-                vec.push(42);
-
-                assert_eq!(vec.find_ref(&token, |&x| x == 42), Some(&42));
-                assert!(vec.any_ref(&token, |&x| x == 42));
-                assert!(vec.all_ref(&token, |&x| x == 42));
-                assert_eq!(vec.count_ref(&token, |&x| x == 42), 1);
-                assert_eq!(vec.min_by_ref(&token, |a, b| a.cmp(b)), Some(&42));
-                assert_eq!(vec.max_by_ref(&token, |a, b| a.cmp(b)), Some(&42));
-            });
-        }
-
-        #[test]
-        fn test_zero_copy_iterator_fusion() {
-            GhostToken::new(|token| {
-                let mut vec = BrandedVec::new();
-                for i in 0..10 {
-                    vec.push(i);
-                }
-
-                // Test that operations can be chained efficiently (iterator fusion)
-                let result: Vec<_> = vec.iter(&token)
-                    .filter(|&&x| x % 2 == 0) // even numbers
-                    .map(|&x| x * 2) // double them
-                    .collect();
-
-                assert_eq!(result, vec![0, 4, 8, 12, 16]); // 0*2, 2*2, 4*2, 6*2, 8*2
-
-                // Test zero-copy filter followed by count
-                let even_count = vec.iter(&token)
-                    .filter(|&&x| x % 2 == 0)
-                    .count();
-                assert_eq!(even_count, 5); // 0, 2, 4, 6, 8
-            });
-        }
+            let max = vec.max_by_ref(&token, |a, b| a.cmp(b));
+            assert_eq!(max, Some(&5));
+        });
     }
 
-    #[cfg(test)]
-    mod tests {
+    #[test]
+    fn test_zero_copy_empty_vector() {
+        GhostToken::new(|token| {
+            let vec: BrandedVec<i32> = BrandedVec::new();
+
+            // All operations should return expected results for empty vec
+            assert_eq!(vec.find_ref(&token, |_| true), None);
+            assert!(!vec.any_ref(&token, |_| true));
+            assert!(vec.all_ref(&token, |_| false)); // vacuously true
+            assert_eq!(vec.count_ref(&token, |_| true), 0);
+            assert_eq!(vec.min_by_ref(&token, |a, b| a.cmp(b)), None);
+            assert_eq!(vec.max_by_ref(&token, |a, b| a.cmp(b)), None);
+        });
+    }
+
+    #[test]
+    fn test_zero_copy_single_element() {
+        GhostToken::new(|token| {
+            let mut vec = BrandedVec::new();
+            vec.push(42);
+
+            assert_eq!(vec.find_ref(&token, |&x| x == 42), Some(&42));
+            assert!(vec.any_ref(&token, |&x| x == 42));
+            assert!(vec.all_ref(&token, |&x| x == 42));
+            assert_eq!(vec.count_ref(&token, |&x| x == 42), 1);
+            assert_eq!(vec.min_by_ref(&token, |a, b| a.cmp(b)), Some(&42));
+            assert_eq!(vec.max_by_ref(&token, |a, b| a.cmp(b)), Some(&42));
+        });
+    }
+
+    #[test]
+    fn test_zero_copy_iterator_fusion() {
+        GhostToken::new(|token| {
+            let mut vec = BrandedVec::new();
+            for i in 0..10 {
+                vec.push(i);
+            }
+
+            // Test that operations can be chained efficiently (iterator fusion)
+            let result: Vec<_> = vec
+                .iter(&token)
+                .filter(|&&x| x % 2 == 0) // even numbers
+                .map(|&x| x * 2) // double them
+                .collect();
+
+            assert_eq!(result, vec![0, 4, 8, 12, 16]); // 0*2, 2*2, 4*2, 6*2, 8*2
+
+            // Test zero-copy filter followed by count
+            let even_count = vec.iter(&token).filter(|&&x| x % 2 == 0).count();
+            assert_eq!(even_count, 5); // 0, 2, 4, 6, 8
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
     use super::*;
     use crate::GhostToken;
 
@@ -953,5 +937,3 @@ impl<'brand, T: Default, const CAPACITY: usize> Default for BrandedArray<'brand,
         });
     }
 }
-
-

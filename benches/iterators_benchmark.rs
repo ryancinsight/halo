@@ -1,7 +1,7 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use halo::{GhostToken, BrandedVec, BrandedDoublyLinkedList, BrandedVecDeque};
-use halo::collections::{BrandedBinaryHeap, BrandedDeque, BrandedChunkedVec};
-use std::collections::{VecDeque, LinkedList, BinaryHeap};
+use halo::collections::{BrandedBinaryHeap, BrandedChunkedVec, BrandedDeque};
+use halo::{BrandedDoublyLinkedList, BrandedVec, BrandedVecDeque, GhostToken};
+use std::collections::{BinaryHeap, LinkedList, VecDeque};
 
 fn bench_iterators(c: &mut Criterion) {
     let mut group = c.benchmark_group("iterators");

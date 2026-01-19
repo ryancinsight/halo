@@ -1,7 +1,7 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use halo::GhostToken;
-use halo::collections::btree::{BrandedBTreeMap, BrandedBPlusTree};
 use halo::collections::btree::active::ActivateBTreeMap;
+use halo::collections::btree::{BrandedBPlusTree, BrandedBTreeMap};
+use halo::GhostToken;
 use std::collections::BTreeMap;
 
 fn bench_insert(c: &mut Criterion) {
@@ -19,7 +19,7 @@ fn bench_insert(c: &mut Criterion) {
 
     group.bench_function("BrandedBTreeMap (Box)", |b| {
         b.iter(|| {
-             GhostToken::new(|mut token| {
+            GhostToken::new(|mut token| {
                 let mut map = BrandedBTreeMap::new();
                 {
                     let mut active = map.activate(&mut token);
@@ -33,7 +33,7 @@ fn bench_insert(c: &mut Criterion) {
 
     group.bench_function("BrandedBPlusTree (Pool)", |b| {
         b.iter(|| {
-             GhostToken::new(|mut token| {
+            GhostToken::new(|mut token| {
                 let mut map = BrandedBPlusTree::new();
                 {
                     let mut active = map.activate(&mut token);

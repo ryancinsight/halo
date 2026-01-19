@@ -2,7 +2,7 @@
 //!
 //! Demonstrates memory-efficient lazy initialization with GhostCell.
 
-use halo::{GhostToken, GhostLazyCell};
+use halo::{GhostLazyCell, GhostToken};
 
 fn main() {
     println!("GhostLazyCell Usage Examples");
@@ -21,11 +21,19 @@ fn main() {
 
         println!("  First access (triggers computation):");
         let value = lazy_value.get(&mut token);
-        println!("  Result: {}, Compute count: {}", *value, compute_count.get());
+        println!(
+            "  Result: {}, Compute count: {}",
+            *value,
+            compute_count.get()
+        );
 
         println!("  Second access (uses cache):");
         let value2 = lazy_value.get(&mut token);
-        println!("  Result: {}, Compute count: {}", *value2, compute_count.get());
+        println!(
+            "  Result: {}, Compute count: {}",
+            *value2,
+            compute_count.get()
+        );
 
         // Example 2: GhostLazyCell caching behavior
         println!("\n2. GhostLazyCell Caching:");
@@ -39,23 +47,37 @@ fn main() {
 
         println!("  First access (computation):");
         let vec1 = lazy.get(&mut token);
-        println!("  Length: {}, Compute count: {}", vec1.len(), compute_count2.get());
+        println!(
+            "  Length: {}, Compute count: {}",
+            vec1.len(),
+            compute_count2.get()
+        );
 
         println!("  Second access (cached):");
         let vec2 = lazy.get(&mut token);
-        println!("  Length: {}, Compute count: {}", vec2.len(), compute_count2.get());
+        println!(
+            "  Length: {}, Compute count: {}",
+            vec2.len(),
+            compute_count2.get()
+        );
 
         // Example 3: Memory efficiency
         println!("\n3. Memory Efficiency:");
         let lazy_empty: GhostLazyCell<Vec<i32>> = GhostLazyCell::new(Vec::<i32>::new);
 
-        println!("  GhostLazyCell size: {} bytes", std::mem::size_of_val(&lazy_empty));
+        println!(
+            "  GhostLazyCell size: {} bytes",
+            std::mem::size_of_val(&lazy_empty)
+        );
         println!("  (Inline storage, no std::cell wrappers)");
 
         // After computation
         let _ = lazy_empty.get(&mut token);
 
-        println!("  GhostLazyCell size (computed): {} bytes", std::mem::size_of_val(&lazy_empty));
+        println!(
+            "  GhostLazyCell size (computed): {} bytes",
+            std::mem::size_of_val(&lazy_empty)
+        );
 
         // Example 4: Performance demonstration
         println!("\n4. Performance Characteristics:");
@@ -84,7 +106,10 @@ fn main() {
         println!("  Cached access time: {:?}", cached_time);
         let cached_ns = cached_time.as_nanos();
         if cached_ns == 0 {
-            println!("  Speedup: > {:.0}x (cached measured as 0ns)", computation_time.as_nanos() as f64);
+            println!(
+                "  Speedup: > {:.0}x (cached measured as 0ns)",
+                computation_time.as_nanos() as f64
+            );
         } else {
             println!(
                 "  Speedup: {:.0}x",

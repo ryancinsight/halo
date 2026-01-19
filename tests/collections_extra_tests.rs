@@ -1,7 +1,7 @@
-use halo::{GhostToken, GhostCell};
+use halo::collections::other::BrandedDoublyLinkedList;
 use halo::collections::vec::BrandedVec;
 use halo::collections::vec::BrandedVecDeque;
-use halo::collections::other::BrandedDoublyLinkedList;
+use halo::{GhostCell, GhostToken};
 
 #[test]
 fn test_branded_vec_from_iter() {
