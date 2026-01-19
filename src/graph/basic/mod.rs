@@ -6,9 +6,9 @@
 pub mod adjacency_graph;
 pub mod bipartite_graph;
 pub mod dag;
+pub mod pool_graph;
 
 pub use adjacency_graph::GhostAdjacencyGraph;
 pub use bipartite_graph::GhostBipartiteGraph;
 pub use dag::GhostDag;
-
-
+pub use pool_graph::BrandedPoolGraph;
