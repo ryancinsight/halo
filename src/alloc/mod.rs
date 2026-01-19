@@ -9,3 +9,8 @@ pub use bump::BrandedBumpAllocator;
 pub use pool::BrandedPool;
 pub mod heap;
 pub mod branded;
+pub mod static_rc;
+pub mod branded_box;
+
+pub use static_rc::StaticRc;
+pub use branded_box::BrandedBox;
