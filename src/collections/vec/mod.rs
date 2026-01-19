@@ -10,11 +10,13 @@ pub mod vec_deque;
 pub mod small_vec;
 pub mod slice;
 pub mod active;
+pub mod matrix;
 
 pub use base_chunked_vec::ChunkedVec;
 pub use chunked_vec::BrandedChunkedVec;
-pub use vec::BrandedVec;
+pub use vec::{BrandedVec, BrandedArray};
 pub use vec_deque::BrandedVecDeque;
 pub use small_vec::BrandedSmallVec;
 pub use slice::{BrandedSlice, BrandedSliceMut};
 pub use active::{ActiveVec, ActivateVec};
+pub use matrix::{BrandedMatrix, BrandedMatrixViewMut};

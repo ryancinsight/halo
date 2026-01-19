@@ -112,3 +112,7 @@ harness = false
 [[bench]]
 name = "shared_token_benchmark"
 harness = false
+
+[[bench]]
+name = "matrix_benchmark"
+harness = false
