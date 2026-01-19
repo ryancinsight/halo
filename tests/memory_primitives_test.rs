@@ -5,16 +5,16 @@ use std::sync::Arc;
 
 #[test]
 fn test_static_rc_basic() {
-    let rc: StaticRc<i32, 10, 10> = StaticRc::new(42);
+    let rc: StaticRc<'_, i32, 10, 10> = StaticRc::new(42);
     assert_eq!(*rc, 42);
 
     // Split: 10 -> 5 + 5
-    let (rc1, rc2): (StaticRc<i32, 5, 10>, StaticRc<i32, 5, 10>) = rc.split::<5, 5>();
+    let (rc1, rc2): (StaticRc<'_, i32, 5, 10>, StaticRc<'_, i32, 5, 10>) = rc.split::<5, 5>();
     assert_eq!(*rc1, 42);
     assert_eq!(*rc2, 42);
 
     // Split again: 5 -> 2 + 3
-    let (rc1a, rc1b): (StaticRc<i32, 2, 10>, StaticRc<i32, 3, 10>) = rc1.split::<2, 3>();
+    let (rc1a, rc1b): (StaticRc<'_, i32, 2, 10>, StaticRc<'_, i32, 3, 10>) = rc1.split::<2, 3>();
     assert_eq!(*rc1a, 42);
     assert_eq!(*rc1b, 42);
 
@@ -28,8 +28,8 @@ fn test_static_rc_basic() {
 
 #[test]
 fn test_static_rc_adjust() {
-    let rc: StaticRc<i32, 1, 1> = StaticRc::new(100);
-    let rc: StaticRc<i32, 10, 10> = rc.adjust();
+    let rc: StaticRc<'_, i32, 1, 1> = StaticRc::new(100);
+    let rc: StaticRc<'_, i32, 10, 10> = rc.adjust();
     let (rc1, rc2) = rc.split::<5, 5>();
     assert_eq!(*rc1, 100);
     assert_eq!(*rc2, 100);
@@ -41,15 +41,15 @@ fn test_static_rc_adjust() {
 #[test]
 #[should_panic(expected = "Split amounts must sum to current shares")]
 fn test_static_rc_invalid_split() {
-    let rc: StaticRc<i32, 10, 10> = StaticRc::new(42);
+    let rc: StaticRc<'_, i32, 10, 10> = StaticRc::new(42);
     // 5 + 4 != 10
-    let (_rc1, _rc2): (StaticRc<i32, 5, 10>, StaticRc<i32, 4, 10>) = rc.split::<5, 4>();
+    let (_rc1, _rc2): (StaticRc<'_, i32, 5, 10>, StaticRc<'_, i32, 4, 10>) = rc.split::<5, 4>();
 }
 
 #[test]
 fn test_branded_box() {
     GhostToken::new(|mut token| {
-        let mut b = BrandedBox::new(10, &mut token);
+        let mut b = BrandedBox::new(10);
         assert_eq!(*b.borrow(&token), 10);
 
         *b.borrow_mut(&mut token) = 20;
@@ -60,7 +60,7 @@ fn test_branded_box() {
 #[test]
 fn test_branded_box_downgrade() {
     GhostToken::new(|mut token| {
-        let b = BrandedBox::new(55, &mut token);
+        let b = BrandedBox::new(55);
         let rc: StaticRc<GhostCell<i32>, 4, 4> = b.into_shared::<4>();
 
         // Access via rc
@@ -90,15 +90,6 @@ fn test_branded_box_zst_drop() {
         dropped: Arc<std::sync::atomic::AtomicBool>,
     }
 
-    // ZST because only PhantomData or similar, but wait, Arc is not ZST.
-    // We need a true ZST that has side effects on drop.
-    // We can use a thread_local or static, but that's messy for parallel tests.
-    // Or we can use a ZST that just prints? No, we need to assert.
-    // How about a type with a field that is logically ZST but controls something?
-    // No, ZST implies size 0. `Arc` is size 8 (ptr).
-    // A unit struct `struct MyZst;` is ZST.
-    // `impl Drop for MyZst` can access `thread_local`.
-
     use std::cell::RefCell;
     thread_local! {
         static DROP_COUNT: RefCell<usize> = RefCell::new(0);
@@ -114,7 +105,7 @@ fn test_branded_box_zst_drop() {
     DROP_COUNT.with(|c| *c.borrow_mut() = 0);
 
     GhostToken::new(|mut token| {
-        let b = BrandedBox::new(MyZst, &mut token);
+        let b = BrandedBox::new(MyZst);
         // Should not be dropped yet.
         DROP_COUNT.with(|c| assert_eq!(*c.borrow(), 0));
         drop(b);

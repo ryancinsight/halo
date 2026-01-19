@@ -1039,30 +1039,36 @@ fn bench_branded_arena(c: &mut Criterion) {
     // Standard generational arena (default threshold)
     c.bench_function("branded_arena_generational", |b| {
         b.iter(|| {
-            let mut arena = BrandedArena::<u64>::new();
-            for i in 0..N {
-                arena.alloc(i as u64);
-            }
+            GhostToken::new(|mut token| {
+                let mut arena = BrandedArena::<u64>::new();
+                for i in 0..N {
+                    arena.alloc(&mut token, i as u64);
+                }
+            })
         });
     });
 
     // Aggressive generational (low threshold)
     c.bench_function("branded_arena_aggressive_gen", |b| {
         b.iter(|| {
-            let mut arena = BrandedArena::<u64>::with_generation_threshold(100);
-            for i in 0..N {
-                arena.alloc(i as u64);
-            }
+            GhostToken::new(|mut token| {
+                let mut arena = BrandedArena::<u64>::with_generation_threshold(100);
+                for i in 0..N {
+                    arena.alloc(&mut token, i as u64);
+                }
+            })
         });
     });
 
     // Conservative generational (high threshold)
     c.bench_function("branded_arena_conservative_gen", |b| {
         b.iter(|| {
-            let mut arena = BrandedArena::<u64>::with_generation_threshold(N * 2);
-            for i in 0..N {
-                arena.alloc(i as u64);
-            }
+            GhostToken::new(|mut token| {
+                let mut arena = BrandedArena::<u64>::with_generation_threshold(N * 2);
+                for i in 0..N {
+                    arena.alloc(&mut token, i as u64);
+                }
+            })
         });
     });
 
@@ -1071,7 +1077,7 @@ fn bench_branded_arena(c: &mut Criterion) {
         GhostToken::new(|mut token| {
             let mut arena = BrandedArena::<u64>::new();
             for i in 0..N {
-                arena.alloc(i as u64);
+                arena.alloc(&mut token, i as u64);
             }
 
             b.iter(|| {
@@ -1085,66 +1091,77 @@ fn bench_branded_arena(c: &mut Criterion) {
     // Bulk allocation benchmark - tests snmalloc-inspired batch allocation
     c.bench_function("branded_arena_bulk_alloc", |b| {
         b.iter(|| {
-            let mut arena = BrandedArena::<u64>::new();
-            let values: Vec<u64> = (0..N).map(|i| i as u64).collect();
-            let _keys = arena.alloc_batch(values);
+            GhostToken::new(|mut token| {
+                let mut arena = BrandedArena::<u64>::new();
+                let values: Vec<u64> = (0..N).map(|i| i as u64).collect();
+                let _keys = arena.alloc_batch(&mut token, values);
+            })
         });
     });
 
     // Adaptive threshold benchmark - tests snmalloc-inspired adaptive memory management
     c.bench_function("branded_arena_adaptive_threshold", |b| {
-        let mut arena = BrandedArena::<u64>::new();
-        // Pre-populate with mixed nursery/mature allocation pattern
-        for i in 0..N {
-            arena.alloc(i as u64);
-        }
+        GhostToken::new(|mut token| {
+            let mut arena = BrandedArena::<u64>::new();
+            // Pre-populate with mixed nursery/mature allocation pattern
+            for i in 0..N {
+                arena.alloc(&mut token, i as u64);
+            }
 
-        b.iter(|| {
-            arena.adapt_threshold();
+            b.iter(|| {
+                arena.adapt_threshold(&mut token);
+            });
         });
     });
 
     // Maintenance operations benchmark - tests mimalloc-inspired periodic optimization
     c.bench_function("branded_arena_maintenance", |b| {
-        let mut arena = BrandedArena::<u64>::new();
-        // Pre-populate
-        for i in 0..N/10 { // Smaller dataset for maintenance
-            arena.alloc(i as u64);
-        }
+        GhostToken::new(|mut token| {
+            let mut arena = BrandedArena::<u64>::new();
+            // Pre-populate
+            for i in 0..N/10 { // Smaller dataset for maintenance
+                arena.alloc(&mut token, i as u64);
+            }
 
-        b.iter(|| {
-            arena.maintenance();
+            b.iter(|| {
+                arena.maintenance(&mut token);
+            });
         });
     });
 
     // Epoch tracking benchmark - tests mimalloc-inspired deferred reclamation foundation
     c.bench_function("branded_arena_epoch_tracking", |b| {
-        let mut arena = BrandedArena::<u64>::new();
-
         b.iter(|| {
-            for i in 0..100 { // Smaller inner loop for epoch measurement
-                arena.alloc(i as u64);
-                black_box(arena.current_epoch());
-            }
+            GhostToken::new(|mut token| {
+                let mut arena = BrandedArena::<u64>::new();
+                for i in 0..100 { // Smaller inner loop for epoch measurement
+                    arena.alloc(&mut token, i as u64);
+                    black_box(arena.current_epoch(&token));
+                }
+            })
         });
     });
 
     // Size-classed allocation comparison - tests different chunk sizes
     c.bench_function("branded_arena_size_class_small", |b| {
         b.iter(|| {
-            let mut arena: BrandedArena<u64, 32> = BrandedArena::new(); // Small chunks
-            for i in 0..N/4 { // Fewer allocations due to smaller N
-                arena.alloc(i as u64);
-            }
+            GhostToken::new(|mut token| {
+                let mut arena: BrandedArena<u64, 32> = BrandedArena::new(); // Small chunks
+                for i in 0..N/4 { // Fewer allocations due to smaller N
+                    arena.alloc(&mut token, i as u64);
+                }
+            })
         });
     });
 
     c.bench_function("branded_arena_size_class_large", |b| {
         b.iter(|| {
-            let mut arena: BrandedArena<u64, 1024> = BrandedArena::new(); // Large chunks
-            for i in 0..N/4 {
-                arena.alloc(i as u64);
-            }
+            GhostToken::new(|mut token| {
+                let mut arena: BrandedArena<u64, 1024> = BrandedArena::new(); // Large chunks
+                for i in 0..N/4 {
+                    arena.alloc(&mut token, i as u64);
+                }
+            })
         });
     });
 }

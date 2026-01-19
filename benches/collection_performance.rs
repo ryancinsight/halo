@@ -11,6 +11,7 @@ use std::cell::{RefCell, Cell};
 use std::collections::HashMap;
 use std::thread;
 use halo::{GhostToken, BrandedVec, BrandedHashMap};
+use halo::collections::{ZeroCopyOps, ZeroCopyMapOps};
 use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

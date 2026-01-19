@@ -533,7 +533,7 @@ impl<'brand, T, const CAPACITY: usize> BrandedArray<'brand, T, CAPACITY> {
     pub fn iter_simd<'a>(
         &'a self,
         token: &'a GhostToken<'brand>,
-    ) -> impl Iterator<Item = &'a T> + 'a {
+    ) -> impl Iterator<Item = &'a T> + 'a + use<'a, 'brand, T, CAPACITY> {
         self.inner.iter().take(self.len).map(|cell| cell.borrow(token))
     }
 
@@ -660,7 +660,7 @@ impl<'brand, T, const CAPACITY: usize> BrandedArray<'brand, T, CAPACITY> {
     }
 
     /// Iterates over all elements by shared reference.
-    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> impl Iterator<Item = &'a T> + 'a {
+    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> impl Iterator<Item = &'a T> + 'a + use<'a, 'brand, T, CAPACITY> {
         self.inner[..self.len].iter().map(|cell| cell.borrow(token))
     }
 

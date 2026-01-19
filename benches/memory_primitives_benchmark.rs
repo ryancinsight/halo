@@ -22,8 +22,8 @@ fn bench_static_rc(c: &mut Criterion) {
 
     group.bench_function("StaticRc::new", |b| {
         b.iter(|| {
-            // StaticRc::new involves Box allocation
-            black_box(StaticRc::<i32, 1, 1>::new(black_box(42)));
+            // StaticRc::new involves Box allocation (now manual alloc)
+            black_box(StaticRc::<'_, i32, 1, 1>::new(black_box(42)));
         })
     });
 
@@ -52,7 +52,7 @@ fn bench_static_rc(c: &mut Criterion) {
 
     group.bench_function("StaticRc::split", |b| {
         b.iter_batched(
-            || StaticRc::<i32, 10, 10>::new(42),
+            || StaticRc::<'_, i32, 10, 10>::new(42),
             |rc| {
                 // split consumes self, returns two.
                 // This is effectively "cloning" ownership.
@@ -78,7 +78,7 @@ fn bench_static_rc(c: &mut Criterion) {
         })
     });
 
-    let static_rc = StaticRc::<i32, 1, 1>::new(42);
+    let static_rc = StaticRc::<'_, i32, 1, 1>::new(42);
     group.bench_function("StaticRc deref", |b| {
         b.iter(|| {
             black_box(*static_rc);
@@ -101,8 +101,9 @@ fn bench_branded_box(c: &mut Criterion) {
     group.bench_function("BrandedBox::new", |b| {
         // We include token creation overhead here as it is required context
         b.iter(|| {
-            GhostToken::new(|mut token| {
-                black_box(BrandedBox::new(black_box(42), &mut token));
+            GhostToken::new(|mut _token| {
+                // BrandedBox::new no longer takes token
+                black_box(BrandedBox::new(black_box(42)));
             })
         })
     });
@@ -118,7 +119,7 @@ fn bench_branded_box(c: &mut Criterion) {
 
     group.bench_function("BrandedBox borrow", |b| {
         GhostToken::new(|mut token| {
-            let bb = BrandedBox::new(42, &mut token);
+            let bb = BrandedBox::new(42);
             // token is mutable here, but borrow takes &token (immutable).
             // &mut T coerces to &T.
             b.iter(|| {

@@ -75,12 +75,12 @@ where
     }
 
     /// Iterates over values.
-    pub fn values(&self) -> impl Iterator<Item = &V> {
+    pub fn values(&self) -> impl Iterator<Item = &V> + use<'_, 'brand, K, V, S> {
         self.map.values(self.token)
     }
 
     /// Iterates over key-value pairs.
-    pub fn iter(&self) -> impl Iterator<Item = (&K, &V)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&K, &V)> + use<'_, 'brand, K, V, S> {
         self.map.keys().zip(self.map.values(self.token))
     }
 
@@ -161,7 +161,7 @@ where
     }
 
     /// Iterates over elements.
-    pub fn iter(&self) -> impl Iterator<Item = &K> {
+    pub fn iter(&self) -> impl Iterator<Item = &K> + use<'_, 'brand, K, S> {
         self.set.iter()
     }
 }
