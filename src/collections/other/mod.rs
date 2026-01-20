@@ -20,6 +20,7 @@ pub mod lru_cache;
 pub mod segment_tree;
 pub mod slot_map;
 pub mod tripod_list;
+pub mod trusted_index;
 
 pub use binary_heap::BrandedBinaryHeap;
 pub use bit_set::BrandedBitSet;

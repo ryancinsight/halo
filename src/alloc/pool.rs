@@ -146,6 +146,19 @@ impl<'brand, T> BrandedPool<'brand, T> {
         }
     }
 
+    /// Returns a shared reference to the value at `index` without checking bounds or occupancy.
+    ///
+    /// # Safety
+    /// The caller must ensure that `index` is within bounds and points to an `Occupied` slot.
+    #[inline]
+    pub unsafe fn get_unchecked<'a>(&'a self, token: &'a GhostToken<'brand>, index: usize) -> &'a T {
+        let state = self.state.borrow(token);
+        match state.storage.get_unchecked(token, index) {
+            PoolSlot::Occupied(val) => val,
+            PoolSlot::Free(_) => std::hint::unreachable_unchecked(),
+        }
+    }
+
     /// Returns a mutable reference to the value at `index`.
     ///
     /// Returns `None` if the slot is free or index is out of bounds.
