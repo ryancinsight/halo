@@ -414,6 +414,14 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
             return &mut [];
         }
 
+        if mem::size_of::<T>() == 0 {
+            // For ZSTs, elements don't occupy memory, so they are always "contiguous"
+            // (or rather, location doesn't matter). Just return a slice.
+            return unsafe {
+                std::slice::from_raw_parts_mut(self.ptr.as_ptr(), self.len)
+            };
+        }
+
         let ptr = self.ptr.as_ptr();
         let head = self.head;
         let tail = self.tail();
@@ -432,6 +440,7 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
                 // Allocate new buffer
                 let new_cap = self.cap;
                 let new_layout = Layout::array::<GhostCell<'brand, T>>(new_cap).unwrap();
+                // Check done at start of function, but strictly layout size > 0 here.
                 let new_ptr = alloc(new_layout) as *mut GhostCell<'brand, T>;
                 if new_ptr.is_null() { handle_alloc_error(new_layout); }
 

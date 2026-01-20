@@ -39,15 +39,28 @@ impl<'brand, T, S> BrandedBloomFilter<'brand, T, S> {
         fp_rate: f64,
         hasher: S,
     ) -> Self {
+        if expected_items == 0 {
+            return Self {
+                bits: BrandedBitSet::new(),
+                num_hashes: 0,
+                bit_size: 0,
+                hasher,
+                _marker: PhantomData,
+            };
+        }
+
+        // Validate fp_rate
+        let fp_rate = fp_rate.clamp(1e-10, 0.99);
+
         // m = - (n * ln p) / (ln 2)^2
         let n = expected_items as f64;
         let ln2 = std::f64::consts::LN_2;
         let m = -1.0 * (n * fp_rate.ln()) / (ln2 * ln2);
-        let bit_size = m.ceil() as usize;
+        let bit_size = m.ceil().max(1.0) as usize;
 
         // k = (m / n) * ln 2
         let k = (m / n) * ln2;
-        let num_hashes = k.ceil() as u32;
+        let num_hashes = k.ceil().max(1.0) as u32;
 
         Self {
             bits: BrandedBitSet::with_capacity(bit_size),
@@ -91,6 +104,9 @@ where
 
     /// Adds an item to the Bloom filter.
     pub fn insert(&mut self, token: &mut GhostToken<'brand>, item: &T) {
+        if self.bit_size == 0 {
+            return;
+        }
         let (h1, h2) = self.get_hashes(item);
         let m = self.bit_size as u64;
 
@@ -102,6 +118,9 @@ where
 
     /// Checks if an item is possibly in the Bloom filter.
     pub fn contains(&self, token: &GhostToken<'brand>, item: &T) -> bool {
+        if self.bit_size == 0 {
+            return false;
+        }
         let (h1, h2) = self.get_hashes(item);
         let m = self.bit_size as u64;
 
