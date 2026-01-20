@@ -1,47 +1,21 @@
+use halo::{BrandedVecDeque, GhostToken};
 
-#[cfg(test)]
-mod tests {
-    use crate::collections::other::deque::BrandedDeque;
-    use crate::GhostToken;
-    use std::cell::RefCell;
-    use std::rc::Rc;
-
-    #[derive(Debug)]
-    struct DropTracker {
-        id: i32,
-        drops: Rc<RefCell<Vec<i32>>>,
-    }
-
-    impl Drop for DropTracker {
-        fn drop(&mut self) {
-            self.drops.borrow_mut().push(self.id);
-        }
-    }
-
-    #[test]
-    fn test_branded_deque_double_drop() {
-        let drops = Rc::new(RefCell::new(Vec::new()));
-
-        {
-            GhostToken::new(|mut token| {
-                let mut deque: BrandedDeque<'_, DropTracker, 4> = BrandedDeque::new();
-                deque.push_back(DropTracker { id: 1, drops: drops.clone() });
-
-                // Pop it. This moves it out.
-                let item = deque.pop_back().unwrap();
-                // Item is dropped here (at end of scope)
-                // If Deque also drops it, we see double drop for id 1.
-            });
-            // Deque is dropped here.
+fn main() {
+    GhostToken::new(|mut token| {
+        let mut dq = BrandedVecDeque::with_capacity(10);
+        for i in 0..10 {
+            dq.push_back(i);
         }
 
-        let recorded_drops = drops.borrow();
-        println!("Drops: {:?}", recorded_drops);
-        // If correct: [1]
-        // If double drop: [1, 1] (or panic/segfault)
+        // Drain middle [3, 4, 5, 6]
+        // Indices 3..7
+        let drained: Vec<_> = dq.drain(3..7).collect();
 
-        // Count occurrences of 1
-        let count_1 = recorded_drops.iter().filter(|&&x| x == 1).count();
-        assert_eq!(count_1, 1, "Double drop detected!");
-    }
+        assert_eq!(drained, vec![3, 4, 5, 6]);
+
+        let remaining: Vec<_> = dq.iter(&token).copied().collect();
+        assert_eq!(remaining, vec![0, 1, 2, 7, 8, 9]);
+
+        println!("Drain test passed!");
+    });
 }
