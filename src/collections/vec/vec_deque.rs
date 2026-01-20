@@ -356,6 +356,161 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
         let (s1, s2) = self.as_mut_slices(token);
         s1.iter_mut().chain(s2.iter_mut())
     }
+
+    /// Rotates the deque `k` steps to the left.
+    ///
+    /// This corresponds to `rotate_left` on `slice` or `VecDeque`.
+    /// Elements are shifted such that the element at `k` becomes the first element.
+    ///
+    /// # Panics
+    /// Panics if `k > len`.
+    pub fn rotate_left(&mut self, k: usize) {
+        assert!(k <= self.len, "rotation amount too large");
+        if k == 0 || k == self.len {
+            return;
+        }
+
+        if self.len == self.cap {
+            self.head = (self.head + k) % self.cap;
+        } else {
+            // Physical movement required for non-full deque
+            // We can move k elements from front to back
+            for _ in 0..k {
+                if let Some(val) = self.pop_front() {
+                    self.push_back(val.into_inner());
+                }
+            }
+        }
+    }
+
+    /// Rotates the deque `k` steps to the right.
+    ///
+    /// # Panics
+    /// Panics if `k > len`.
+    pub fn rotate_right(&mut self, k: usize) {
+        assert!(k <= self.len, "rotation amount too large");
+        if k == 0 || k == self.len {
+            return;
+        }
+
+        if self.len == self.cap {
+            self.head = (self.head + self.cap - k) % self.cap;
+        } else {
+            // Physical movement required
+            for _ in 0..k {
+                if let Some(val) = self.pop_back() {
+                    self.push_front(val.into_inner());
+                }
+            }
+        }
+    }
+}
+
+impl<'brand, T> BrandedVecDeque<'brand, T> {
+    /// Creates a splicing iterator that replaces the specified range in the deque
+    /// with the given `replace_with` iterator and yields the removed items.
+    ///
+    /// `replace_with` does not need to be the same length as the removed range.
+    ///
+    /// # logic
+    /// This method rotates the deque to bring the range to the front, yields elements,
+    /// pushes new elements to the back, and rotates again to restore order.
+    pub fn splice<R, I>(
+        &mut self,
+        range: R,
+        replace_with: I,
+    ) -> Splice<'_, 'brand, T, I::IntoIter>
+    where
+        R: std::ops::RangeBounds<usize>,
+        I: IntoIterator<Item = T>,
+    {
+        let len = self.len();
+        let start = match range.start_bound() {
+            std::ops::Bound::Included(&n) => n,
+            std::ops::Bound::Excluded(&n) => n + 1,
+            std::ops::Bound::Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            std::ops::Bound::Included(&n) => n + 1,
+            std::ops::Bound::Excluded(&n) => n,
+            std::ops::Bound::Unbounded => len,
+        };
+
+        let start = std::cmp::min(start, len);
+        let end = std::cmp::min(end, len);
+
+        let count = end.saturating_sub(start);
+        let suffix_len = len - end;
+
+        // Choose rotation strategy to bring the range to the front
+        // Cost 1: start (prefix len)
+        // Cost 2: suffix_len + count
+        if start <= suffix_len + count {
+            self.rotate_left(start);
+        } else {
+            self.rotate_right(suffix_len + count);
+        }
+
+        Splice {
+            deque: self,
+            remaining: count,
+            replacement: replace_with.into_iter(),
+            suffix_len,
+        }
+    }
+}
+
+/// A splicing iterator for `BrandedVecDeque`.
+pub struct Splice<'a, 'brand, T, I>
+where
+    I: Iterator<Item = T>,
+{
+    deque: &'a mut BrandedVecDeque<'brand, T>,
+    remaining: usize,
+    replacement: I,
+    suffix_len: usize,
+}
+
+impl<'a, 'brand, T, I> Iterator for Splice<'a, 'brand, T, I>
+where
+    I: Iterator<Item = T>,
+{
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.remaining > 0 {
+            self.remaining -= 1;
+            self.deque.pop_front().map(GhostCell::into_inner)
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.remaining, Some(self.remaining))
+    }
+}
+
+impl<'a, 'brand, T, I> ExactSizeIterator for Splice<'a, 'brand, T, I> where I: Iterator<Item = T> {}
+
+impl<'a, 'brand, T, I> Drop for Splice<'a, 'brand, T, I>
+where
+    I: Iterator<Item = T>,
+{
+    fn drop(&mut self) {
+        while self.remaining > 0 {
+            self.remaining -= 1;
+            self.deque.pop_front();
+        }
+
+        for item in self.replacement.by_ref() {
+            self.deque.push_back(item);
+        }
+
+        if self.suffix_len > 0 {
+            self.deque.rotate_left(self.suffix_len);
+        }
+    }
 }
 
 impl<'brand, T> Default for BrandedVecDeque<'brand, T> {
@@ -449,7 +604,7 @@ impl<'brand, T> Extend<T> for BrandedVecDeque<'brand, T> {
 impl<'brand, T> BrandedVecDeque<'brand, T> {
     /// Creates a draining iterator that removes the specified range in the deque
     /// and yields the removed items.
-    pub fn drain<R>(&mut self, range: R) -> std::vec::IntoIter<T>
+    pub fn drain<R>(&mut self, range: R) -> Drain<'_, 'brand, T>
     where
         R: std::ops::RangeBounds<usize>,
     {
@@ -465,27 +620,88 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
             std::ops::Bound::Unbounded => len,
         };
 
-        if start >= end || start >= len {
-            return Vec::new().into_iter();
-        }
+        let start = std::cmp::min(start, len);
         let end = std::cmp::min(end, len);
+
+        if start >= end {
+            return Drain {
+                deque: self,
+                remaining: 0,
+                cleanup_is_left: false,
+                cleanup_len: 0,
+            };
+        }
+
         let count = end - start;
+        let suffix_len = len - end;
 
-        let mut new_dq = Self::with_capacity(self.cap);
-        let mut drain_items = Vec::with_capacity(count);
+        // Choose rotation strategy to bring the drain range to the front
+        // Cost 1: start (prefix len)
+        // Cost 2: suffix_len + count
+        let (cleanup_is_left, cleanup_len) = if start <= suffix_len + count {
+            // Strategy 1: Rotate prefix to back
+            self.rotate_left(start);
+            // Cleanup: Rotate right start (prefix len)
+            (false, start)
+        } else {
+            // Strategy 2: Rotate suffix+range to front
+            self.rotate_right(suffix_len + count);
+            // Cleanup: Rotate left suffix_len
+            (true, suffix_len)
+        };
 
-        // We can iterate efficiently using index
-        for i in 0..len {
-            let item = self.pop_front().unwrap().into_inner();
-            if i >= start && i < end {
-                drain_items.push(item);
+        Drain {
+            deque: self,
+            remaining: count,
+            cleanup_is_left,
+            cleanup_len,
+        }
+    }
+}
+
+/// A draining iterator for `BrandedVecDeque`.
+pub struct Drain<'a, 'brand, T> {
+    deque: &'a mut BrandedVecDeque<'brand, T>,
+    remaining: usize,
+    cleanup_is_left: bool,
+    cleanup_len: usize,
+}
+
+impl<'a, 'brand, T> Iterator for Drain<'a, 'brand, T> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.remaining == 0 {
+            return None;
+        }
+        self.remaining -= 1;
+        // Always pop from front as we rotated the range to the front
+        self.deque.pop_front().map(GhostCell::into_inner)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.remaining, Some(self.remaining))
+    }
+}
+
+impl<'a, 'brand, T> ExactSizeIterator for Drain<'a, 'brand, T> {}
+
+impl<'a, 'brand, T> Drop for Drain<'a, 'brand, T> {
+    fn drop(&mut self) {
+        // Exhaust remaining
+        while self.remaining > 0 {
+            self.remaining -= 1;
+            self.deque.pop_front();
+        }
+
+        // Cleanup rotation
+        if self.cleanup_len > 0 {
+            if self.cleanup_is_left {
+                self.deque.rotate_left(self.cleanup_len);
             } else {
-                new_dq.push_back(item);
+                self.deque.rotate_right(self.cleanup_len);
             }
         }
-
-        *self = new_dq;
-        drain_items.into_iter()
     }
 }
 
