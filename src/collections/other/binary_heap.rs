@@ -8,6 +8,7 @@ use crate::collections::ZeroCopyOps;
 use crate::GhostToken;
 use core::cmp::Ord;
 use core::fmt;
+use core::mem::ManuallyDrop;
 
 /// A priority queue implemented with a binary heap.
 ///
@@ -15,6 +16,65 @@ use core::fmt;
 /// Access to the elements is controlled by a `GhostToken`.
 pub struct BrandedBinaryHeap<'brand, T> {
     data: BrandedVec<'brand, T>,
+}
+
+/// A "hole" in the heap that holds the element being shifted.
+/// Ensures that if a panic occurs (e.g. during comparison), the element is written back
+/// to the heap, preventing double-drop or leaking.
+struct Hole<'a, T> {
+    data: &'a mut [T],
+    elt: ManuallyDrop<T>,
+    pos: usize,
+}
+
+impl<'a, T> Hole<'a, T> {
+    /// Create a new Hole at index `pos`.
+    ///
+    /// # Safety
+    /// `pos` must be valid index in `data`.
+    unsafe fn new(data: &'a mut [T], pos: usize) -> Self {
+        let elt = std::ptr::read(data.get_unchecked(pos));
+        Self {
+            data,
+            elt: ManuallyDrop::new(elt),
+            pos,
+        }
+    }
+
+    fn pos(&self) -> usize {
+        self.pos
+    }
+
+    fn element(&self) -> &T {
+        &self.elt
+    }
+
+    /// Returns a reference to the element at `index`.
+    ///
+    /// # Safety
+    /// `index` must be valid.
+    unsafe fn get(&self, index: usize) -> &T {
+        self.data.get_unchecked(index)
+    }
+
+    /// Move the hole to `index`, moving the element at `index` to the old hole position.
+    ///
+    /// # Safety
+    /// `index` must be valid.
+    unsafe fn move_to(&mut self, index: usize) {
+        let ptr = self.data.as_mut_ptr();
+        std::ptr::copy_nonoverlapping(ptr.add(index), ptr.add(self.pos), 1);
+        self.pos = index;
+    }
+}
+
+impl<'a, T> Drop for Hole<'a, T> {
+    fn drop(&mut self) {
+        unsafe {
+            let pos = self.pos;
+            std::ptr::write(self.data.get_unchecked_mut(pos), ManuallyDrop::take(&mut self.elt));
+        }
+    }
 }
 
 impl<'brand, T: Ord> BrandedBinaryHeap<'brand, T> {
@@ -48,21 +108,29 @@ impl<'brand, T: Ord> BrandedBinaryHeap<'brand, T> {
     }
 
     /// Pushes an item onto the binary heap.
-    pub fn push(&mut self, token: &mut GhostToken<'brand>, item: T) {
+    pub fn push(&mut self, _token: &mut GhostToken<'brand>, item: T) {
         self.data.push(item);
-        self.sift_up(token, self.data.len() - 1);
+        self.sift_up(self.data.len() - 1);
     }
 
     /// Pops the greatest item from the binary heap.
-    pub fn pop(&mut self, token: &mut GhostToken<'brand>) -> Option<T> {
+    pub fn pop(&mut self, _token: &mut GhostToken<'brand>) -> Option<T> {
         if self.data.is_empty() {
             return None;
         }
         let last_idx = self.data.len() - 1;
-        self.data.swap(0, last_idx);
+
+        if last_idx == 0 {
+            return self.data.pop().map(|c| c.into_inner());
+        }
+
+        let slice = self.data.as_mut_slice_exclusive();
+        slice.swap(0, last_idx);
+
         let item = self.data.pop()?.into_inner();
+
         if !self.data.is_empty() {
-            self.sift_down(token, 0);
+            self.sift_down(0);
         }
         Some(item)
     }
@@ -74,49 +142,52 @@ impl<'brand, T: Ord> BrandedBinaryHeap<'brand, T> {
 
     /// Clears the binary heap.
     pub fn clear(&mut self) {
-        // Inefficient but safe clear without modifying BrandedVec API
-        while let Some(_) = self.data.pop() {}
+        self.data.clear();
     }
 
-    fn sift_up(&mut self, token: &mut GhostToken<'brand>, mut node: usize) {
-        while node > 0 {
-            let parent = (node - 1) / 2;
-            if self.less(token, parent, node) {
-                self.data.swap(parent, node);
-                node = parent;
-            } else {
-                break;
+    fn sift_up(&mut self, node: usize) {
+        let slice = self.data.as_mut_slice_exclusive();
+        unsafe {
+            let mut hole = Hole::new(slice, node);
+
+            while hole.pos() > 0 {
+                let parent = (hole.pos() - 1) / 2;
+                if hole.element() > hole.get(parent) {
+                    hole.move_to(parent);
+                } else {
+                    break;
+                }
             }
         }
     }
 
-    fn sift_down(&mut self, token: &mut GhostToken<'brand>, mut node: usize) {
-        let len = self.data.len();
-        loop {
-            let left = 2 * node + 1;
-            if left >= len {
-                break;
-            }
-            let right = left + 1;
-            let mut greater = left;
-            if right < len && self.less(token, left, right) {
-                greater = right;
-            }
+    fn sift_down(&mut self, node: usize) {
+        let slice = self.data.as_mut_slice_exclusive();
+        let len = slice.len();
+        unsafe {
+            let mut hole = Hole::new(slice, node);
+            let mut hole_pos = hole.pos();
 
-            if self.less(token, node, greater) {
-                self.data.swap(node, greater);
-                node = greater;
-            } else {
-                break;
+            loop {
+                let left = 2 * hole_pos + 1;
+                if left >= len {
+                    break;
+                }
+                let right = left + 1;
+                let mut child = left;
+
+                if right < len && hole.get(right) > hole.get(left) {
+                    child = right;
+                }
+
+                if hole.get(child) > hole.element() {
+                    hole.move_to(child);
+                    hole_pos = child;
+                } else {
+                    break;
+                }
             }
         }
-    }
-
-    // Helper to compare two elements in the heap
-    fn less(&self, token: &GhostToken<'brand>, a: usize, b: usize) -> bool {
-        let val_a = self.data.borrow(token, a);
-        let val_b = self.data.borrow(token, b);
-        val_a < val_b
     }
 }
 

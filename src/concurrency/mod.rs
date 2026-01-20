@@ -6,4 +6,5 @@
 
 pub mod atomic;
 pub mod scoped;
+pub mod sync;
 pub mod worklist;
