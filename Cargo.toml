@@ -155,3 +155,7 @@ harness = false
 [[bench]]
 name = "sync_benchmark"
 harness = false
+
+[[bench]]
+name = "btree_benchmark"
+harness = false
