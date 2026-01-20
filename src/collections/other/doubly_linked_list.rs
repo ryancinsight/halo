@@ -572,7 +572,7 @@ impl<'a, 'brand, T> CursorMut<'a, 'brand, T> {
     pub fn remove_current(&mut self, token: &mut GhostToken<'brand>) -> Option<T> {
         let curr_idx = self.current?;
 
-        let mut node = unsafe { self.list.pool.take(token, curr_idx) };
+        let node = unsafe { self.list.pool.take(token, curr_idx) };
         let prev_idx = node.prev;
         let next_idx = node.next;
 

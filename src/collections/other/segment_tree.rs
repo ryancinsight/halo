@@ -236,27 +236,25 @@ where
         let left_child_idx = 2 * self.node_idx + 1;
         let right_child_idx = 2 * self.node_idx + 2;
 
-        unsafe {
-            let left = Self {
-                ptr: self.ptr,
-                node_idx: left_child_idx,
-                range_start: self.range_start,
-                range_end: mid,
-                combinator: self.combinator,
-                default_value: self.default_value,
-                _marker: PhantomData,
-            };
-            let right = Self {
-                ptr: self.ptr,
-                node_idx: right_child_idx,
-                range_start: mid,
-                range_end: self.range_end,
-                combinator: self.combinator,
-                default_value: self.default_value,
-                _marker: PhantomData,
-            };
-            Some((left, right))
-        }
+        let left = Self {
+            ptr: self.ptr,
+            node_idx: left_child_idx,
+            range_start: self.range_start,
+            range_end: mid,
+            combinator: self.combinator,
+            default_value: self.default_value,
+            _marker: PhantomData,
+        };
+        let right = Self {
+            ptr: self.ptr,
+            node_idx: right_child_idx,
+            range_start: mid,
+            range_end: self.range_end,
+            combinator: self.combinator,
+            default_value: self.default_value,
+            _marker: PhantomData,
+        };
+        Some((left, right))
     }
 
     /// Updates the value at `index` within this view's range.
@@ -302,7 +300,7 @@ where
 
         // Pull up
         unsafe {
-            let left_cell = &*self.ptr.add(left_child);
+            let _left_cell = &*self.ptr.add(left_child);
             // We need to read from the cell.
             // BrandedSegmentTreeViewMut grants MUTABLE access.
             // Reading is safe if we have exclusive access.
