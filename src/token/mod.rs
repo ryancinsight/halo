@@ -71,6 +71,34 @@ impl<'brand> GhostToken<'brand> {
     pub const fn is_valid(&self) -> bool {
         true
     }
+
+    /// Creates a new branded scope nested within the current one.
+    ///
+    /// This is functionally equivalent to `GhostToken::new`, but allows
+    /// method-chaining style and clarifies intent when creating sub-scopes
+    /// for temporary views or nested data structures.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use halo::GhostToken;
+    ///
+    /// GhostToken::new(|mut token| {
+    ///     // Do some work with `token`
+    ///
+    ///     // Create a temporary sub-scope
+    ///     token.with_scoped(|mut sub_token| {
+    ///         // Work with `sub_token` is isolated
+    ///     });
+    /// });
+    /// ```
+    #[inline(always)]
+    pub fn with_scoped<F, R>(&self, f: F) -> R
+    where
+        F: for<'sub> FnOnce(GhostToken<'sub>) -> R,
+    {
+        Self::new(f)
+    }
 }
 
 // NOTE:
