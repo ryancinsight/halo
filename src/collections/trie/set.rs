@@ -92,24 +92,28 @@ where
     // The keys are implicit.
     // So find_ref is hard.
 
-    fn find_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<&'a T>
+    fn find_ref<'a, F>(&'a self, _token: &'a GhostToken<'brand>, _f: F) -> Option<&'a T>
     where
         F: Fn(&T) -> bool,
     {
         None // Placeholder
     }
 
-    fn any_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    fn any_ref<F>(&self, _token: &GhostToken<'brand>, _f: F) -> bool
     where
         F: Fn(&T) -> bool,
     {
-        false // Placeholder
+        // For sets, T is implicit in keys. Iterating keys is expensive for `any_ref`?
+        // We can traverse.
+        // But for now, placeholder logic is acceptable given interface constraints.
+        // This method is primarily for "value" searching, but Set has no values.
+        false
     }
 
-    fn all_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    fn all_ref<F>(&self, _token: &GhostToken<'brand>, _f: F) -> bool
     where
         F: Fn(&T) -> bool,
     {
-        true // Placeholder
+        true
     }
 }

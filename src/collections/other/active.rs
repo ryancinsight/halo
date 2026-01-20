@@ -2,9 +2,10 @@
 
 use super::deque::BrandedDequeIter;
 use super::doubly_linked_list::{BrandedDoublyLinkedListIter, BrandedDoublyLinkedListIterMut};
-use super::{BrandedBinaryHeap, BrandedDeque, BrandedDoublyLinkedList};
+use super::{BrandedBinaryHeap, BrandedDeque, BrandedDoublyLinkedList, BrandedFenwickTree};
 use crate::GhostToken;
 use core::cmp::Ord;
+use core::ops::{AddAssign, SubAssign};
 
 /// A wrapper around a mutable reference to a `BrandedDoublyLinkedList` and a mutable reference to a `GhostToken`.
 pub struct ActiveDoublyLinkedList<'a, 'brand, T> {
@@ -300,5 +301,104 @@ impl<'brand, T, const CAPACITY: usize> ActivateDeque<'brand, T, CAPACITY>
         token: &'a mut GhostToken<'brand>,
     ) -> ActiveDeque<'a, 'brand, T, CAPACITY> {
         ActiveDeque::new(self, token)
+    }
+}
+
+/// A wrapper around a mutable reference to a `BrandedFenwickTree` and a mutable reference to a `GhostToken`.
+pub struct ActiveFenwickTree<'a, 'brand, T> {
+    tree: &'a mut BrandedFenwickTree<'brand, T>,
+    token: &'a mut GhostToken<'brand>,
+}
+
+impl<'a, 'brand, T> ActiveFenwickTree<'a, 'brand, T>
+where
+    T: Default + Copy + AddAssign + SubAssign,
+{
+    /// Creates a new active Fenwick Tree handle.
+    pub fn new(
+        tree: &'a mut BrandedFenwickTree<'brand, T>,
+        token: &'a mut GhostToken<'brand>,
+    ) -> Self {
+        Self { tree, token }
+    }
+
+    /// Returns the number of elements.
+    pub fn len(&self) -> usize {
+        self.tree.len()
+    }
+
+    /// Returns `true` if empty.
+    pub fn is_empty(&self) -> bool {
+        self.tree.is_empty()
+    }
+
+    /// Adds `delta` to the element at `index`.
+    pub fn add(&mut self, index: usize, delta: T) {
+        self.tree.add(self.token, index, delta)
+    }
+
+    /// Computes prefix sum.
+    pub fn prefix_sum(&self, index: usize) -> T {
+        self.tree.prefix_sum(self.token, index)
+    }
+
+    /// Computes range sum.
+    pub fn range_sum(&self, start: usize, end: usize) -> T {
+        self.tree.range_sum(self.token, start, end)
+    }
+
+    /// Pushes a new value.
+    pub fn push(&mut self, val: T) {
+        self.tree.push(self.token, val)
+    }
+
+    /// Clears the tree.
+    pub fn clear(&mut self) {
+        self.tree.clear()
+    }
+}
+
+/// Extension trait to easily create ActiveFenwickTree.
+pub trait ActivateFenwickTree<'brand, T> {
+    fn activate<'a>(
+        &'a mut self,
+        token: &'a mut GhostToken<'brand>,
+    ) -> ActiveFenwickTree<'a, 'brand, T>;
+}
+
+impl<'brand, T> ActivateFenwickTree<'brand, T> for BrandedFenwickTree<'brand, T>
+where
+    T: Default + Copy + AddAssign + SubAssign,
+{
+    fn activate<'a>(
+        &'a mut self,
+        token: &'a mut GhostToken<'brand>,
+    ) -> ActiveFenwickTree<'a, 'brand, T> {
+        ActiveFenwickTree::new(self, token)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::GhostToken;
+
+    #[test]
+    fn test_active_fenwick_tree() {
+        GhostToken::new(|mut token| {
+            let mut ft = BrandedFenwickTree::<i64>::new();
+            let mut active = ft.activate(&mut token);
+
+            for _ in 0..5 {
+                active.push(0);
+            }
+
+            active.add(0, 10);
+            active.add(2, 20);
+
+            assert_eq!(active.prefix_sum(0), 10);
+            assert_eq!(active.prefix_sum(2), 30);
+            assert_eq!(active.range_sum(1, 3), 20);
+        });
     }
 }
