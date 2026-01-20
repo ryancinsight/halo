@@ -6,9 +6,9 @@ use std::thread;
 use std::time::Duration;
 
 fn bench_mpmc_contended(c: &mut Criterion) {
-    let capacity = 128; // Small capacity to force contention
-    let items = 1000; // Items per thread
-    let threads = 4;
+    let capacity = 512; // Increased capacity
+    let items = 1000;
+    let threads = 2; // Reduced thread count (2 prod + 2 cons)
 
     c.bench_function("ghost_ring_buffer_mpmc_contended", |b| {
         b.iter(|| {
@@ -22,7 +22,7 @@ fn bench_mpmc_contended(c: &mut Criterion) {
                         s.spawn(move || {
                             for i in 0..items {
                                 while q.try_push(i).is_err() {
-                                    std::hint::spin_loop();
+                                    thread::yield_now(); // Yield instead of spin
                                 }
                             }
                         });
@@ -37,7 +37,7 @@ fn bench_mpmc_contended(c: &mut Criterion) {
                                 if q.try_pop().is_some() {
                                     count += 1;
                                 } else {
-                                    std::hint::spin_loop();
+                                    thread::yield_now(); // Yield instead of spin
                                 }
                             }
                         });
@@ -66,7 +66,7 @@ fn bench_mpmc_contended(c: &mut Criterion) {
                                     break;
                                 }
                                 drop(guard);
-                                std::hint::spin_loop();
+                                thread::yield_now(); // Yield instead of spin
                             }
                         }
                     });
@@ -84,7 +84,7 @@ fn bench_mpmc_contended(c: &mut Criterion) {
                                 drop(guard);
                             } else {
                                 drop(guard);
-                                std::hint::spin_loop();
+                                thread::yield_now(); // Yield instead of spin
                             }
                         }
                     });
