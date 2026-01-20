@@ -1,4 +1,4 @@
-use halo::alloc::StaticRc;
+use halo::alloc::{BrandedBox, StaticRc};
 use halo::{GhostCell, GhostToken};
 use std::mem::MaybeUninit;
 
@@ -20,6 +20,22 @@ fn test_from_box_into_box() {
     // Convert back to Box
     let b = rc.into_box();
     assert_eq!(*b, 54321);
+}
+
+#[test]
+fn test_from_branded_box_into_branded_box() {
+    GhostToken::new(|mut token| {
+        let bb = BrandedBox::new(999);
+
+        // Convert to StaticRc
+        let mut rc: StaticRc<'_, i32, 1, 1> = StaticRc::from_branded_box(bb);
+        assert_eq!(*rc, 999);
+        *rc.get_mut() = 888;
+
+        // Convert back to BrandedBox
+        let bb = rc.into_branded_box();
+        assert_eq!(*bb.borrow(&token), 888);
+    });
 }
 
 #[test]

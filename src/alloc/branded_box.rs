@@ -60,6 +60,29 @@ impl<'id, T> BrandedBox<'id, T> {
         unsafe { self.ptr.as_ref() }
     }
 
+    /// Consumes the `BrandedBox` and returns the raw pointer.
+    ///
+    /// The caller is responsible for cleaning up the allocation (e.g., via `from_raw` and then dropping).
+    pub fn into_raw(self) -> NonNull<T> {
+        let ptr = self.ptr;
+        std::mem::forget(self);
+        ptr
+    }
+
+    /// Constructs a `BrandedBox` from a raw pointer.
+    ///
+    /// # Safety
+    ///
+    /// The pointer must be valid, allocated via the same allocator as `BrandedBox` (global `std::alloc`),
+    /// and the caller must transfer ownership to the new `BrandedBox`.
+    pub unsafe fn from_raw(ptr: NonNull<T>) -> Self {
+        Self {
+            ptr,
+            _brand: InvariantLifetime::default(),
+            _marker: PhantomData,
+        }
+    }
+
     /// Downgrades the BrandedBox into a shared StaticRc.
     ///
     /// Converts `BrandedBox<'id, T>` into `StaticRc<'id, GhostCell<'id, T>, D, D>`.

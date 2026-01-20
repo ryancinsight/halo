@@ -1,3 +1,4 @@
+use super::branded_box::BrandedBox;
 use crate::cell::GhostCell;
 use crate::token::InvariantLifetime;
 use crate::GhostToken;
@@ -208,6 +209,26 @@ impl<'id, T, const D: usize> StaticRc<'id, T, D, D> {
         mem::forget(self);
         // SAFETY: The pointer came from `std::alloc` (or compatible Box), and we own it fully.
         unsafe { Box::from_raw(ptr.as_ptr()) }
+    }
+
+    /// Converts a `BrandedBox<'id, T>` into a `StaticRc`.
+    ///
+    /// This reuses the allocation.
+    pub fn from_branded_box(b: BrandedBox<'id, T>) -> Self {
+        let ptr = b.into_raw();
+        unsafe {
+            Self {
+                ptr,
+                _brand: InvariantLifetime::default(),
+            }
+        }
+    }
+
+    /// Converts the `StaticRc` back into a `BrandedBox<'id, T>`.
+    pub fn into_branded_box(self) -> BrandedBox<'id, T> {
+        let ptr = self.ptr;
+        mem::forget(self);
+        unsafe { BrandedBox::from_raw(ptr) }
     }
 }
 
