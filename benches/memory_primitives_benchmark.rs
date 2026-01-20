@@ -27,6 +27,14 @@ fn bench_static_rc(c: &mut Criterion) {
         })
     });
 
+    group.bench_function("StaticRc::scope", |b| {
+        b.iter(|| {
+            StaticRc::scope(black_box(42), |rc| {
+                black_box(rc);
+            });
+        })
+    });
+
     // Cloning / Splitting
     // We benchmark the cost of getting another handle to the same data.
 
@@ -58,6 +66,37 @@ fn bench_static_rc(c: &mut Criterion) {
                 // This is effectively "cloning" ownership.
                 let (r1, r2) = rc.split::<5, 5>();
                 black_box((r1, r2));
+            },
+            BatchSize::SmallInput,
+        )
+    });
+
+    group.bench_function("StaticRc::join", |b| {
+        b.iter_batched(
+            || {
+                let rc = StaticRc::<'_, i32, 10, 10>::new(42);
+                rc.split::<5, 5>()
+            },
+            |(r1, r2)| {
+                // join consumes both.
+                black_box(r1.join::<5, 10>(r2));
+            },
+            BatchSize::SmallInput,
+        )
+    });
+
+    group.bench_function("StaticRc::join_unchecked", |b| {
+        b.iter_batched(
+            || {
+                // We simulate the setup where we have two pieces.
+                // We use new/split because we can't easily scope in setup.
+                let rc = StaticRc::<'_, i32, 10, 10>::new(42);
+                rc.split::<5, 5>()
+            },
+            |(r1, r2)| {
+                unsafe {
+                    black_box(r1.join_unchecked::<5, 10>(r2));
+                }
             },
             BatchSize::SmallInput,
         )
