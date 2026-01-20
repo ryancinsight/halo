@@ -3,7 +3,7 @@ use core::marker::PhantomData;
 use std::boxed::Box;
 use std::vec::Vec;
 
-use super::node::{Node, NodeSlot};
+use super::node::{Node, NodePrefix, NodeSlot};
 use crate::collections::{BrandedCollection, BrandedVec, ZeroCopyMapOps};
 use crate::{GhostCell, GhostToken};
 
@@ -127,7 +127,7 @@ impl<'brand, K, V> BrandedRadixTrieMap<'brand, K, V> {
     {
         let slot = self.nodes.get(token, node_idx).expect("Corrupted");
         if let NodeSlot::Occupied(node) = slot {
-            key_buf.extend_from_slice(&node.prefix);
+            key_buf.extend_from_slice(node.prefix.as_slice());
 
             // Process value
             if let Some(val) = &node.value {
@@ -179,7 +179,7 @@ where
 
         if self.root.is_none() {
             let mut node = Node::new_with_value(value);
-            node.prefix = Box::from(key_bytes);
+            node.prefix = NodePrefix::new(key_bytes);
             self.root = Some(self.alloc_node(node));
             self.len += 1;
             return None;
@@ -196,7 +196,7 @@ where
                     .get(token, curr_idx)
                     .expect("Node index out of bounds");
                 if let NodeSlot::Occupied(node) = slot {
-                    let common = common_prefix_len(&key_bytes[key_offset..], &node.prefix);
+                    let common = common_prefix_len(&key_bytes[key_offset..], node.prefix.as_slice());
                     (common, node.prefix.len())
                 } else {
                     panic!("Corrupted trie: pointing to free slot");
@@ -218,9 +218,15 @@ where
                     }
                 };
 
-                let suffix = &old_prefix[common_len..];
+                // We took old_prefix (NodePrefix). We need to split it.
+                // NodePrefix doesn't support easy splitting without access to inner data.
+                // But we can get slice.
+                // The issue: old_prefix is now owned by us.
+                let old_prefix_slice = old_prefix.as_slice();
+
+                let suffix = &old_prefix_slice[common_len..];
                 let mut new_child = Node::new();
-                new_child.prefix = Box::from(suffix);
+                new_child.prefix = NodePrefix::new(suffix);
                 new_child.value = old_value;
                 new_child.children = old_children;
 
@@ -229,7 +235,7 @@ where
                 // Update current
                 let slot = self.nodes.get_mut(token, curr_idx).unwrap();
                 if let NodeSlot::Occupied(node) = slot {
-                    node.prefix = Box::from(&old_prefix[..common_len]);
+                    node.prefix = NodePrefix::new(&old_prefix_slice[..common_len]);
                     node.add_child(suffix[0], new_child_idx);
 
                     let remaining_key_len = key_bytes.len() - key_offset;
@@ -245,7 +251,7 @@ where
                 // Add leaf
                 let rest_of_key = &key_bytes[key_offset + common_len..];
                 let mut leaf = Node::new_with_value(value);
-                leaf.prefix = Box::from(rest_of_key);
+                leaf.prefix = NodePrefix::new(rest_of_key);
                 let leaf_idx = self.alloc_node(leaf);
 
                 let slot = self.nodes.get_mut(token, curr_idx).unwrap();
@@ -283,7 +289,7 @@ where
                 } else {
                     let rest_of_key = &key_bytes[key_offset + common_len..];
                     let mut leaf = Node::new_with_value(value);
-                    leaf.prefix = Box::from(rest_of_key);
+                    leaf.prefix = NodePrefix::new(rest_of_key);
                     let leaf_idx = self.alloc_node(leaf);
 
                     let slot = self.nodes.get_mut(token, curr_idx).unwrap();
@@ -311,7 +317,7 @@ where
                     if key_bytes.len() - key_offset < prefix_len {
                         return None;
                     }
-                    if &key_bytes[key_offset..key_offset + prefix_len] != &*node.prefix {
+                    if &key_bytes[key_offset..key_offset + prefix_len] != node.prefix.as_slice() {
                         return None;
                     }
 
@@ -361,7 +367,7 @@ where
                     if key_bytes.len() - key_offset < p_len {
                         return None;
                     }
-                    if &key_bytes[key_offset..key_offset + p_len] != &*node.prefix {
+                    if &key_bytes[key_offset..key_offset + p_len] != node.prefix.as_slice() {
                         return None;
                     }
 
@@ -403,7 +409,7 @@ where
                 let p_len = node.prefix.len();
 
                 if key_bytes.len() - key_offset < p_len
-                    || &key_bytes[key_offset..key_offset + p_len] != &*node.prefix
+                    || &key_bytes[key_offset..key_offset + p_len] != node.prefix.as_slice()
                 {
                     return None;
                 }

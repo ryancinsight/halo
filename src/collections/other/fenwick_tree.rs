@@ -12,16 +12,16 @@
 //!
 //! This implementation is "branded", meaning it is secured by a `GhostToken`
 //! and backed by a `BrandedVec` arena.
+//!
+//! This implementation uses 0-based indexing logic internally to avoid dummy elements.
 
 use crate::collections::{BrandedCollection, BrandedVec};
-use crate::{GhostToken, GhostCell};
+use crate::{GhostCell, GhostToken};
 use core::ops::{AddAssign, SubAssign};
 use std::iter::FromIterator;
 
 /// A branded Fenwick Tree.
 pub struct BrandedFenwickTree<'brand, T> {
-    /// The tree is 1-indexed internally for easier bit manipulation.
-    /// Index 0 is unused (dummy).
     tree: BrandedVec<'brand, T>,
 }
 
@@ -31,27 +31,26 @@ where
 {
     /// Creates a new empty Fenwick Tree.
     pub fn new() -> Self {
-        let mut tree = BrandedVec::new();
-        // Push dummy element at index 0
-        tree.push(T::default());
-        Self { tree }
+        Self {
+            tree: BrandedVec::new(),
+        }
     }
 
     /// Creates a new Fenwick Tree with specified capacity.
     pub fn with_capacity(capacity: usize) -> Self {
-        let mut tree = BrandedVec::with_capacity(capacity + 1);
-        tree.push(T::default());
-        Self { tree }
+        Self {
+            tree: BrandedVec::with_capacity(capacity),
+        }
     }
 
-    /// Returns the number of elements in the tree (excluding dummy).
+    /// Returns the number of elements in the tree.
     pub fn len(&self) -> usize {
-        self.tree.len() - 1
+        self.tree.len()
     }
 
     /// Returns true if the tree is empty.
     pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        self.tree.is_empty()
     }
 
     /// Adds `delta` to the element at `index`.
@@ -63,15 +62,31 @@ where
         let n = self.len();
         assert!(index < n, "Index out of bounds");
 
-        // Convert to 1-based index
-        let mut idx = index + 1;
-        while idx <= n {
+        let mut idx = index;
+        // Unrolling loop for performance
+        while idx < n {
             unsafe {
-                let cell = self.tree.get_unchecked_mut(token, idx);
-                *cell += delta;
+                *self.tree.get_unchecked_mut(token, idx) += delta;
             }
-            // idx += idx & -idx
-            idx += idx & (!idx + 1); // logic to isolate last set bit
+            idx = idx | (idx + 1);
+            if idx < n {
+                 unsafe {
+                    *self.tree.get_unchecked_mut(token, idx) += delta;
+                }
+                idx = idx | (idx + 1);
+                if idx < n {
+                     unsafe {
+                        *self.tree.get_unchecked_mut(token, idx) += delta;
+                    }
+                    idx = idx | (idx + 1);
+                    if idx < n {
+                         unsafe {
+                            *self.tree.get_unchecked_mut(token, idx) += delta;
+                        }
+                        idx = idx | (idx + 1);
+                    }
+                }
+            }
         }
     }
 
@@ -87,15 +102,37 @@ where
         }
 
         let mut sum = T::default();
-        let mut idx = index + 1;
+        let mut idx = index;
 
-        while idx > 0 {
+        loop {
             unsafe {
-                let cell = self.tree.get_unchecked(token, idx);
-                sum += *cell;
+                sum += *self.tree.get_unchecked(token, idx);
             }
-            // idx -= idx & -idx
-            idx -= idx & (!idx + 1);
+            // idx = (idx & (idx + 1)) - 1
+            let next_idx = (idx & (idx + 1)).wrapping_sub(1);
+            if next_idx >= idx { break; } // Wrapped around
+            idx = next_idx;
+
+             unsafe {
+                sum += *self.tree.get_unchecked(token, idx);
+            }
+            let next_idx = (idx & (idx + 1)).wrapping_sub(1);
+            if next_idx >= idx { break; }
+            idx = next_idx;
+
+            unsafe {
+                sum += *self.tree.get_unchecked(token, idx);
+            }
+            let next_idx = (idx & (idx + 1)).wrapping_sub(1);
+            if next_idx >= idx { break; }
+            idx = next_idx;
+
+            unsafe {
+                sum += *self.tree.get_unchecked(token, idx);
+            }
+            let next_idx = (idx & (idx + 1)).wrapping_sub(1);
+            if next_idx >= idx { break; }
+            idx = next_idx;
         }
         sum
     }
@@ -125,10 +162,22 @@ where
 
     /// Pushes a new value to the end of the tree.
     pub fn push(&mut self, token: &mut GhostToken<'brand>, val: T) {
-        // 1. Extend the tree with a 0 value.
+        // Just appending `val` is not enough for Fenwick Tree logic unless we update parents.
+        // But `push` implies appending to the array that the Fenwick Tree represents.
+        // If we append to array A, A[n] = val.
+        // In FT, T[n] = sum(A[k]) for appropriate k.
+        // T[n] = val + sum of children in the tree structure?
+        // Actually, T[i] stores sum of A[j] where j covers range.
+        // When we add a new element at `len`, it covers `[len - (len&-len-logic) + 1, len]`.
+        // We can compute T[len] using prefix sums!
+        // T[len] = prefix_sum(len) - prefix_sum(len - (len&-len-logic)).
+        // But we don't have val at len yet.
+        // So `T[len]` is just `val` + (sum of specific previous ranges).
+        // A simpler way:
+        // 1. Push 0.
+        // 2. `add(len, val)`.
+
         self.tree.push(T::default());
-        // 2. Add the value to the new position.
-        // This maintains the Fenwick invariant.
         let idx = self.len() - 1;
         self.add(token, idx, val);
     }
@@ -136,22 +185,21 @@ where
     /// Clears the tree.
     pub fn clear(&mut self) {
         self.tree.clear();
-        self.tree.push(T::default());
     }
 
     /// Returns the capacity of the backing storage.
     pub fn capacity(&self) -> usize {
-        self.tree.capacity() - 1
+        self.tree.capacity()
     }
 }
 
 impl<'brand, T> BrandedCollection<'brand> for BrandedFenwickTree<'brand, T> {
     fn is_empty(&self) -> bool {
-        self.tree.len() <= 1
+        self.tree.is_empty()
     }
 
     fn len(&self) -> usize {
-        self.tree.len() - 1
+        self.tree.len()
     }
 }
 
@@ -173,10 +221,7 @@ where
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         let iter = iter.into_iter();
         let (lower, _) = iter.size_hint();
-        let mut tree = BrandedVec::with_capacity(lower + 1);
-
-        // Push dummy
-        tree.push(T::default());
+        let mut tree = BrandedVec::with_capacity(lower);
 
         // Push elements (raw values first)
         for item in iter {
@@ -184,22 +229,19 @@ where
         }
 
         // O(n) construction:
-        // For each index i from 1 to n, add tree[i] to parent tree[i + (i & -i)]
-        let len = tree.len();
-        // We can't easily do this with BrandedVec safely without a token because we need to read/write multiple indices.
-        // But FromIterator creates the structure, so we own it.
-        // BrandedVec owns the cells. We can access them if we had a token?
-        // No, FromIterator doesn't take a token.
-        // But we are constructing it. The cells are fresh.
-        // We can use `get_mut_exclusive` which `BrandedVec` provides!
+        // For each index i from 0 to n-1:
+        // parent = i | (i + 1)
+        // if parent < n: tree[parent] += tree[i]
 
-        for i in 1..len {
-            let parent = i + (i & (!i + 1)); // i + LSOne(i)
+        let len = tree.len();
+
+        for i in 0..len {
+            let parent = i | (i + 1);
             if parent < len {
-                // Read tree[i]
-                let val = *tree.get_mut_exclusive(i).expect("index valid");
-                // Add to tree[parent]
-                *tree.get_mut_exclusive(parent).expect("parent valid") += val;
+                unsafe {
+                    let val = *tree.get_unchecked_mut_exclusive(i);
+                    *tree.get_unchecked_mut_exclusive(parent) += val;
+                }
             }
         }
 
