@@ -1,4 +1,6 @@
+use crate::cell::GhostCell;
 use crate::token::InvariantLifetime;
+use crate::GhostToken;
 use core::alloc::Layout;
 use core::mem;
 use core::ops::Deref;
@@ -147,6 +149,29 @@ impl<'id, T, const N: usize, const D: usize> StaticRc<'id, T, N, D> {
         }
     }
 
+    /// Joins two instances back together without checking pointer equality.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that `self` and `other` originate from the same allocation.
+    /// This is guaranteed if the `StaticRc` was created via `StaticRc::scope` and the types match.
+    pub unsafe fn join_unchecked<const M: usize, const SUM: usize>(
+        self,
+        other: StaticRc<'id, T, M, D>,
+    ) -> StaticRc<'id, T, SUM, D> {
+        debug_assert_eq!(self.ptr, other.ptr, "StaticRc::join_unchecked mismatch");
+        assert_eq!(N + M, SUM, "Join result amount must equal sum of shares");
+
+        let ptr = self.ptr;
+        mem::forget(self);
+        mem::forget(other);
+
+        StaticRc {
+            ptr,
+            _brand: InvariantLifetime::default(),
+        }
+    }
+
     /// Returns a reference to the inner value.
     pub fn get(&self) -> &T {
         unsafe { self.ptr.as_ref() }
@@ -185,3 +210,59 @@ impl<'id, T, const N: usize, const D: usize> Deref for StaticRc<'id, T, N, D> {
 
 unsafe impl<'id, T: Send + Sync, const N: usize, const D: usize> Send for StaticRc<'id, T, N, D> {}
 unsafe impl<'id, T: Send + Sync, const N: usize, const D: usize> Sync for StaticRc<'id, T, N, D> {}
+
+impl<'id, T> StaticRc<'id, T, 1, 1> {
+    /// Creates a new `StaticRc` within a scoped closure, ensuring a unique brand.
+    ///
+    /// This pattern guarantees that the `StaticRc` and its splits have a unique lifetime `'id`,
+    /// preventing accidental mixing with other `StaticRc` instances.
+    /// This allows for safe optimization when joining.
+    pub fn scope<F, R>(value: T, f: F) -> R
+    where
+        F: for<'new_id> FnOnce(StaticRc<'new_id, T, 1, 1>) -> R,
+    {
+        // We create a new allocation.
+        // We manually construct the StaticRc with a fresh brand via the closure bound.
+        // Since StaticRc::new takes 'id from the caller, we can't use it directly and satisfy higher-ranked bounds cleanly
+        // without some friction, so we inline the logic or use an unsafe cast.
+        // Inlining logic is safer to see.
+        let layout = Layout::new::<T>();
+        let raw = if layout.size() == 0 {
+            NonNull::dangling().as_ptr()
+        } else {
+            unsafe { std::alloc::alloc(layout) as *mut T }
+        };
+
+        if raw.is_null() {
+            handle_alloc_error(layout);
+        }
+
+        unsafe {
+            ptr::write(raw, value);
+            // Construct the branded RC.
+            // The closure expects StaticRc<'new_id, T, 1, 1>.
+            // InvariantLifetime::default() creates the necessary ZST.
+            f(StaticRc {
+                ptr: NonNull::new_unchecked(raw),
+                _brand: InvariantLifetime::default(),
+            })
+        }
+    }
+}
+
+/// Integration with `GhostCell` for ergonomic token-gated access.
+impl<'id, 'brand, T, const N: usize, const D: usize> StaticRc<'id, GhostCell<'brand, T>, N, D> {
+    /// Borrows the inner `GhostCell` immutably using the provided token.
+    ///
+    /// This is a convenience method that forwards to `GhostCell::borrow`.
+    pub fn borrow<'a>(&'a self, token: &'a GhostToken<'brand>) -> &'a T {
+        self.get().borrow(token)
+    }
+
+    /// Borrows the inner `GhostCell` mutably using the provided token.
+    ///
+    /// This is a convenience method that forwards to `GhostCell::borrow_mut`.
+    pub fn borrow_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>) -> &'a mut T {
+        self.get().borrow_mut(token)
+    }
+}
