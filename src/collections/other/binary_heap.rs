@@ -60,7 +60,7 @@ impl<'brand, T: Ord> BrandedBinaryHeap<'brand, T> {
         }
         let last_idx = self.data.len() - 1;
         self.data.swap(0, last_idx);
-        let item = self.data.pop()?.into_inner();
+        let item = self.data.pop()?;
         if !self.data.is_empty() {
             self.sift_down(token, 0);
         }

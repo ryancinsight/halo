@@ -99,7 +99,7 @@ impl<'brand, T, const N: usize> BrandedSmallVec<'brand, T, N> {
                     None
                 }
             }
-            SmallVecInner::Heap(v) => v.pop().map(|c| c.into_inner()),
+            SmallVecInner::Heap(v) => v.pop(),
         }
     }
 

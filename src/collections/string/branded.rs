@@ -12,17 +12,9 @@
 //! - **Structural inspection without a token**: `len()`, `capacity()`, `is_empty()`
 //! - **Structural mutation without a token**: `push_str()`, `clear()`, `reserve()`
 //! - **Content access requires a token**: `as_str()`
-//!
-//! # Implementation Note
-//!
-//! To achieve high performance for structural mutations (like `push_str`), `BrandedString`
-//! accesses the internal storage of `BrandedVec` directly (via `pub(crate)` visibility)
-//! to perform bulk operations without per-byte token overhead, while trusting `BrandedVec`'s
-//! branding guarantees.
 
 use crate::collections::BrandedVec;
-use crate::{GhostCell, GhostToken};
-use std::mem;
+use crate::GhostToken;
 
 /// A branded string compatible with GhostCell.
 ///
@@ -54,13 +46,8 @@ impl<'brand> BrandedString<'brand> {
     /// Creates a branded string from an existing String.
     #[inline]
     pub fn from_string(s: String) -> Self {
-        // SAFETY: `GhostCell<u8>` has the same layout as `u8`.
-        // `Vec<GhostCell<u8>>` has the same layout as `Vec<u8>`.
-        // We take ownership of the String's vector and wrap it in BrandedVec.
-        let bytes = s.into_bytes();
-        let inner_vec = unsafe { mem::transmute::<Vec<u8>, Vec<GhostCell<'brand, u8>>>(bytes) };
         Self {
-            vec: BrandedVec { inner: inner_vec },
+            vec: BrandedVec::from_vec(s.into_bytes()),
         }
     }
 
@@ -90,17 +77,8 @@ impl<'brand> BrandedString<'brand> {
     /// we are appending new, valid values.
     #[inline]
     pub fn push_str(&mut self, string: &str) {
-        // SAFETY:
-        // 1. `Vec<GhostCell<u8>>` layout == `Vec<u8>`.
-        // 2. Appending valid UTF-8 bytes to a valid UTF-8 string maintains validity.
-        unsafe {
-            // Access the inner vector directly for performance
-            // Cast &mut Vec<GhostCell<u8>> to &mut Vec<u8>
-            let vec_ptr = &mut self.vec.inner as *mut Vec<GhostCell<'brand, u8>>;
-            let vec_u8_ptr = vec_ptr as *mut Vec<u8>;
-            let vec_u8 = &mut *vec_u8_ptr;
-            vec_u8.extend_from_slice(string.as_bytes());
-        }
+        // SAFETY: Appending valid UTF-8 bytes to a valid UTF-8 string maintains validity.
+        self.vec.extend(string.bytes());
     }
 
     /// Appends a character.
@@ -165,8 +143,7 @@ impl<'brand> BrandedString<'brand> {
         }
 
         if self.is_char_boundary_internal(new_len) {
-            // BrandedVec doesn't expose truncate, but we can access inner
-            self.vec.inner.truncate(new_len);
+            self.vec.truncate(new_len);
         } else {
             panic!("new_len does not lie on a char boundary");
         }
@@ -185,10 +162,9 @@ impl<'brand> BrandedString<'brand> {
 
         // Read byte at index
         // SAFETY: index is in bounds. We have `&self`.
-        // We are reading a byte to check its bit pattern.
-        // We safely read from the inner vector using raw pointer access via UnsafeCell/GhostCell.
+        // We read from the internal pointer which is valid.
         unsafe {
-            let ptr = self.vec.inner.as_ptr() as *const u8;
+            let ptr = self.vec.as_ptr();
             let byte = *ptr.add(index);
             // Check if it's NOT a continuation byte (10xxxxxx)
             (byte as i8) >= -0x40
@@ -220,27 +196,27 @@ mod tests {
 
     #[test]
     fn test_branded_string_basic() {
-        // No token needed for creation and structural mutation!
-        let mut s = BrandedString::new();
-        s.push_str("hello");
-        s.push(' ');
-        s.push_str("world");
+        GhostToken::new(|mut token| {
+            // No token needed for creation and structural mutation!
+            let mut s = BrandedString::new();
+            s.push_str("hello");
+            s.push(' ');
+            s.push_str("world");
 
-        assert_eq!(s.len(), 11);
-        assert!(!s.is_empty());
+            assert_eq!(s.len(), 11);
+            assert!(!s.is_empty());
 
-        // Token needed for reading content
-        GhostToken::new(|token| {
+            // Token needed for reading content
             assert_eq!(s.as_str(&token), "hello world");
-        });
 
-        s.clear();
-        assert!(s.is_empty());
+            s.clear();
+            assert!(s.is_empty());
+        });
     }
 
     #[test]
     fn test_branded_string_capacity() {
-        let mut s = BrandedString::with_capacity(10);
+        let mut s: BrandedString = BrandedString::with_capacity(10);
         assert!(s.capacity() >= 10);
 
         s.reserve(20);
@@ -249,10 +225,10 @@ mod tests {
 
     #[test]
     fn test_branded_string_from() {
-        let s1 = BrandedString::from("test");
-        let s2 = BrandedString::from_string("test2".to_string());
-
         GhostToken::new(|token| {
+            let s1 = BrandedString::from("test");
+            let s2 = BrandedString::from_string("test2".to_string());
+
             assert_eq!(s1.as_str(&token), "test");
             assert_eq!(s2.as_str(&token), "test2");
         });
@@ -260,10 +236,10 @@ mod tests {
 
     #[test]
     fn test_branded_string_truncate() {
-        let mut s = BrandedString::from("hello world");
-        s.truncate(5);
-
         GhostToken::new(|token| {
+            let mut s = BrandedString::from("hello world");
+            s.truncate(5);
+
             assert_eq!(s.as_str(&token), "hello");
         });
     }
@@ -278,8 +254,8 @@ mod tests {
 
     #[test]
     fn test_branded_string_as_bytes() {
-        let mut s = BrandedString::from("abc");
         GhostToken::new(|token| {
+            let mut s = BrandedString::from("abc");
             assert_eq!(s.as_bytes(&token), b"abc");
         });
     }

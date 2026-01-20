@@ -12,7 +12,8 @@
 //!   without requiring the global `GhostToken`. This enables splitting the matrix recursively.
 
 use crate::collections::vec::{slice::BrandedSlice, slice::BrandedSliceMut, BrandedVec};
-use crate::{GhostCell, GhostToken};
+use crate::token::InvariantLifetime;
+use crate::GhostToken;
 use std::marker::PhantomData;
 use std::slice;
 
@@ -26,11 +27,10 @@ pub struct BrandedMatrix<'brand, T> {
 /// A mutable view into a sub-matrix.
 ///
 /// This structure acts as a "sub-token" or capability, granting exclusive access to a
-/// rectangular region of the matrix. It holds `&mut GhostCell` references implicitly
-/// via raw pointers, but the API ensures safety and non-aliasing.
+/// rectangular region of the matrix.
 pub struct BrandedMatrixViewMut<'a, 'brand, T> {
     /// Pointer to the top-left element of this view in the original matrix.
-    ptr: *mut GhostCell<'brand, T>,
+    ptr: *mut T,
     /// Number of rows in this view.
     rows: usize,
     /// Number of columns in this view.
@@ -38,7 +38,8 @@ pub struct BrandedMatrixViewMut<'a, 'brand, T> {
     /// The stride (row pitch) of the underlying storage (items per row).
     stride: usize,
     /// Lifetime marker for the mutable borrow of the cells.
-    _marker: PhantomData<&'a mut GhostCell<'brand, T>>,
+    _marker: PhantomData<&'a mut T>,
+    _brand: InvariantLifetime<'brand>,
 }
 
 unsafe impl<'a, 'brand, T: Send> Send for BrandedMatrixViewMut<'a, 'brand, T> {}
@@ -127,8 +128,7 @@ impl<'brand, T> BrandedMatrix<'brand, T> {
         if row < self.rows {
             let start = row * self.cols;
             let end = start + self.cols;
-            // Access inner vector directly safely
-            let slice = &self.data.inner[start..end];
+            let slice = &self.data.as_slice(token)[start..end];
             Some(BrandedSlice::new(slice, token))
         } else {
             None
@@ -145,7 +145,7 @@ impl<'brand, T> BrandedMatrix<'brand, T> {
         if row < self.rows {
             let start = row * self.cols;
             let end = start + self.cols;
-            let slice = &mut self.data.inner[start..end];
+            let slice = &mut self.data.as_mut_slice_exclusive()[start..end];
             Some(BrandedSliceMut::new(slice))
         } else {
             None
@@ -155,11 +155,12 @@ impl<'brand, T> BrandedMatrix<'brand, T> {
     /// Returns a view of the entire matrix for splitting.
     pub fn view_mut<'a>(&'a mut self) -> BrandedMatrixViewMut<'a, 'brand, T> {
         BrandedMatrixViewMut {
-            ptr: self.data.inner.as_mut_ptr(),
+            ptr: self.data.as_mut_ptr(),
             rows: self.rows,
             cols: self.cols,
             stride: self.cols,
             _marker: PhantomData,
+            _brand: InvariantLifetime::default(),
         }
     }
 }
@@ -182,8 +183,7 @@ impl<'a, 'brand, T> BrandedMatrixViewMut<'a, 'brand, T> {
     pub fn get_mut(&mut self, row: usize, col: usize) -> Option<&mut T> {
         if row < self.rows && col < self.cols {
             unsafe {
-                let cell = &mut *self.ptr.add(row * self.stride + col);
-                Some(cell.get_mut())
+                Some(&mut *self.ptr.add(row * self.stride + col))
             }
         } else {
             None
@@ -205,6 +205,7 @@ impl<'a, 'brand, T> BrandedMatrixViewMut<'a, 'brand, T> {
                 cols: self.cols,
                 stride: self.stride,
                 _marker: PhantomData,
+                _brand: InvariantLifetime::default(),
             };
             let bottom = Self {
                 ptr: self.ptr.add(mid * self.stride),
@@ -212,6 +213,7 @@ impl<'a, 'brand, T> BrandedMatrixViewMut<'a, 'brand, T> {
                 cols: self.cols,
                 stride: self.stride,
                 _marker: PhantomData,
+                _brand: InvariantLifetime::default(),
             };
             (top, bottom)
         }
@@ -232,6 +234,7 @@ impl<'a, 'brand, T> BrandedMatrixViewMut<'a, 'brand, T> {
                 cols: left_cols,
                 stride: self.stride,
                 _marker: PhantomData,
+                _brand: InvariantLifetime::default(),
             };
             let right = Self {
                 ptr: self.ptr.add(mid),
@@ -239,6 +242,7 @@ impl<'a, 'brand, T> BrandedMatrixViewMut<'a, 'brand, T> {
                 cols: right_cols,
                 stride: self.stride,
                 _marker: PhantomData,
+                _brand: InvariantLifetime::default(),
             };
             (left, right)
         }
@@ -265,12 +269,13 @@ impl<'a, 'brand, T> BrandedMatrixViewMut<'a, 'brand, T> {
         // We iterate `rows` times.
         // Each time we return a BrandedSliceMut starting at `ptr + r*stride` with len `cols`.
         struct RowsMutIter<'b, 'brand, T> {
-            ptr: *mut GhostCell<'brand, T>,
+            ptr: *mut T,
             end_row_idx: usize,
             current_row_idx: usize,
             stride: usize,
             cols: usize,
-            _marker: PhantomData<&'b mut GhostCell<'brand, T>>,
+            _marker: PhantomData<&'b mut T>,
+            _brand: InvariantLifetime<'brand>,
         }
 
         impl<'b, 'brand, T> Iterator for RowsMutIter<'b, 'brand, T> {
@@ -296,6 +301,7 @@ impl<'a, 'brand, T> BrandedMatrixViewMut<'a, 'brand, T> {
             stride: self.stride,
             cols: self.cols,
             _marker: PhantomData,
+            _brand: InvariantLifetime::default(),
         }
     }
 
@@ -311,46 +317,6 @@ impl<'a, 'brand, T> BrandedMatrixViewMut<'a, 'brand, T> {
         }
     }
 
-    /// Copies data from another view into this one.
-    ///
-    /// # Panics
-    /// Panics if dimensions do not match.
-    pub fn copy_from(&mut self, other: &BrandedMatrixViewMut<'_, 'brand, T>)
-    where
-        T: Clone,
-    {
-        assert_eq!(self.rows, other.rows);
-        assert_eq!(self.cols, other.cols);
-
-        // We can't zip rows_mut directly because of mutable borrow overlap if self and other alias.
-        // But BrandedMatrixViewMut guarantees disjointness if derived from same matrix.
-        // If they are from different matrices, it's fine.
-        // If they are aliasing, we have a bigger problem with Rust ownership rules, but `&mut self` ensures exclusive access to `self`.
-        // `other` is `&BrandedMatrixViewMut`, so it's a shared reference.
-        // BUT `BrandedMatrixViewMut` holds a pointer. It behaves like `&mut [T]`.
-        // Copying from `&BrandedMatrixViewMut` requires reading from it.
-        // `BrandedMatrixViewMut` doesn't expose `read` access easily without `rows_mut`?
-        // Wait, `BrandedMatrixViewMut` represents *mutable* access rights.
-        // If we have `&BrandedMatrixViewMut`, we technically don't have the right to mutate, but we might have rights to read?
-        // Actually `BrandedMatrixViewMut` is just a handle. Access methods require `&mut self` (like `get_mut`).
-        // To read from `other`, we would need a `BrandedMatrixView` (shared view).
-        // Or we assume `BrandedMatrixViewMut` implies ownership of the cells, so we can read from them if we had a method.
-        // But `BrandedMatrixViewMut` only exposes `get_mut`. It doesn't strictly expose `get` (shared).
-        // Although `&mut T` implies `&T`.
-        // Let's implement `rows_mut` equivalent for shared access? No, we don't have shared view struct yet.
-        // Let's iterate manually using unsafe for now, treating `other` as source.
-
-        // Actually, implementing `copy_from` correctly requires reading from `other`.
-        // `other` has `ptr`. We can read from `ptr`.
-        // We need to be careful about aliasing.
-        // Since `self` is `&mut`, and `other` is `&`, if they overlap, `self` must strictly not alias `other` in a way that violates Rust rules.
-        // But since we are using raw pointers inside, we must be careful.
-        // However, standard `copy_from_slice` checks this.
-
-        // Let's skip `copy_from` for now as it requires a "Shared View" abstraction which we didn't implement.
-        // We will stick to `fill` and `rows_mut`.
-    }
-
     /// Iterates over the rows of this view as `BrandedSliceMut`.
     /// note: This provides a callback-based iteration which might be easier for some patterns.
     pub fn for_each_mut<F>(self, mut f: F)
@@ -361,7 +327,7 @@ impl<'a, 'brand, T> BrandedMatrixViewMut<'a, 'brand, T> {
             for c in 0..self.cols {
                 unsafe {
                     let cell = &mut *self.ptr.add(r * self.stride + c);
-                    f(r, c, cell.get_mut());
+                    f(r, c, cell);
                 }
             }
         }
