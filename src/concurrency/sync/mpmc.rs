@@ -84,13 +84,13 @@ impl<'brand, T> GhostRingBuffer<'brand, T> {
             // SAFETY: index is within bounds (mask = cap - 1)
             let slot = unsafe { self.buffer.get_unchecked(index) };
             let seq = slot.sequence.load(Ordering::Acquire);
-            let diff = seq as isize - head as isize;
+            let diff = seq.wrapping_sub(head) as isize;
 
             if diff == 0 {
                 // Slot is empty. Try to claim it.
                 match self.head.compare_exchange(
                     head,
-                    head + 1,
+                    head.wrapping_add(1),
                     Ordering::Relaxed,
                     Ordering::Relaxed,
                 ) {
@@ -100,7 +100,8 @@ impl<'brand, T> GhostRingBuffer<'brand, T> {
                             (*slot.data.get()).write(value);
                         }
                         // Commit sequence.
-                        slot.sequence.store(head + 1, Ordering::Release);
+                        slot.sequence
+                            .store(head.wrapping_add(1), Ordering::Release);
                         return Ok(());
                     }
                     Err(h) => {
@@ -129,13 +130,13 @@ impl<'brand, T> GhostRingBuffer<'brand, T> {
             // SAFETY: index is within bounds
             let slot = unsafe { self.buffer.get_unchecked(index) };
             let seq = slot.sequence.load(Ordering::Acquire);
-            let diff = seq as isize - (tail + 1) as isize;
+            let diff = seq.wrapping_sub(tail.wrapping_add(1)) as isize;
 
             if diff == 0 {
                 // Slot has data. Try to claim it.
                 match self.tail.compare_exchange(
                     tail,
-                    tail + 1,
+                    tail.wrapping_add(1),
                     Ordering::Relaxed,
                     Ordering::Relaxed,
                 ) {
@@ -143,8 +144,10 @@ impl<'brand, T> GhostRingBuffer<'brand, T> {
                         // Claimed. Read data.
                         let value = unsafe { (*slot.data.get()).assume_init_read() };
                         // Commit sequence.
-                        slot.sequence
-                            .store(tail + self.mask + 1, Ordering::Release);
+                        slot.sequence.store(
+                            tail.wrapping_add(self.mask).wrapping_add(1),
+                            Ordering::Release,
+                        );
                         return Some(value);
                     }
                     Err(t) => {
@@ -171,14 +174,14 @@ impl<'brand, T> GhostRingBuffer<'brand, T> {
     pub fn is_empty(&self) -> bool {
         let head = self.head.load(Ordering::Relaxed);
         let tail = self.tail.load(Ordering::Relaxed);
-        head <= tail
+        head.wrapping_sub(tail) == 0
     }
 
     /// Returns `true` if the queue is full.
     pub fn is_full(&self) -> bool {
         let head = self.head.load(Ordering::Relaxed);
         let tail = self.tail.load(Ordering::Relaxed);
-        head >= tail + self.capacity()
+        head.wrapping_sub(tail) >= self.capacity()
     }
 }
 
