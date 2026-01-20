@@ -6,6 +6,13 @@
 //! This design allows nodes to be managed with explicit ownership handles (`StaticRc`)
 //! held by the user, ensuring that nodes cannot be used after removal from the graph,
 //! while edges are compactly stored in a memory pool for cache efficiency.
+//!
+//! # Optimization: Structure of Arrays (SoA)
+//! This implementation uses a SoA layout for node topology. The `head_outgoing` and
+//! `head_incoming` edge pointers are stored in a `Vec` (wrapped in `GhostCell`) parallel
+//! to the `nodes` pool, rather than in the heap-allocated `NodeData`. This ensures that
+//! graph traversals (BFS/DFS) iterate over contiguous vectors and avoid pointer
+//! chasing to random heap locations for each visited node.
 
 use crate::alloc::pool::PoolSlot;
 use crate::alloc::{BrandedPool, StaticRc};
@@ -43,12 +50,19 @@ impl EdgeType for Undirected {
 pub struct NodeData<'brand, V> {
     /// The user-provided value.
     pub value: V,
+    /// Index of the `StaticRc` handle in the graph's node pool.
+    pub(crate) pool_idx: usize,
+    /// Marker for brand.
+    pub(crate) _marker: PhantomData<&'brand ()>,
+}
+
+/// Topology data for a node, stored in a dense vector.
+#[derive(Copy, Clone, Default)]
+struct NodeTopology<'brand> {
     /// Head of the outgoing edge list (index into edge pool).
     pub(crate) head_outgoing: Option<TrustedIndex<'brand>>,
     /// Head of the incoming edge list (index into edge pool).
     pub(crate) head_incoming: Option<TrustedIndex<'brand>>,
-    /// Index of the `StaticRc` handle in the graph's node pool.
-    pub(crate) pool_idx: usize,
 }
 
 /// Internal edge data structure stored in the pool.
@@ -71,6 +85,8 @@ pub type NodeHandle<'brand, V> = StaticRc<'brand, GhostCell<'brand, NodeData<'br
 pub struct AdjListGraph<'brand, V, E, Ty = Directed> {
     /// Pool containing the graph's share of the node handles.
     nodes: BrandedPool<'brand, NodeHandle<'brand, V>>,
+    /// Dense vector storing node topology (edges). Indexed by pool_idx.
+    node_topology: GhostCell<'brand, Vec<NodeTopology<'brand>>>,
     /// Pool containing the edges.
     edges: BrandedPool<'brand, EdgeData<'brand, E>>,
     _marker: PhantomData<Ty>,
@@ -81,6 +97,7 @@ impl<'brand, V, E> AdjListGraph<'brand, V, E, Undirected> {
     pub fn new_undirected() -> Self {
         Self {
             nodes: BrandedPool::new(),
+            node_topology: GhostCell::new(Vec::new()),
             edges: BrandedPool::new(),
             _marker: PhantomData,
         }
@@ -106,6 +123,7 @@ impl<'brand, V, E> AdjListGraph<'brand, V, E, Directed> {
     pub fn new() -> Self {
         Self {
             nodes: BrandedPool::new(),
+            node_topology: GhostCell::new(Vec::new()),
             edges: BrandedPool::new(),
             _marker: PhantomData,
         }
@@ -121,9 +139,8 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
         // Create the node data, initially with invalid pool_idx (will set below).
         let node_data = NodeData {
             value,
-            head_outgoing: None,
-            head_incoming: None,
             pool_idx: usize::MAX,
+            _marker: PhantomData,
         };
 
         // Create the StaticRc with N=D=2.
@@ -136,8 +153,33 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
         let idx = self.nodes.alloc(token, h1);
 
         // Update the pool_idx in the node data.
-        // We can access it via h2 (which we hold).
         h2.borrow_mut(token).pool_idx = idx;
+
+        // Ensure topology storage
+        let topology = self.node_topology.borrow_mut(token);
+        if idx >= topology.len() {
+             // We need to resize. Since alloc usually fills holes or appends 1,
+             // and we want dense indexing matching pool storage, we can push default.
+             // Pool index can be anything < pool capacity.
+             // BrandedPool logic: if free_head, use it. Else push.
+             // If push, idx == len.
+             // If free_head, idx < len.
+             // So we only need to push if idx == len (which is >= len).
+             if idx == topology.len() {
+                 topology.push(NodeTopology::default());
+             } else {
+                 // Should be already allocated if reusing.
+                 // Ensure bounds just in case logic drifts (e.g. pool impl changes)
+                 while topology.len() <= idx {
+                     topology.push(NodeTopology::default());
+                 }
+                 // Reset the slot if it was reused (though fields are overwritten anyway)
+                 topology[idx] = NodeTopology::default();
+             }
+        } else {
+            // Reusing a slot, clear it
+            topology[idx] = NodeTopology::default();
+        }
 
         h2
     }
@@ -160,17 +202,26 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
         // 3. Join the handles to regain full ownership.
         let full_rc = handle.join(other_half);
 
-        // 4. Clean up edges.
-        let node_ptr = NonNull::from(full_rc.get());
-        let _node_ptr_val = node_ptr.as_ptr();
+        // 4. Clean up edges using topology.
 
         // Remove outgoing edges
-        let mut curr = full_rc.borrow(token).head_outgoing;
+        // We cannot iterate the linked list while holding a mutable borrow of topology (needed for update)
+        // OR while holding the token for edge access if we hold topology.
+        // Strategy: Iterate by reading head from topology (short borrow), then accessing edges (token),
+        // then updating topology if needed (short borrow).
+
+        // However, unlink_incoming/unlink_outgoing traverse the list on the OTHER node.
+        // We are iterating THIS node's list to find which other nodes to update.
+
+        let mut curr = self.node_topology.borrow(token)[pool_idx].head_outgoing;
         while let Some(edge_idx_trusted) = curr {
             let edge_idx = edge_idx_trusted.get();
-            let edge_data = self.edges.get(token, edge_idx).expect("Corrupt edge list");
-            let next_edge = edge_data.next_outgoing;
-            let target_idx = edge_data.target_idx.get();
+            // Read edge data to find next and target
+            // SAFETY: edge exists
+            let (next_edge, target_idx) = {
+                let edge_data = self.edges.get(token, edge_idx).expect("Corrupt edge list");
+                (edge_data.next_outgoing, edge_data.target_idx.get())
+            };
 
             unsafe {
                 self.unlink_incoming(token, target_idx, edge_idx);
@@ -181,12 +232,13 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
         }
 
         // Remove incoming edges
-        let mut curr = full_rc.borrow(token).head_incoming;
+        let mut curr = self.node_topology.borrow(token)[pool_idx].head_incoming;
         while let Some(edge_idx_trusted) = curr {
             let edge_idx = edge_idx_trusted.get();
-            let edge_data = self.edges.get(token, edge_idx).expect("Corrupt edge list");
-            let next_edge = edge_data.next_incoming;
-            let source_idx = edge_data.source_idx.get();
+            let (next_edge, source_idx) = {
+                let edge_data = self.edges.get(token, edge_idx).expect("Corrupt edge list");
+                (edge_data.next_incoming, edge_data.source_idx.get())
+            };
 
             unsafe {
                 self.unlink_outgoing(token, source_idx, edge_idx);
@@ -202,9 +254,6 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
     }
 
     /// Adds a directed edge between two nodes.
-    ///
-    /// If the graph is undirected, use `add_undirected_edge` (TODO) or this method
-    /// might be adapted. Currently this adds a single directed edge.
     pub fn add_edge(
         &self,
         token: &mut GhostToken<'brand>,
@@ -218,13 +267,19 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
         let source_idx_trusted = unsafe { TrustedIndex::new_unchecked(source_idx) };
         let target_idx_trusted = unsafe { TrustedIndex::new_unchecked(target_idx) };
 
+        // Read current heads
+        let (next_outgoing, next_incoming) = {
+             let topo = self.node_topology.borrow(token);
+             (topo[source_idx].head_outgoing, topo[target_idx].head_incoming)
+        };
+
         // Allocate edge
         let edge = EdgeData {
             weight,
             source_idx: source_idx_trusted,
             target_idx: target_idx_trusted,
-            next_outgoing: source.borrow(token).head_outgoing,
-            next_incoming: target.borrow(token).head_incoming,
+            next_outgoing,
+            next_incoming,
             _marker: PhantomData,
         };
 
@@ -232,8 +287,9 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
         let edge_idx_trusted = unsafe { TrustedIndex::new_unchecked(edge_idx) };
 
         // Update heads
-        source.borrow_mut(token).head_outgoing = Some(edge_idx_trusted);
-        target.borrow_mut(token).head_incoming = Some(edge_idx_trusted);
+        let topo = self.node_topology.borrow_mut(token);
+        topo[source_idx].head_outgoing = Some(edge_idx_trusted);
+        topo[target_idx].head_incoming = Some(edge_idx_trusted);
     }
 
     // Helper to unlink an edge from a node's incoming list
@@ -244,81 +300,21 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
         edge_idx: usize,
     ) {
         // 1. Read head.
-        let head = {
-            let node_handle = self.nodes.get_unchecked(token, node_idx);
-            node_handle.borrow(token).head_incoming
-        };
+        let head = self.node_topology.borrow(token)[node_idx].head_incoming;
 
         let mut curr = head;
         let mut prev_idx: Option<usize> = None;
 
         while let Some(curr_idx_trusted) = curr {
             let curr_idx = curr_idx_trusted.get();
-
-            // To allow mutation of edges while iterating, we need to be careful.
-            // But we have &mut token. The issue is `self.edges.get` borrows `token` immutably.
-            // But we need to mutate later.
-            // We can assume edges exist and use raw pointers if needed, or re-borrow.
-
             let next = self.edges.get(token, curr_idx).unwrap().next_incoming;
 
             if curr_idx == edge_idx {
                 if let Some(p) = prev_idx {
                     self.edges.get_mut(token, p).unwrap().next_incoming = next;
                 } else {
-                    // Re-fetch node handle to borrow mutably.
-                    // To avoid E0502, we must ensure `self.nodes.get_unchecked` does not conflict with `token` borrow.
-                    // But `get_unchecked` takes `&token`.
-                    // The issue is `borrow_mut` takes `&mut token`.
-                    // `get_unchecked` returns `&NodeHandle`. The handle itself doesn't borrow token mutably.
-                    // But `borrow_mut` DOES.
-
-                    // We can use `StaticRc` to get a raw pointer to GhostCell, then write to it?
-                    // `NodeHandle` is `StaticRc`. `StaticRc` contains `NonNull`.
-                    // We can get the pointer without the token.
-                    // We already retrieved `head` so we know it exists.
-                    // We need to write `head_incoming = next`.
-
-                    // Since we have `&mut token` for the function, we can do whatever we want if we don't alias.
-                    // The problem is `self.nodes.get_unchecked` takes `token`.
-                    // We should use `self.nodes.get_unchecked` BEFORE mutable borrow?
-                    // But we are inside loop.
-
-                    // Solution: Use `self.nodes.get_unchecked` is okay if it takes `&token`.
-                    // But `borrow_mut` takes `&mut token`.
-                    // We cannot hold `&token` (from `get_unchecked`) and `&mut token`.
-                    // But `NodeHandle` is Copy/Clone? No, `StaticRc` is not Copy. It is Clone (increments ref count).
-                    // Wait, `nodes` pool stores `NodeHandle`. `get_unchecked` returns reference `&NodeHandle`.
-                    // We can clone the handle? But that modifies ref count (needs token? No, StaticRc clone is usually cheap but might need branding checks).
-                    // `StaticRc` clone does not need token.
-                    // Wait, `StaticRc` is `!Clone` if N != D? It is `Clone` if `StaticRc` implements it.
-                    // Let's assume we can get the inner pointer.
-
-                    // Better: `BrandedPool` allows accessing elements via index if we have `&self` and `token`.
-                    // If we have `&mut GhostToken`, we can get a mutable reference to the pool content?
-                    // But `nodes` pool requires `&GhostToken` for `get`.
-
-                    // Alternative: use `ptr` manipulation since we are unsafe.
-                    // `self.nodes` is a `BrandedPool`. It has `storage` (BrandedVec).
-                    // `BrandedVec` is `Vec<GhostCell>`.
-                    // We can get the pointer to the element in the vector.
-
-                    // Simpler: The `NodeHandle` (StaticRc) contains a pointer `ptr: NonNull<T>`.
-                    // We can get that pointer.
-                    // `StaticRc::as_ptr(&self) -> *mut T`.
-                    // We need to get the `NodeHandle` first.
-                    // We can get it using `self.nodes.get_unchecked(token, node_idx)`.
-                    // This borrows `token` immutably.
-                    // We can extract the pointer, DROP the reference to `NodeHandle`, and THEN use `borrow_mut` on the pointer using `&mut token`.
-
-                    let node_ptr = {
-                        let handle = self.nodes.get_unchecked(token, node_idx);
-                        handle.get().as_ptr(token)
-                    };
-                    // SAFETY: We have &mut token for the graph, and we ensured the node exists.
-                    // We need to cast *const to *mut because as_ptr returns *const.
-                    let node_mut_ptr = node_ptr as *mut NodeData<'brand, V>;
-                    (*node_mut_ptr).head_incoming = next;
+                    // Update head in topology
+                    self.node_topology.borrow_mut(token)[node_idx].head_incoming = next;
                 }
                 return;
             }
@@ -335,10 +331,7 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
         node_idx: usize,
         edge_idx: usize,
     ) {
-        let head = {
-            let node_handle = self.nodes.get_unchecked(token, node_idx);
-            node_handle.borrow(token).head_outgoing
-        };
+        let head = self.node_topology.borrow(token)[node_idx].head_outgoing;
 
         let mut curr = head;
         let mut prev_idx: Option<usize> = None;
@@ -351,12 +344,7 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
                 if let Some(p) = prev_idx {
                     self.edges.get_mut(token, p).unwrap().next_outgoing = next;
                 } else {
-                    let node_ptr = {
-                        let handle = self.nodes.get_unchecked(token, node_idx);
-                        handle.get().as_ptr(token)
-                    };
-                    let node_mut_ptr = node_ptr as *mut NodeData<'brand, V>;
-                    (*node_mut_ptr).head_outgoing = next;
+                    self.node_topology.borrow_mut(token)[node_idx].head_outgoing = next;
                 }
                 return;
             }
@@ -372,17 +360,16 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
         token: &'a GhostToken<'brand>,
         node: &'a GhostCell<'brand, NodeData<'brand, V>>,
     ) -> Neighbors<'a, 'brand, V, E, Ty> {
+        let pool_idx = node.borrow(token).pool_idx;
+        let curr_edge = self.node_topology.borrow(token)[pool_idx].head_outgoing;
         Neighbors {
             graph: self,
-            curr_edge: node.borrow(token).head_outgoing,
+            curr_edge,
             _token: token,
         }
     }
 
     /// Returns the unique integer ID (pool index) of a node.
-    ///
-    /// This ID is suitable for use in `Vec<T>` or `BitSet` for O(1) lookups/visited checks.
-    /// The ID is guaranteed to be < `self.nodes.capacity_len()`.
     pub fn node_id(
         &self,
         token: &GhostToken<'brand>,
@@ -409,18 +396,36 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
         token: &'a GhostToken<'brand>,
         node: &'a GhostCell<'brand, NodeData<'brand, V>>,
     ) -> NeighborIndices<'a, 'brand, V, E, Ty> {
+        let pool_idx = node.borrow(token).pool_idx;
+        let curr_edge = self.node_topology.borrow(token)[pool_idx].head_outgoing;
         NeighborIndices {
             graph: self,
-            curr_edge: node.borrow(token).head_outgoing,
+            curr_edge,
+            _token: token,
+        }
+    }
+
+    /// Iterates over outgoing neighbor IDs and edge weights given a node ID.
+    ///
+    /// This method is fully SoA-optimized: it uses the graph's topology vectors
+    /// and edge pool directly, avoiding all heap accesses to `NodeData`.
+    pub fn neighbor_indices_by_id<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+        node_id: usize,
+    ) -> NeighborIndices<'a, 'brand, V, E, Ty> {
+        // Direct vector access, no GhostCell deref of NodeData!
+        // Safety: Caller must ensure node_id is valid (allocated).
+        // If out of bounds, Vec index panics (safe).
+        let curr_edge = self.node_topology.borrow(token)[node_id].head_outgoing;
+        NeighborIndices {
+            graph: self,
+            curr_edge,
             _token: token,
         }
     }
 
     /// Returns a reference to the node cell given its ID.
-    ///
-    /// # Safety
-    /// The caller must ensure that `node_id` is a valid index for a node in this graph
-    /// and that the node has not been removed.
     #[inline]
     pub unsafe fn get_node_unchecked<'a>(
         &'a self,
@@ -430,12 +435,65 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
         let handle = self.nodes.get_unchecked(token, node_id);
         handle.get()
     }
+
+    /// Performs a Breadth-First Search (BFS) starting from `start_node`.
+    ///
+    /// This method is fully optimized for the SoA layout:
+    /// - Uses `Vec<bool>` for dense visited tracking (cache friendly).
+    /// - Uses `neighbor_indices_by_id` to traverse topology without heap accesses.
+    /// - Returns a vector of visited node IDs in traversal order.
+    pub fn bfs(
+        &self,
+        token: &GhostToken<'brand>,
+        start_node: usize,
+    ) -> Vec<usize> {
+        let topology = self.node_topology.borrow(token);
+        let mut visited = vec![false; topology.len()];
+        let mut queue = std::collections::VecDeque::new();
+        let mut result = Vec::new();
+
+        if start_node < visited.len() {
+            visited[start_node] = true;
+            queue.push_back(start_node);
+        }
+
+        while let Some(u) = queue.pop_front() {
+            result.push(u);
+
+            // Use neighbor_indices_by_id manually here to avoid borrowing self immutably
+            // while we might want to do other things (though here we just push to queue).
+            // Actually neighbor_indices_by_id borrows self.node_topology (immutably).
+            // We already borrowed topology above to get len.
+            // We need to drop that borrow or reuse it.
+            // neighbor_indices_by_id re-borrows. GhostCell allows multiple shared borrows.
+            // But RefCell/GhostCell borrow runtime check might fail if we hold a ref?
+            // GhostCell::borrow returns a reference `&T`. It does NOT use a runtime lock like RefCell!
+            // It uses the compile-time token.
+            // So we can have multiple references.
+
+            // Wait, GhostCell::borrow returns `&T`.
+            // `topology` variable is `&Vec<NodeTopology>`.
+            // `neighbor_indices_by_id` calls `self.node_topology.borrow(token)`.
+            // This returns `&Vec<NodeTopology>`.
+            // This is allowed.
+
+            for (v, _) in self.neighbor_indices_by_id(token, u) {
+                if v < visited.len() && !visited[v] {
+                    visited[v] = true;
+                    queue.push_back(v);
+                }
+            }
+        }
+
+        result
+    }
 }
 
 impl<'brand, V, E, Ty> Default for AdjListGraph<'brand, V, E, Ty> {
     fn default() -> Self {
         Self {
             nodes: BrandedPool::new(),
+            node_topology: GhostCell::new(Vec::new()),
             edges: BrandedPool::new(),
             _marker: PhantomData,
         }
@@ -496,8 +554,6 @@ pub struct SnapshotMap<'brand, V> {
 
 impl<'brand, V> SnapshotMap<'brand, V> {
     /// Retrieves (takes) the new handle corresponding to an old handle.
-    ///
-    /// This consumes the handle from the map, so it can only be called once per node.
     pub fn take_new_handle<'old_brand, OLD_V>(
         &mut self,
         token: &GhostToken<'old_brand>,
@@ -510,8 +566,6 @@ impl<'brand, V> SnapshotMap<'brand, V> {
 
 impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
     /// Creates a deep copy (snapshot) of the graph in a new branding scope.
-    ///
-    /// Returns the new graph and a `SnapshotMap` to retrieve the new handles.
     pub fn snapshot<'new_brand>(
         &self,
         token: &GhostToken<'brand>,
@@ -527,35 +581,29 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
         // 1. Clone nodes
         let (new_nodes, handle_map_vec) = self.nodes.clone_structure(token, |old_handle| {
             let old_data = old_handle.borrow(token);
-
-            // Clone data
-            // SAFETY: We are cloning the pool structure exactly, so indices remain valid in the new graph.
-            let head_outgoing = old_data
-                .head_outgoing
-                .map(|i| unsafe { TrustedIndex::new_unchecked(i.get()) });
-            let head_incoming = old_data
-                .head_incoming
-                .map(|i| unsafe { TrustedIndex::new_unchecked(i.get()) });
-
             let new_data = NodeData {
                 value: old_data.value.clone(),
-                head_outgoing,
-                head_incoming,
                 pool_idx: old_data.pool_idx,
+                _marker: PhantomData,
             };
 
-            // Create new handle
             let full_rc: StaticRc<'new_brand, _, 2, 2> =
                 StaticRc::new(GhostCell::new(new_data));
             let (h1, h2) = full_rc.split::<1, 1>();
-
-            // Return graph handle (h1) and user handle (h2)
             (h1, h2)
         });
 
-        // 2. Clone edges
+        // 2. Clone topology
+        let old_topology = self.node_topology.borrow(token);
+        let new_topology_vec: Vec<NodeTopology<'new_brand>> = old_topology.iter().map(|t| {
+             NodeTopology {
+                 head_outgoing: t.head_outgoing.map(|i| unsafe { TrustedIndex::new_unchecked(i.get()) }),
+                 head_incoming: t.head_incoming.map(|i| unsafe { TrustedIndex::new_unchecked(i.get()) }),
+             }
+        }).collect();
+
+        // 3. Clone edges
         let (new_edges, _) = self.edges.clone_structure(token, |old_edge| {
-            // SAFETY: Preserving indices in the new pool.
             let next_outgoing = old_edge
                 .next_outgoing
                 .map(|i| unsafe { TrustedIndex::new_unchecked(i.get()) });
@@ -563,7 +611,6 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
                 .next_incoming
                 .map(|i| unsafe { TrustedIndex::new_unchecked(i.get()) });
 
-            // Re-brand target/source indices
             let target_idx = unsafe { TrustedIndex::new_unchecked(old_edge.target_idx.get()) };
             let source_idx = unsafe { TrustedIndex::new_unchecked(old_edge.source_idx.get()) };
 
@@ -583,6 +630,7 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
         (
             AdjListGraph {
                 nodes: new_nodes,
+                node_topology: GhostCell::new(new_topology_vec),
                 edges: new_edges,
                 _marker: PhantomData,
             },
