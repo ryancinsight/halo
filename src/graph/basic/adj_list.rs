@@ -311,6 +311,27 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
             _token: token,
         }
     }
+
+    /// Returns the unique integer ID (pool index) of a node.
+    ///
+    /// This ID is suitable for use in `Vec<T>` or `BitSet` for O(1) lookups/visited checks.
+    /// The ID is guaranteed to be < `self.nodes.capacity_len()`.
+    pub fn node_id(
+        &self,
+        token: &GhostToken<'brand>,
+        handle: &NodeHandle<'brand, V>,
+    ) -> usize {
+        handle.borrow(token).pool_idx
+    }
+
+    /// Returns the unique integer ID (pool index) of a node from its cell.
+    pub fn node_id_from_cell(
+        &self,
+        token: &GhostToken<'brand>,
+        cell: &GhostCell<'brand, NodeData<'brand, V>>,
+    ) -> usize {
+        cell.borrow(token).pool_idx
+    }
 }
 
 impl<'brand, V, E, Ty> Default for AdjListGraph<'brand, V, E, Ty> {

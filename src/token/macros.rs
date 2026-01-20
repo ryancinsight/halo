@@ -25,13 +25,10 @@
 /// ```
 #[macro_export]
 macro_rules! scope {
+    (|$sub_token:ident| in $token:ident, $body:expr) => {
+        $token.with_scoped(|$sub_token| $body)
+    };
     (|$sub_token:ident| in $token:ident $body:block) => {
-        $token.with_scoped(|$sub_token| $body)
-    };
-    (|$sub_token:ident| in $token:expr, $body:expr) => {
-        $token.with_scoped(|$sub_token| $body)
-    };
-    (|$sub_token:ident| in $token:expr, $body:block) => {
         $token.with_scoped(|$sub_token| $body)
     };
     (|$token:ident| $body:expr) => {
