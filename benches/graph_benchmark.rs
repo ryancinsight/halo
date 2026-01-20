@@ -38,6 +38,32 @@ fn bench_graph_sparse_remove(c: &mut Criterion) {
             })
         });
     });
+
+    c.bench_function("adj_list_graph_sparse_remove", |b| {
+        b.iter(|| {
+            GhostToken::new(|mut token| {
+                let graph = halo::graph::AdjListGraph::new();
+                let mut nodes = Vec::with_capacity(size);
+                for i in 0..size {
+                    nodes.push(graph.add_node(&mut token, i));
+                }
+                // Chain
+                for i in 0..size - 1 {
+                    graph.add_edge(&mut token, &nodes[i], &nodes[i + 1], ());
+                }
+
+                // Remove middle node.
+                // Since NodeHandle is linear, we must take it from the vector.
+                let mid_node = nodes.swap_remove(size / 2);
+                black_box(graph.remove_node(&mut token, mid_node));
+
+                // Cleanup remaining nodes
+                for node in nodes {
+                    graph.remove_node(&mut token, node);
+                }
+            })
+        });
+    });
 }
 
 fn bench_graph_bfs(c: &mut Criterion) {
@@ -67,6 +93,46 @@ fn bench_graph_bfs(c: &mut Criterion) {
                     count += 1;
                     for (v, _) in graph.neighbors(&token, u) {
                         if visited.insert(v) {
+                            q.push_back(v);
+                        }
+                    }
+                }
+                black_box(count);
+
+                // Cleanup
+                for node in nodes {
+                    graph.remove_node(&mut token, node);
+                }
+            })
+        });
+    });
+
+    c.bench_function("adj_list_graph_bfs", |b| {
+        b.iter(|| {
+            GhostToken::new(|mut token| {
+                let graph = halo::graph::AdjListGraph::new();
+                let mut nodes = Vec::with_capacity(size);
+                for i in 0..size {
+                    nodes.push(graph.add_node(&mut token, i));
+                }
+                // Tree-like
+                for i in 1..size {
+                    graph.add_edge(&mut token, &nodes[i / 2], &nodes[i], ());
+                }
+
+                let mut q = std::collections::VecDeque::new();
+                let mut visited = std::collections::HashSet::new();
+
+                // Use pointer address for visited set
+                let start_node = &*nodes[0];
+                q.push_back(start_node);
+                visited.insert(std::ptr::from_ref(start_node) as usize);
+
+                let mut count = 0;
+                while let Some(u) = q.pop_front() {
+                    count += 1;
+                    for (v, _) in graph.neighbors(&token, u) {
+                        if visited.insert(std::ptr::from_ref(v) as usize) {
                             q.push_back(v);
                         }
                     }
