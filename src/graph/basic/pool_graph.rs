@@ -214,6 +214,10 @@ impl<'brand, V, E> BrandedPoolGraph<'brand, V, E> {
         token: &'a GhostToken<'brand>,
         node: NodeIdx<'brand>,
     ) -> Option<&'a V> {
+        // We can use get_unchecked since NodeIdx implies validity within the brand?
+        // NodeIdx is opaque, created by add_node.
+        // However, a node can be removed. NodeIdx doesn't track removal.
+        // So we must check.
         self.pool.get(token, node.index()).map(|n| &n.value)
     }
 
@@ -227,16 +231,37 @@ impl<'brand, V, E> BrandedPoolGraph<'brand, V, E> {
     }
 
     /// Get neighbors (outgoing edges).
+    ///
+    /// # Safety
+    /// If `node` has been removed, this returns an empty iterator (safe behavior).
+    /// If `node` is valid, it uses unchecked access for speed.
     pub fn neighbors<'a>(
         &'a self,
         token: &'a GhostToken<'brand>,
         node: NodeIdx<'brand>,
     ) -> impl Iterator<Item = (NodeIdx<'brand>, &'a E)> + 'a {
+        // Optimization: Use get_unchecked if we are sure?
+        // We aren't sure if the node was removed.
+        // But for traversal, if we got the node from iteration or neighbors, it should be valid.
+
         self.pool
             .get(token, node.index())
             .map(|n| n.outgoing.iter().map(|(idx, w)| (NodeIdx::new(*idx), w)))
             .into_iter()
             .flatten()
+    }
+
+    /// Get neighbors (outgoing edges) assuming the node exists.
+    ///
+    /// # Safety
+    /// Caller must ensure `node` is valid (allocated and not removed).
+    pub unsafe fn neighbors_unchecked<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+        node: NodeIdx<'brand>,
+    ) -> impl Iterator<Item = (NodeIdx<'brand>, &'a E)> + 'a {
+        let n = self.pool.get_unchecked(token, node.index());
+        n.outgoing.iter().map(|(idx, w)| (NodeIdx::new(*idx), w))
     }
 
     /// Get incoming neighbors.

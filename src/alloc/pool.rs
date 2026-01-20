@@ -146,6 +146,19 @@ impl<'brand, T> BrandedPool<'brand, T> {
         }
     }
 
+    /// Returns a shared reference to the value at `index` without checking bounds or occupancy.
+    ///
+    /// # Safety
+    /// The caller must ensure that `index` is within bounds and points to an `Occupied` slot.
+    #[inline]
+    pub unsafe fn get_unchecked<'a>(&'a self, token: &'a GhostToken<'brand>, index: usize) -> &'a T {
+        let state = self.state.borrow(token);
+        match state.storage.get_unchecked(token, index) {
+            PoolSlot::Occupied(val) => val,
+            PoolSlot::Free(_) => std::hint::unreachable_unchecked(),
+        }
+    }
+
     /// Returns a mutable reference to the value at `index`.
     ///
     /// Returns `None` if the slot is free or index is out of bounds.
@@ -224,6 +237,49 @@ impl<'brand, T> BrandedPool<'brand, T> {
     pub fn as_mut_slice<'a>(&'a self, token: &'a mut GhostToken<'brand>) -> &'a mut [PoolSlot<T>] {
         let state = self.state.borrow_mut(token);
         state.storage.as_mut_slice_exclusive()
+    }
+
+    /// Clones the pool structure to a new brand, mapping elements via `clone_fn`.
+    ///
+    /// Preserves the exact structure, including free lists and indices.
+    /// Returns the new pool and an auxiliary vector containing the secondary output of `clone_fn`
+    /// for occupied slots (and `None` for free slots).
+    pub fn clone_structure<'new_brand, U, Aux, F>(
+        &self,
+        token: &GhostToken<'brand>,
+        mut clone_fn: F,
+    ) -> (BrandedPool<'new_brand, U>, Vec<Option<Aux>>)
+    where
+        F: FnMut(&T) -> (U, Aux),
+    {
+        let state = self.state.borrow(token);
+        let mut new_storage = BrandedVec::with_capacity(state.storage.len());
+        let mut aux_vec = Vec::with_capacity(state.storage.len());
+
+        for slot in state.storage.as_slice(token) {
+            match slot {
+                PoolSlot::Occupied(val) => {
+                    let (new_val, aux) = clone_fn(val);
+                    new_storage.push(PoolSlot::Occupied(new_val));
+                    aux_vec.push(Some(aux));
+                }
+                PoolSlot::Free(next) => {
+                    new_storage.push(PoolSlot::Free(*next));
+                    aux_vec.push(None);
+                }
+            }
+        }
+
+        (
+            BrandedPool {
+                state: GhostCell::new(PoolState {
+                    storage: new_storage,
+                    free_head: state.free_head,
+                    len: state.len,
+                }),
+            },
+            aux_vec,
+        )
     }
 }
 
