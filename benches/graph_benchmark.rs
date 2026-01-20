@@ -192,11 +192,14 @@ fn bench_graph_bfs(c: &mut Criterion) {
                 let mut count = 0;
                 while let Some(u) = q.pop_front() {
                     count += 1;
-                    for (v, _) in graph.neighbors(&token, u) {
-                        let id = graph.node_id_from_cell(&token, v);
-                        if !visited[id] {
-                            visited[id] = true;
-                            q.push_back(v);
+                    // Use neighbor_indices to avoid touching neighbor memory for visited check
+                    for (neighbor_id, _) in graph.neighbor_indices(&token, u) {
+                        if !visited[neighbor_id] {
+                            visited[neighbor_id] = true;
+                            // Retrieve node pointer only when pushing to queue (visiting)
+                            // Use unsafe get_node_unchecked
+                            let neighbor = unsafe { graph.get_node_unchecked(&token, neighbor_id) };
+                            q.push_back(neighbor);
                         }
                     }
                 }

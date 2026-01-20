@@ -52,10 +52,10 @@ pub struct NodeData<'brand, V> {
 }
 
 /// Internal edge data structure stored in the pool.
-pub(crate) struct EdgeData<'brand, E, V> {
+pub(crate) struct EdgeData<'brand, E> {
     pub weight: E,
-    pub target: NonNull<GhostCell<'brand, NodeData<'brand, V>>>,
-    pub source: NonNull<GhostCell<'brand, NodeData<'brand, V>>>,
+    pub target_idx: TrustedIndex<'brand>,
+    pub source_idx: TrustedIndex<'brand>,
     pub next_outgoing: Option<TrustedIndex<'brand>>,
     pub next_incoming: Option<TrustedIndex<'brand>>,
     pub _marker: PhantomData<&'brand ()>,
@@ -72,7 +72,7 @@ pub struct AdjListGraph<'brand, V, E, Ty = Directed> {
     /// Pool containing the graph's share of the node handles.
     nodes: BrandedPool<'brand, NodeHandle<'brand, V>>,
     /// Pool containing the edges.
-    edges: BrandedPool<'brand, EdgeData<'brand, E, V>>,
+    edges: BrandedPool<'brand, EdgeData<'brand, E>>,
     _marker: PhantomData<Ty>,
 }
 
@@ -168,15 +168,12 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
         let mut curr = full_rc.borrow(token).head_outgoing;
         while let Some(edge_idx_trusted) = curr {
             let edge_idx = edge_idx_trusted.get();
-            // We use get because we are mutating the graph structure (removing),
-            // so we don't need get_unchecked speed here as much as safety during teardown.
-            // But edge_idx_trusted implies validity.
             let edge_data = self.edges.get(token, edge_idx).expect("Corrupt edge list");
             let next_edge = edge_data.next_outgoing;
-            let target_ptr = edge_data.target;
+            let target_idx = edge_data.target_idx.get();
 
             unsafe {
-                self.unlink_incoming(token, target_ptr, edge_idx);
+                self.unlink_incoming(token, target_idx, edge_idx);
             }
             unsafe { self.edges.take(token, edge_idx) };
 
@@ -189,10 +186,10 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
             let edge_idx = edge_idx_trusted.get();
             let edge_data = self.edges.get(token, edge_idx).expect("Corrupt edge list");
             let next_edge = edge_data.next_incoming;
-            let source_ptr = edge_data.source;
+            let source_idx = edge_data.source_idx.get();
 
             unsafe {
-                self.unlink_outgoing(token, source_ptr, edge_idx);
+                self.unlink_outgoing(token, source_idx, edge_idx);
             }
             unsafe { self.edges.take(token, edge_idx) };
 
@@ -215,14 +212,17 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
         target: &NodeHandle<'brand, V>,
         weight: E,
     ) {
-        let source_ptr = NonNull::from(source.get());
-        let target_ptr = NonNull::from(target.get());
+        let source_idx = source.borrow(token).pool_idx;
+        let target_idx = target.borrow(token).pool_idx;
+
+        let source_idx_trusted = unsafe { TrustedIndex::new_unchecked(source_idx) };
+        let target_idx_trusted = unsafe { TrustedIndex::new_unchecked(target_idx) };
 
         // Allocate edge
         let edge = EdgeData {
             weight,
-            source: source_ptr,
-            target: target_ptr,
+            source_idx: source_idx_trusted,
+            target_idx: target_idx_trusted,
             next_outgoing: source.borrow(token).head_outgoing,
             next_incoming: target.borrow(token).head_incoming,
             _marker: PhantomData,
@@ -240,25 +240,85 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
     unsafe fn unlink_incoming(
         &self,
         token: &mut GhostToken<'brand>,
-        node_ptr: NonNull<GhostCell<'brand, NodeData<'brand, V>>>,
+        node_idx: usize,
         edge_idx: usize,
     ) {
-        let node = &*node_ptr.as_ptr();
+        // 1. Read head.
+        let head = {
+            let node_handle = self.nodes.get_unchecked(token, node_idx);
+            node_handle.borrow(token).head_incoming
+        };
 
-        // Read head without holding borrow
-        let head = node.borrow(token).head_incoming;
         let mut curr = head;
         let mut prev_idx: Option<usize> = None;
 
         while let Some(curr_idx_trusted) = curr {
             let curr_idx = curr_idx_trusted.get();
+
+            // To allow mutation of edges while iterating, we need to be careful.
+            // But we have &mut token. The issue is `self.edges.get` borrows `token` immutably.
+            // But we need to mutate later.
+            // We can assume edges exist and use raw pointers if needed, or re-borrow.
+
             let next = self.edges.get(token, curr_idx).unwrap().next_incoming;
 
             if curr_idx == edge_idx {
                 if let Some(p) = prev_idx {
                     self.edges.get_mut(token, p).unwrap().next_incoming = next;
                 } else {
-                    node.borrow_mut(token).head_incoming = next;
+                    // Re-fetch node handle to borrow mutably.
+                    // To avoid E0502, we must ensure `self.nodes.get_unchecked` does not conflict with `token` borrow.
+                    // But `get_unchecked` takes `&token`.
+                    // The issue is `borrow_mut` takes `&mut token`.
+                    // `get_unchecked` returns `&NodeHandle`. The handle itself doesn't borrow token mutably.
+                    // But `borrow_mut` DOES.
+
+                    // We can use `StaticRc` to get a raw pointer to GhostCell, then write to it?
+                    // `NodeHandle` is `StaticRc`. `StaticRc` contains `NonNull`.
+                    // We can get the pointer without the token.
+                    // We already retrieved `head` so we know it exists.
+                    // We need to write `head_incoming = next`.
+
+                    // Since we have `&mut token` for the function, we can do whatever we want if we don't alias.
+                    // The problem is `self.nodes.get_unchecked` takes `token`.
+                    // We should use `self.nodes.get_unchecked` BEFORE mutable borrow?
+                    // But we are inside loop.
+
+                    // Solution: Use `self.nodes.get_unchecked` is okay if it takes `&token`.
+                    // But `borrow_mut` takes `&mut token`.
+                    // We cannot hold `&token` (from `get_unchecked`) and `&mut token`.
+                    // But `NodeHandle` is Copy/Clone? No, `StaticRc` is not Copy. It is Clone (increments ref count).
+                    // Wait, `nodes` pool stores `NodeHandle`. `get_unchecked` returns reference `&NodeHandle`.
+                    // We can clone the handle? But that modifies ref count (needs token? No, StaticRc clone is usually cheap but might need branding checks).
+                    // `StaticRc` clone does not need token.
+                    // Wait, `StaticRc` is `!Clone` if N != D? It is `Clone` if `StaticRc` implements it.
+                    // Let's assume we can get the inner pointer.
+
+                    // Better: `BrandedPool` allows accessing elements via index if we have `&self` and `token`.
+                    // If we have `&mut GhostToken`, we can get a mutable reference to the pool content?
+                    // But `nodes` pool requires `&GhostToken` for `get`.
+
+                    // Alternative: use `ptr` manipulation since we are unsafe.
+                    // `self.nodes` is a `BrandedPool`. It has `storage` (BrandedVec).
+                    // `BrandedVec` is `Vec<GhostCell>`.
+                    // We can get the pointer to the element in the vector.
+
+                    // Simpler: The `NodeHandle` (StaticRc) contains a pointer `ptr: NonNull<T>`.
+                    // We can get that pointer.
+                    // `StaticRc::as_ptr(&self) -> *mut T`.
+                    // We need to get the `NodeHandle` first.
+                    // We can get it using `self.nodes.get_unchecked(token, node_idx)`.
+                    // This borrows `token` immutably.
+                    // We can extract the pointer, DROP the reference to `NodeHandle`, and THEN use `borrow_mut` on the pointer using `&mut token`.
+
+                    let node_ptr = {
+                        let handle = self.nodes.get_unchecked(token, node_idx);
+                        handle.get().as_ptr(token)
+                    };
+                    // SAFETY: We have &mut token for the graph, and we ensured the node exists.
+                    // We need to cast *const to *mut because as_ptr returns *const.
+                    let node_mut_ptr = node_ptr as *mut NodeData<'brand, V>;
+                    (*node_mut_ptr).head_incoming = next;
                 }
                 return;
             }
@@ -272,12 +332,14 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
     unsafe fn unlink_outgoing(
         &self,
         token: &mut GhostToken<'brand>,
-        node_ptr: NonNull<GhostCell<'brand, NodeData<'brand, V>>>,
+        node_idx: usize,
         edge_idx: usize,
     ) {
-        let node = &*node_ptr.as_ptr();
+        let head = {
+            let node_handle = self.nodes.get_unchecked(token, node_idx);
+            node_handle.borrow(token).head_outgoing
+        };
 
-        let head = node.borrow(token).head_outgoing;
         let mut curr = head;
         let mut prev_idx: Option<usize> = None;
 
@@ -289,7 +351,12 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
                 if let Some(p) = prev_idx {
                     self.edges.get_mut(token, p).unwrap().next_outgoing = next;
                 } else {
-                    node.borrow_mut(token).head_outgoing = next;
+                    let node_ptr = {
+                        let handle = self.nodes.get_unchecked(token, node_idx);
+                        handle.get().as_ptr(token)
+                    };
+                    let node_mut_ptr = node_ptr as *mut NodeData<'brand, V>;
+                    (*node_mut_ptr).head_outgoing = next;
                 }
                 return;
             }
@@ -332,6 +399,37 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
     ) -> usize {
         cell.borrow(token).pool_idx
     }
+
+    /// Iterates over outgoing neighbor IDs and edge weights.
+    ///
+    /// This iterator yields `(target_node_idx, &weight)`. It is faster than `neighbors` because
+    /// it avoids accessing the target node's memory to retrieve its data or ID.
+    pub fn neighbor_indices<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+        node: &'a GhostCell<'brand, NodeData<'brand, V>>,
+    ) -> NeighborIndices<'a, 'brand, V, E, Ty> {
+        NeighborIndices {
+            graph: self,
+            curr_edge: node.borrow(token).head_outgoing,
+            _token: token,
+        }
+    }
+
+    /// Returns a reference to the node cell given its ID.
+    ///
+    /// # Safety
+    /// The caller must ensure that `node_id` is a valid index for a node in this graph
+    /// and that the node has not been removed.
+    #[inline]
+    pub unsafe fn get_node_unchecked<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+        node_id: usize,
+    ) -> &'a GhostCell<'brand, NodeData<'brand, V>> {
+        let handle = self.nodes.get_unchecked(token, node_id);
+        handle.get()
+    }
 }
 
 impl<'brand, V, E, Ty> Default for AdjListGraph<'brand, V, E, Ty> {
@@ -357,14 +455,37 @@ impl<'a, 'brand, V, E, Ty> Iterator for Neighbors<'a, 'brand, V, E, Ty> {
         let trusted_idx = self.curr_edge?;
         let idx = trusted_idx.get();
 
-        // SAFETY: `trusted_idx` is a `TrustedIndex` which guarantees it is a valid index
-        // into the pool for this brand. The graph invariant ensures it points to an occupied slot.
+        // SAFETY: `trusted_idx` is a `TrustedIndex` valid for this brand.
         let edge = unsafe { self.graph.edges.get_unchecked(self._token, idx) };
 
         self.curr_edge = edge.next_outgoing;
 
-        let target_node = unsafe { &*edge.target.as_ptr() };
+        let target_handle = unsafe { self.graph.nodes.get_unchecked(self._token, edge.target_idx.get()) };
+        let target_node = target_handle.get();
         Some((target_node, &edge.weight))
+    }
+}
+
+pub struct NeighborIndices<'a, 'brand, V, E, Ty> {
+    graph: &'a AdjListGraph<'brand, V, E, Ty>,
+    curr_edge: Option<TrustedIndex<'brand>>,
+    _token: &'a GhostToken<'brand>,
+}
+
+impl<'a, 'brand, V, E, Ty> Iterator for NeighborIndices<'a, 'brand, V, E, Ty> {
+    type Item = (usize, &'a E);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let trusted_idx = self.curr_edge?;
+        let idx = trusted_idx.get();
+
+        // SAFETY: `trusted_idx` is a `TrustedIndex` valid for this brand.
+        let edge = unsafe { self.graph.edges.get_unchecked(self._token, idx) };
+
+        self.curr_edge = edge.next_outgoing;
+
+        // Optimized: we get target_idx directly from the edge, no pointer deref!
+        Some((edge.target_idx.get(), &edge.weight))
     }
 }
 
@@ -434,24 +555,6 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
 
         // 2. Clone edges
         let (new_edges, _) = self.edges.clone_structure(token, |old_edge| {
-            // Fix pointers
-            let target_node = unsafe { &*old_edge.target.as_ptr() };
-            let target_idx = target_node.borrow(token).pool_idx;
-
-            let source_node = unsafe { &*old_edge.source.as_ptr() };
-            let source_idx = source_node.borrow(token).pool_idx;
-
-            // Look up new handles to get new pointers
-            let target_handle = handle_map_vec[target_idx]
-                .as_ref()
-                .expect("Target node missing in snapshot");
-            let source_handle = handle_map_vec[source_idx]
-                .as_ref()
-                .expect("Source node missing in snapshot");
-
-            let new_target_ptr = NonNull::from(target_handle.get());
-            let new_source_ptr = NonNull::from(source_handle.get());
-
             // SAFETY: Preserving indices in the new pool.
             let next_outgoing = old_edge
                 .next_outgoing
@@ -460,11 +563,15 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
                 .next_incoming
                 .map(|i| unsafe { TrustedIndex::new_unchecked(i.get()) });
 
+            // Re-brand target/source indices
+            let target_idx = unsafe { TrustedIndex::new_unchecked(old_edge.target_idx.get()) };
+            let source_idx = unsafe { TrustedIndex::new_unchecked(old_edge.source_idx.get()) };
+
             (
                 EdgeData {
                     weight: old_edge.weight.clone(),
-                    target: new_target_ptr,
-                    source: new_source_ptr,
+                    target_idx,
+                    source_idx,
                     next_outgoing,
                     next_incoming,
                     _marker: PhantomData,
@@ -580,6 +687,37 @@ mod tests {
             // Cleanup old
             graph.remove_node(&mut token, n1);
             graph.remove_node(&mut token, n2);
+        });
+    }
+
+    #[test]
+    fn test_neighbor_indices() {
+        GhostToken::new(|mut token| {
+            let graph = AdjListGraph::new();
+            let n1 = graph.add_node(&mut token, 10);
+            let n2 = graph.add_node(&mut token, 20);
+            let n3 = graph.add_node(&mut token, 30);
+
+            graph.add_edge(&mut token, &n1, &n2, 1);
+            graph.add_edge(&mut token, &n1, &n3, 2);
+
+            let n1_id = graph.node_id(&token, &n1);
+            let n2_id = graph.node_id(&token, &n2);
+            let n3_id = graph.node_id(&token, &n3);
+
+            let neighbors: Vec<_> = graph.neighbor_indices(&token, n1.get()).collect();
+            assert_eq!(neighbors.len(), 2);
+
+            // Edges are added at head, so order might be reversed (LIFO)
+            assert_eq!(neighbors[0].0, n3_id);
+            assert_eq!(*neighbors[0].1, 2);
+
+            assert_eq!(neighbors[1].0, n2_id);
+            assert_eq!(*neighbors[1].1, 1);
+
+            graph.remove_node(&mut token, n1);
+            graph.remove_node(&mut token, n2);
+            graph.remove_node(&mut token, n3);
         });
     }
 }
