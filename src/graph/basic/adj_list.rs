@@ -573,7 +573,7 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
     /// Performs a Breadth-First Search (BFS) starting from `start_node`.
     ///
     /// This method is fully optimized for the SoA layout:
-    /// - Uses `Vec<bool>` for dense visited tracking (cache friendly).
+    /// - Uses `Vec<u64>` (bitset) for dense visited tracking (cache friendly).
     /// - Uses `neighbor_indices_by_id` to traverse topology without heap accesses.
     /// - Returns a vector of visited node IDs in traversal order.
     pub fn bfs(
@@ -582,39 +582,27 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
         start_node: usize,
     ) -> Vec<usize> {
         let topology = self.node_topology.borrow(token);
-        let mut visited = vec![false; topology.len()];
+        let len = topology.len();
+        let mut visited = vec![0u64; (len + 63) / 64];
         let mut queue = std::collections::VecDeque::new();
         let mut result = Vec::new();
 
-        if start_node < visited.len() {
-            visited[start_node] = true;
+        if start_node < len {
+            visited[start_node / 64] |= 1 << (start_node % 64);
             queue.push_back(start_node);
         }
 
         while let Some(u) = queue.pop_front() {
             result.push(u);
 
-            // Use neighbor_indices_by_id manually here to avoid borrowing self immutably
-            // while we might want to do other things (though here we just push to queue).
-            // Actually neighbor_indices_by_id borrows self.node_topology (immutably).
-            // We already borrowed topology above to get len.
-            // We need to drop that borrow or reuse it.
-            // neighbor_indices_by_id re-borrows. GhostCell allows multiple shared borrows.
-            // But RefCell/GhostCell borrow runtime check might fail if we hold a ref?
-            // GhostCell::borrow returns a reference `&T`. It does NOT use a runtime lock like RefCell!
-            // It uses the compile-time token.
-            // So we can have multiple references.
-
-            // Wait, GhostCell::borrow returns `&T`.
-            // `topology` variable is `&Vec<NodeTopology>`.
-            // `neighbor_indices_by_id` calls `self.node_topology.borrow(token)`.
-            // This returns `&Vec<NodeTopology>`.
-            // This is allowed.
-
             for (v, _) in self.neighbor_indices_by_id(token, u) {
-                if v < visited.len() && !visited[v] {
-                    visited[v] = true;
-                    queue.push_back(v);
+                if v < len {
+                    let word_idx = v / 64;
+                    let mask = 1 << (v % 64);
+                    if (visited[word_idx] & mask) == 0 {
+                        visited[word_idx] |= mask;
+                        queue.push_back(v);
+                    }
                 }
             }
         }
@@ -631,12 +619,13 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
         start_node: usize,
     ) -> Vec<usize> {
         let topology = self.node_topology.borrow(token);
-        let mut visited = vec![false; topology.len()];
+        let len = topology.len();
+        let mut visited = vec![0u64; (len + 63) / 64];
         let mut stack = Vec::new();
         let mut result = Vec::new();
 
-        if start_node < visited.len() {
-            visited[start_node] = true;
+        if start_node < len {
+            visited[start_node / 64] |= 1 << (start_node % 64);
             stack.push(start_node);
         }
 
@@ -644,14 +633,73 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
             result.push(u);
 
             for (v, _) in self.neighbor_indices_by_id(token, u) {
-                if v < visited.len() && !visited[v] {
-                    visited[v] = true;
-                    stack.push(v);
+                if v < len {
+                    let word_idx = v / 64;
+                    let mask = 1 << (v % 64);
+                    if (visited[word_idx] & mask) == 0 {
+                        visited[word_idx] |= mask;
+                        stack.push(v);
+                    }
                 }
             }
         }
 
         result
+    }
+
+    /// Computes the shortest paths from `start_node` to all other nodes using Dijkstra's algorithm.
+    ///
+    /// Returns a tuple `(distances, predecessors)`, where:
+    /// - `distances` stores the minimum distance from `start_node` to each node (or `None` if unreachable).
+    /// - `predecessors` stores the predecessor of each node in the shortest path tree (or `None`).
+    ///
+    /// # Requirements
+    /// - Edge weights `E` must implement `Copy`, `Ord`, `Add`, and `Default`.
+    /// - Weights must be non-negative (Dijkstra's requirement).
+    pub fn dijkstra(
+        &self,
+        token: &GhostToken<'brand>,
+        start_node: usize,
+    ) -> (Vec<Option<E>>, Vec<Option<usize>>)
+    where
+        E: Copy + Ord + std::ops::Add<Output = E> + Default,
+    {
+        use std::cmp::Reverse;
+        use std::collections::BinaryHeap;
+
+        let topology = self.node_topology.borrow(token);
+        let len = topology.len();
+
+        let mut dist = vec![None; len];
+        let mut pred = vec![None; len];
+        let mut pq = BinaryHeap::new();
+
+        if start_node < len {
+            dist[start_node] = Some(E::default());
+            pq.push(Reverse((E::default(), start_node)));
+        }
+
+        while let Some(Reverse((d, u))) = pq.pop() {
+            // If we found a shorter path before, skip this stale entry
+            if let Some(current_dist) = dist[u] {
+                if d > current_dist {
+                    continue;
+                }
+            }
+
+            for (v, weight) in self.neighbor_indices_by_id(token, u) {
+                if v < len {
+                    let new_dist = d + *weight;
+                    if dist[v].map_or(true, |curr| new_dist < curr) {
+                        dist[v] = Some(new_dist);
+                        pred[v] = Some(u);
+                        pq.push(Reverse((new_dist, v)));
+                    }
+                }
+            }
+        }
+
+        (dist, pred)
     }
 }
 
@@ -940,6 +988,47 @@ mod tests {
             assert!(visited.contains(&graph.node_id(&token, &n1)));
             assert!(visited.contains(&graph.node_id(&token, &n2)));
             assert!(visited.contains(&graph.node_id(&token, &n3)));
+
+            graph.remove_node(&mut token, n0);
+            graph.remove_node(&mut token, n1);
+            graph.remove_node(&mut token, n2);
+            graph.remove_node(&mut token, n3);
+        });
+    }
+
+    #[test]
+    fn test_dijkstra() {
+        GhostToken::new(|mut token| {
+            let graph = AdjListGraph::new();
+            let n0 = graph.add_node(&mut token, 0);
+            let n1 = graph.add_node(&mut token, 1);
+            let n2 = graph.add_node(&mut token, 2);
+            let n3 = graph.add_node(&mut token, 3);
+
+            // 0 -> 1 (10)
+            // 0 -> 2 (5)
+            // 2 -> 1 (2)  => Path 0->2->1 is cost 7 (better than 10)
+            // 1 -> 3 (1)
+            graph.add_edge(&mut token, &n0, &n1, 10);
+            graph.add_edge(&mut token, &n0, &n2, 5);
+            graph.add_edge(&mut token, &n2, &n1, 2);
+            graph.add_edge(&mut token, &n1, &n3, 1);
+
+            let n0_id = graph.node_id(&token, &n0);
+            let n1_id = graph.node_id(&token, &n1);
+            let n2_id = graph.node_id(&token, &n2);
+            let n3_id = graph.node_id(&token, &n3);
+
+            let (dists, preds) = graph.dijkstra(&token, n0_id);
+
+            assert_eq!(dists[n0_id], Some(0));
+            assert_eq!(dists[n2_id], Some(5));
+            assert_eq!(dists[n1_id], Some(7)); // 0->2->1 = 5+2=7
+            assert_eq!(dists[n3_id], Some(8)); // 7+1=8
+
+            assert_eq!(preds[n1_id], Some(n2_id));
+            assert_eq!(preds[n2_id], Some(n0_id));
+            assert_eq!(preds[n3_id], Some(n1_id));
 
             graph.remove_node(&mut token, n0);
             graph.remove_node(&mut token, n1);
