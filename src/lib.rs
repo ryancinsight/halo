@@ -116,10 +116,11 @@ pub use cell::{
     RawGhostCell,
 };
 pub use collections::{
-    ActivateVec, ActiveVec, BrandedArray, BrandedCowStrings, BrandedDoublyLinkedList,
-    BrandedHashMap, BrandedHashSet, BrandedIntervalMap, BrandedMatrix, BrandedMatrixViewMut,
-    BrandedSegmentTree, BrandedSegmentTreeViewMut, BrandedSlice, BrandedSliceMut, BrandedString,
-    BrandedVec, BrandedVecDeque,
+    ActivateVec, ActiveDisjointSet, ActiveVec, BrandedArray, BrandedCowStrings,
+    BrandedDisjointSet, BrandedDoublyLinkedList, BrandedHashMap, BrandedHashSet,
+    BrandedIntervalMap, BrandedMatrix, BrandedMatrixViewMut, BrandedSegmentTree,
+    BrandedSegmentTreeViewMut, BrandedSlice, BrandedSliceMut, BrandedString, BrandedVec,
+    BrandedVecDeque,
 };
 pub use graph::{GhostAdjacencyGraph, GhostBipartiteGraph, GhostCscGraph, GhostCsrGraph, GhostDag};
 pub use token::{GhostToken, SharedGhostToken};

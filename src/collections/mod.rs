@@ -21,9 +21,9 @@ pub use hash::{
     BrandedIndexMap,
 };
 pub use other::{
-    BrandedBinaryHeap, BrandedCowStrings, BrandedDeque, BrandedDoublyLinkedList,
-    BrandedIntervalMap, BrandedLruCache, BrandedSegmentTree, BrandedSegmentTreeViewMut,
-    BrandedSlotMap, SlotKey, TripodList,
+    ActiveDisjointSet, BrandedBinaryHeap, BrandedCowStrings, BrandedDeque, BrandedDisjointSet,
+    BrandedDoublyLinkedList, BrandedIntervalMap, BrandedLruCache, BrandedSegmentTree,
+    BrandedSegmentTreeViewMut, BrandedSlotMap, SlotKey, TripodList,
 };
 pub use skip_list::{ActivateSkipList, ActiveSkipList, BrandedSkipList};
 pub use trie::{BrandedRadixTrieMap, BrandedRadixTrieSet};
