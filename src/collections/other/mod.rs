@@ -5,6 +5,8 @@
 
 pub mod active;
 pub mod binary_heap;
+pub mod bit_set;
+pub mod bloom_filter;
 pub mod chain;
 pub mod cow;
 pub mod cow_strings;
@@ -20,6 +22,8 @@ pub mod slot_map;
 pub mod tripod_list;
 
 pub use binary_heap::BrandedBinaryHeap;
+pub use bit_set::BrandedBitSet;
+pub use bloom_filter::BrandedBloomFilter;
 pub use chain::BrandedChain;
 pub use cow::BrandedCow;
 pub use cow_strings::BrandedCowStrings;
