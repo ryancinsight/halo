@@ -148,3 +148,6 @@ harness = false
 [[bench]]
 name = "disjoint_set_benchmark"
 harness = false
+[[bench]]
+name = "vec_deque_drain_benchmark"
+harness = false
