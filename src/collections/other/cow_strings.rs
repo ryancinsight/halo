@@ -51,7 +51,7 @@
 //! ```
 
 use crate::collections::BrandedVec;
-use crate::{GhostCell, GhostToken};
+use crate::GhostToken;
 use std::borrow::Cow;
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hash, Hasher};
