@@ -14,6 +14,7 @@
 use core::marker::PhantomData;
 
 pub mod invariant;
+pub mod macros;
 pub mod shared;
 
 pub use invariant::InvariantLifetime;
