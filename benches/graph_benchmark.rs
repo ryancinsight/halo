@@ -168,7 +168,59 @@ fn bench_graph_bfs(c: &mut Criterion) {
             })
         });
     });
+
+    c.bench_function("petgraph_bfs", |b| {
+        use petgraph::visit::Bfs;
+        use petgraph::Graph;
+
+        b.iter(|| {
+            let mut graph = Graph::<usize, (), petgraph::Directed>::new();
+            let mut nodes = Vec::with_capacity(size);
+            for i in 0..size {
+                nodes.push(graph.add_node(i));
+            }
+            for i in 1..size {
+                graph.add_edge(nodes[i / 2], nodes[i], ());
+            }
+
+            let mut bfs = Bfs::new(&graph, nodes[0]);
+            let mut count = 0;
+            while let Some(_) = bfs.next(&graph) {
+                count += 1;
+            }
+            black_box(count);
+        });
+    });
 }
 
-criterion_group!(benches, bench_graph_sparse_remove, bench_graph_bfs);
+fn bench_graph_snapshot(c: &mut Criterion) {
+    let size = 1000;
+
+    c.bench_function("adj_list_graph_snapshot", |b| {
+        b.iter(|| {
+            GhostToken::new(|mut token| {
+                let graph = halo::graph::AdjListGraph::new();
+                let mut nodes = Vec::with_capacity(size);
+                for i in 0..size {
+                    nodes.push(graph.add_node(&mut token, i));
+                }
+                for i in 1..size {
+                    graph.add_edge(&mut token, &nodes[i / 2], &nodes[i], ());
+                }
+
+                GhostToken::new(|mut new_token| {
+                    let (new_graph, map) = graph.snapshot(&token, &mut new_token);
+                    black_box((new_graph, map));
+                });
+            })
+        });
+    });
+}
+
+criterion_group!(
+    benches,
+    bench_graph_sparse_remove,
+    bench_graph_bfs,
+    bench_graph_snapshot
+);
 criterion_main!(benches);

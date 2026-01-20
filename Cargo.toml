@@ -25,6 +25,7 @@ proptest = { version = "1.4", optional = true }
 criterion = "0.5"
 proptest = "1.4"
 loom = "0.7"
+petgraph = "0.6"
 
 [[bench]]
 name = "halo_benchmark"

@@ -14,6 +14,28 @@ use crate::GhostToken;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 
+/// Marker trait for graph edge directionality.
+pub trait EdgeType {
+    /// Returns true if the graph is directed.
+    fn is_directed() -> bool;
+}
+
+/// Marker for directed graphs.
+pub struct Directed;
+/// Marker for undirected graphs.
+pub struct Undirected;
+
+impl EdgeType for Directed {
+    fn is_directed() -> bool {
+        true
+    }
+}
+impl EdgeType for Undirected {
+    fn is_directed() -> bool {
+        false
+    }
+}
+
 /// Internal node data structure.
 ///
 /// This is wrapped in a `GhostCell` and managed by `StaticRc`.
@@ -45,22 +67,51 @@ pub(crate) struct EdgeData<'brand, E, V> {
 pub type NodeHandle<'brand, V> = StaticRc<'brand, GhostCell<'brand, NodeData<V>>, 1, 2>;
 
 /// An intrusive adjacency list graph.
-pub struct AdjListGraph<'brand, V, E> {
+pub struct AdjListGraph<'brand, V, E, Ty = Directed> {
     /// Pool containing the graph's share of the node handles.
     nodes: BrandedPool<'brand, NodeHandle<'brand, V>>,
     /// Pool containing the edges.
     edges: BrandedPool<'brand, EdgeData<'brand, E, V>>,
+    _marker: PhantomData<Ty>,
 }
 
-impl<'brand, V, E> AdjListGraph<'brand, V, E> {
-    /// Creates a new empty graph.
+impl<'brand, V, E> AdjListGraph<'brand, V, E, Undirected> {
+    /// Creates a new empty undirected graph.
+    pub fn new_undirected() -> Self {
+        Self {
+            nodes: BrandedPool::new(),
+            edges: BrandedPool::new(),
+            _marker: PhantomData,
+        }
+    }
+
+    /// Adds an undirected edge (two directed edges) between two nodes.
+    pub fn add_undirected_edge(
+        &self,
+        token: &mut GhostToken<'brand>,
+        u: &NodeHandle<'brand, V>,
+        v: &NodeHandle<'brand, V>,
+        weight: E,
+    ) where
+        E: Clone,
+    {
+        self.add_edge(token, u, v, weight.clone());
+        self.add_edge(token, v, u, weight);
+    }
+}
+
+impl<'brand, V, E> AdjListGraph<'brand, V, E, Directed> {
+    /// Creates a new empty directed graph.
     pub fn new() -> Self {
         Self {
             nodes: BrandedPool::new(),
             edges: BrandedPool::new(),
+            _marker: PhantomData,
         }
     }
+}
 
+impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
     /// Adds a node to the graph and returns a handle to it.
     ///
     /// The returned `NodeHandle` represents partial ownership of the node.
@@ -75,10 +126,6 @@ impl<'brand, V, E> AdjListGraph<'brand, V, E> {
         };
 
         // Create the StaticRc with N=D=2.
-        // We use StaticRc::new which creates N=D.
-        // But we want generic N=D=2.
-        // StaticRc::new infers N, D from return type.
-        // We need `StaticRc<..., 2, 2>`.
         let full_rc: StaticRc<'brand, _, 2, 2> = StaticRc::new(GhostCell::new(node_data));
 
         // Split into two halves (1/2).
@@ -107,43 +154,25 @@ impl<'brand, V, E> AdjListGraph<'brand, V, E> {
         let pool_idx = handle.borrow(token).pool_idx;
 
         // 2. Retrieve the graph's share of the handle.
-        // Since we are inside remove_node, we assume validity.
-        // If the handle is from this graph, pool_idx should be valid and contain the other half.
-        // SAFETY: We rely on the invariant that pool_idx points to the matching handle.
         let other_half = unsafe { self.nodes.take(token, pool_idx) };
 
         // 3. Join the handles to regain full ownership.
-        // This panics if pointers don't match (i.e. handle is from wrong graph or corrupted).
         let full_rc = handle.join(other_half);
 
         // 4. Clean up edges.
-        // We need to remove all edges connected to this node.
-        // We can use the head_outgoing/head_incoming pointers.
-
         let node_ptr = NonNull::from(full_rc.get());
+        let _node_ptr_val = node_ptr.as_ptr(); // avoid unused variable warning properly later if needed
 
         // Remove outgoing edges
         let mut curr = full_rc.borrow(token).head_outgoing;
         while let Some(edge_idx) = curr {
-            // Unlink from target's incoming list
-            // We need to access edge data.
-            // Be careful about aliasing: we have &mut token, so we can access everything.
-
-            // We need to read edge data, find target, remove from target's incoming.
-            // And free edge slot.
-
-            // Note: We are iterating a list we are destroying.
-            // Read next before destroying.
             let edge_data = self.edges.get(token, edge_idx).expect("Corrupt edge list");
             let next_edge = edge_data.next_outgoing;
             let target_ptr = edge_data.target;
 
-            // Remove from target's incoming list.
             unsafe {
                 self.unlink_incoming(token, target_ptr, edge_idx);
             }
-
-            // Free the edge.
             unsafe { self.edges.take(token, edge_idx) };
 
             curr = next_edge;
@@ -152,7 +181,6 @@ impl<'brand, V, E> AdjListGraph<'brand, V, E> {
         // Remove incoming edges
         let mut curr = full_rc.borrow(token).head_incoming;
         while let Some(edge_idx) = curr {
-            // Unlink from source's outgoing list
             let edge_data = self.edges.get(token, edge_idx).expect("Corrupt edge list");
             let next_edge = edge_data.next_incoming;
             let source_ptr = edge_data.source;
@@ -160,27 +188,20 @@ impl<'brand, V, E> AdjListGraph<'brand, V, E> {
             unsafe {
                 self.unlink_outgoing(token, source_ptr, edge_idx);
             }
-
             unsafe { self.edges.take(token, edge_idx) };
 
             curr = next_edge;
         }
 
         // 5. Drop full_rc, which deallocates the NodeData.
-        // We extract the value first?
-        // StaticRc::into_box -> Box -> into_inner?
-        // StaticRc owns GhostCell.
-        // GhostCell owns T.
-        // We can consume StaticRc.
-        // But StaticRc::into_box gives Box<GhostCell<...>>.
-        // Box::into_inner gives GhostCell.
-        // GhostCell::into_inner gives T.
-
-        let cell = *full_rc.into_box(); // Box<GhostCell> deref to GhostCell? No, Box<GhostCell>
+        let cell = *full_rc.into_box();
         cell.into_inner().value
     }
 
     /// Adds a directed edge between two nodes.
+    ///
+    /// If the graph is undirected, use `add_undirected_edge` (TODO) or this method
+    /// might be adapted. Currently this adds a single directed edge.
     pub fn add_edge(
         &self,
         token: &mut GhostToken<'brand>,
@@ -223,7 +244,6 @@ impl<'brand, V, E> AdjListGraph<'brand, V, E> {
         let mut prev_idx: Option<usize> = None;
 
         while let Some(curr_idx) = curr {
-            // Read next from edges
             let next = self.edges.get(token, curr_idx).unwrap().next_incoming;
 
             if curr_idx == edge_idx {
@@ -275,7 +295,7 @@ impl<'brand, V, E> AdjListGraph<'brand, V, E> {
         &'a self,
         token: &'a GhostToken<'brand>,
         node: &'a GhostCell<'brand, NodeData<V>>,
-    ) -> Neighbors<'a, 'brand, V, E> {
+    ) -> Neighbors<'a, 'brand, V, E, Ty> {
         Neighbors {
             graph: self,
             curr_edge: node.borrow(token).head_outgoing,
@@ -284,19 +304,23 @@ impl<'brand, V, E> AdjListGraph<'brand, V, E> {
     }
 }
 
-impl<'brand, V, E> Default for AdjListGraph<'brand, V, E> {
+impl<'brand, V, E, Ty> Default for AdjListGraph<'brand, V, E, Ty> {
     fn default() -> Self {
-        Self::new()
+        Self {
+            nodes: BrandedPool::new(),
+            edges: BrandedPool::new(),
+            _marker: PhantomData,
+        }
     }
 }
 
-pub struct Neighbors<'a, 'brand, V, E> {
-    graph: &'a AdjListGraph<'brand, V, E>,
+pub struct Neighbors<'a, 'brand, V, E, Ty> {
+    graph: &'a AdjListGraph<'brand, V, E, Ty>,
     curr_edge: Option<usize>,
     _token: &'a GhostToken<'brand>,
 }
 
-impl<'a, 'brand, V, E> Iterator for Neighbors<'a, 'brand, V, E> {
+impl<'a, 'brand, V, E, Ty> Iterator for Neighbors<'a, 'brand, V, E, Ty> {
     type Item = (&'a GhostCell<'brand, NodeData<V>>, &'a E);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -306,6 +330,108 @@ impl<'a, 'brand, V, E> Iterator for Neighbors<'a, 'brand, V, E> {
 
         let target_node = unsafe { &*edge.target.as_ptr() };
         Some((target_node, &edge.weight))
+    }
+}
+
+/// A map generated during snapshotting to retrieve new handles from old ones.
+pub struct SnapshotMap<'brand, V> {
+    map: Vec<Option<NodeHandle<'brand, V>>>,
+}
+
+impl<'brand, V> SnapshotMap<'brand, V> {
+    /// Retrieves (takes) the new handle corresponding to an old handle.
+    ///
+    /// This consumes the handle from the map, so it can only be called once per node.
+    pub fn take_new_handle<'old_brand, OLD_V>(
+        &mut self,
+        token: &GhostToken<'old_brand>,
+        old_handle: &NodeHandle<'old_brand, OLD_V>,
+    ) -> Option<NodeHandle<'brand, V>> {
+        let idx = old_handle.borrow(token).pool_idx;
+        self.map.get_mut(idx).and_then(|opt| opt.take())
+    }
+}
+
+impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
+    /// Creates a deep copy (snapshot) of the graph in a new branding scope.
+    ///
+    /// Returns the new graph and a `SnapshotMap` to retrieve the new handles.
+    pub fn snapshot<'new_brand>(
+        &self,
+        token: &GhostToken<'brand>,
+        _new_token: &mut GhostToken<'new_brand>,
+    ) -> (
+        AdjListGraph<'new_brand, V, E, Ty>,
+        SnapshotMap<'new_brand, V>,
+    )
+    where
+        V: Clone,
+        E: Clone,
+    {
+        // 1. Clone nodes
+        let (new_nodes, handle_map_vec) = self.nodes.clone_structure(token, |old_handle| {
+            let old_data = old_handle.borrow(token);
+
+            // Clone data
+            let new_data = NodeData {
+                value: old_data.value.clone(),
+                head_outgoing: old_data.head_outgoing,
+                head_incoming: old_data.head_incoming,
+                pool_idx: old_data.pool_idx,
+            };
+
+            // Create new handle
+            let full_rc: StaticRc<'new_brand, _, 2, 2> =
+                StaticRc::new(GhostCell::new(new_data));
+            let (h1, h2) = full_rc.split::<1, 1>();
+
+            // Return graph handle (h1) and user handle (h2)
+            (h1, h2)
+        });
+
+        // 2. Clone edges
+        let (new_edges, _) = self.edges.clone_structure(token, |old_edge| {
+            // Fix pointers
+            let target_node = unsafe { &*old_edge.target.as_ptr() };
+            let target_idx = target_node.borrow(token).pool_idx;
+
+            let source_node = unsafe { &*old_edge.source.as_ptr() };
+            let source_idx = source_node.borrow(token).pool_idx;
+
+            // Look up new handles to get new pointers
+            let target_handle = handle_map_vec[target_idx]
+                .as_ref()
+                .expect("Target node missing in snapshot");
+            let source_handle = handle_map_vec[source_idx]
+                .as_ref()
+                .expect("Source node missing in snapshot");
+
+            let new_target_ptr = NonNull::from(target_handle.get());
+            let new_source_ptr = NonNull::from(source_handle.get());
+
+            (
+                EdgeData {
+                    weight: old_edge.weight.clone(),
+                    target: new_target_ptr,
+                    source: new_source_ptr,
+                    next_outgoing: old_edge.next_outgoing,
+                    next_incoming: old_edge.next_incoming,
+                    _marker: PhantomData,
+                },
+                (),
+            )
+        });
+
+        (
+            AdjListGraph {
+                nodes: new_nodes,
+                edges: new_edges,
+                _marker: PhantomData,
+            },
+            SnapshotMap {
+                map: handle_map_vec,
+            },
+        )
     }
 }
 
@@ -334,6 +460,74 @@ mod tests {
             assert_eq!(val, 1);
 
             // Must remove n2 to satisfy StaticRc linearity
+            graph.remove_node(&mut token, n2);
+        });
+    }
+
+    #[test]
+    fn test_adj_graph_undirected() {
+        GhostToken::new(|mut token| {
+            let graph = AdjListGraph::new_undirected();
+            let n1 = graph.add_node(&mut token, 1);
+            let n2 = graph.add_node(&mut token, 2);
+
+            graph.add_undirected_edge(&mut token, &n1, &n2, 100);
+
+            // Check n1 -> n2
+            let neighbors1: Vec<_> = graph.neighbors(&token, &n1).collect();
+            assert_eq!(neighbors1.len(), 1);
+            assert_eq!(neighbors1[0].0.borrow(&token).value, 2);
+
+            // Check n2 -> n1
+            let neighbors2: Vec<_> = graph.neighbors(&token, &n2).collect();
+            assert_eq!(neighbors2.len(), 1);
+            assert_eq!(neighbors2[0].0.borrow(&token).value, 1);
+
+            // Clean up
+            graph.remove_node(&mut token, n1);
+            graph.remove_node(&mut token, n2);
+        });
+    }
+
+    #[test]
+    fn test_adj_graph_snapshot() {
+        GhostToken::new(|mut token| {
+            let graph = AdjListGraph::new();
+            let n1 = graph.add_node(&mut token, 1);
+            let n2 = graph.add_node(&mut token, 2);
+            graph.add_edge(&mut token, &n1, &n2, 100);
+
+            // Create snapshot
+            GhostToken::new(|mut new_token| {
+                let (new_graph, mut map) = graph.snapshot(&token, &mut new_token);
+
+                // Retrieve new handles
+                let new_n1 = map.take_new_handle(&token, &n1).unwrap();
+                let new_n2 = map.take_new_handle(&token, &n2).unwrap();
+
+                // Check values
+                assert_eq!(new_n1.borrow(&new_token).value, 1);
+                assert_eq!(new_n2.borrow(&new_token).value, 2);
+
+                // Check edge
+                let neighbors: Vec<_> = new_graph.neighbors(&new_token, &new_n1).collect();
+                assert_eq!(neighbors.len(), 1);
+                assert_eq!(neighbors[0].0.borrow(&new_token).value, 2);
+                assert_eq!(*neighbors[0].1, 100);
+
+                // Modify new graph
+                new_graph.remove_node(&mut new_token, new_n1);
+
+                // Verify old graph is untouched
+                let old_neighbors: Vec<_> = graph.neighbors(&token, &n1).collect();
+                assert_eq!(old_neighbors.len(), 1);
+
+                // Cleanup new
+                new_graph.remove_node(&mut new_token, new_n2);
+            });
+
+            // Cleanup old
+            graph.remove_node(&mut token, n1);
             graph.remove_node(&mut token, n2);
         });
     }
