@@ -404,6 +404,58 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
             }
         }
     }
+
+    /// Rearranges the internal storage so that the deque contents are contiguous.
+    ///
+    /// Returns a mutable slice to the contiguous contents.
+    /// This may require allocating a new buffer if the deque is wrapped.
+    pub fn make_contiguous(&mut self) -> &mut [GhostCell<'brand, T>] {
+        if self.len == 0 {
+            return &mut [];
+        }
+
+        let ptr = self.ptr.as_ptr();
+        let head = self.head;
+        let tail = self.tail();
+        let cap = self.cap;
+
+        unsafe {
+            if tail <= head {
+                // Wrapped case.
+                // The logical contents are [head..cap] followed by [0..tail].
+                // We want to make them contiguous.
+                // The safest way is to allocate a new buffer and copy the parts in order.
+
+                let head_len = cap - head;
+                let tail_len = tail;
+
+                // Allocate new buffer
+                let new_cap = self.cap;
+                let new_layout = Layout::array::<GhostCell<'brand, T>>(new_cap).unwrap();
+                let new_ptr = alloc(new_layout) as *mut GhostCell<'brand, T>;
+                if new_ptr.is_null() { handle_alloc_error(new_layout); }
+
+                // Copy head part to start of new buffer
+                ptr::copy_nonoverlapping(ptr.add(head), new_ptr, head_len);
+
+                // Copy tail part to follow head part
+                if tail_len > 0 {
+                    ptr::copy_nonoverlapping(ptr, new_ptr.add(head_len), tail_len);
+                }
+
+                // Deallocate old buffer
+                let old_layout = Layout::array::<GhostCell<'brand, T>>(self.cap).unwrap();
+                dealloc(ptr as *mut u8, old_layout);
+
+                // Update pointers
+                self.ptr = NonNull::new_unchecked(new_ptr);
+                self.head = 0;
+            }
+
+            // Now contiguous.
+            std::slice::from_raw_parts_mut(self.ptr.as_ptr().add(self.head), self.len)
+        }
+    }
 }
 
 impl<'brand, T> BrandedVecDeque<'brand, T> {

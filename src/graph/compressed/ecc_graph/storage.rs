@@ -50,8 +50,8 @@ impl EdgeCentricStorage {
         let n = adjacency.len();
         let mut degrees = vec![0; n];
         let mut all_edges = Vec::new();
-        let mut weights = Vec::new();
-        let mut has_weights = false;
+        let weights = Vec::new();
+        let has_weights = false;
 
         // Collect all edges
         for (u, neighbors) in adjacency.iter().enumerate() {
