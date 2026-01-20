@@ -1,8 +1,9 @@
-use crate::token::InvariantLifetime;
+use crate::foundation::ghost::ptr::BrandedNonNull;
+use crate::GhostToken;
 use core::alloc::Layout;
 use core::mem;
-use core::ops::Deref;
-use core::ptr::{self, NonNull};
+use core::ptr;
+use core::ptr::NonNull;
 use std::alloc::{dealloc, handle_alloc_error};
 
 /// A compile-time reference-counted pointer that tracks ownership fractions.
@@ -13,8 +14,7 @@ use std::alloc::{dealloc, handle_alloc_error};
 /// Safety invariant: `N <= D` and the sum of `N` across all instances pointing to the same allocation equals `D`.
 #[derive(Debug)]
 pub struct StaticRc<'id, T, const N: usize, const D: usize> {
-    ptr: NonNull<T>,
-    _brand: InvariantLifetime<'id>,
+    ptr: BrandedNonNull<'id, T>,
 }
 
 impl<'id, T, const N: usize, const D: usize> StaticRc<'id, T, N, D> {
@@ -42,23 +42,21 @@ impl<'id, T, const N: usize, const D: usize> StaticRc<'id, T, N, D> {
         unsafe {
             ptr::write(raw, value);
             Self {
-                ptr: NonNull::new_unchecked(raw),
-                _brand: InvariantLifetime::default(),
+                ptr: BrandedNonNull::new_unchecked(raw),
             }
         }
     }
 
-    /// Constructs a `StaticRc` from a raw pointer.
+    /// Constructs a `StaticRc` from a branded pointer.
     ///
     /// # Safety
     ///
     /// The caller must ensure that `ptr` points to a valid heap allocation of `T`,
     /// allocated via `std::alloc::alloc` with `Layout::new::<T>()`.
     /// The ownership fractions must be correctly managed.
-    pub unsafe fn from_raw(ptr: NonNull<T>) -> Self {
+    pub unsafe fn from_raw(ptr: BrandedNonNull<'id, T>) -> Self {
         Self {
             ptr,
-            _brand: InvariantLifetime::default(),
         }
     }
 
@@ -85,11 +83,9 @@ impl<'id, T, const N: usize, const D: usize> StaticRc<'id, T, N, D> {
             (
                 StaticRc {
                     ptr,
-                    _brand: InvariantLifetime::default(),
                 },
                 StaticRc {
                     ptr,
-                    _brand: InvariantLifetime::default(),
                 },
             )
         }
@@ -110,7 +106,6 @@ impl<'id, T, const N: usize, const D: usize> StaticRc<'id, T, N, D> {
         unsafe {
             StaticRc {
                 ptr,
-                _brand: InvariantLifetime::default(),
             }
         }
     }
@@ -142,14 +137,17 @@ impl<'id, T, const N: usize, const D: usize> StaticRc<'id, T, N, D> {
         unsafe {
             StaticRc {
                 ptr,
-                _brand: InvariantLifetime::default(),
             }
         }
     }
 
-    /// Returns a reference to the inner value.
-    pub fn get(&self) -> &T {
-        unsafe { self.ptr.as_ref() }
+    /// Access the inner value using the token.
+    ///
+    /// The lifetime of the returned reference is tied to `self`, not the token,
+    /// because `StaticRc` owns the data. The token is only used to prove permission.
+    pub fn borrow<'a>(&'a self, _token: &GhostToken<'id>) -> &'a T {
+        // SAFETY: We hold a share of ownership (ensuring liveness) and the token proves brand access.
+        unsafe { self.ptr.as_non_null().as_ref() }
     }
 }
 
@@ -173,13 +171,6 @@ impl<'id, T, const N: usize, const D: usize> Drop for StaticRc<'id, T, N, D> {
                 }
             }
         }
-    }
-}
-
-impl<'id, T, const N: usize, const D: usize> Deref for StaticRc<'id, T, N, D> {
-    type Target = T;
-    fn deref(&self) -> &Self::Target {
-        self.get()
     }
 }
 

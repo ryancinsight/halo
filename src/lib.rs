@@ -105,6 +105,7 @@
 
 pub mod alloc;
 pub mod cell;
+pub mod foundation;
 pub mod collections;
 pub mod concurrency;
 pub mod graph;

@@ -684,7 +684,7 @@ fn branded_vec_comprehensive_vs_std_vec() {
         // Test removals
         while !std_vec.is_empty() && !branded_vec.is_empty() {
             let std_val = std_vec.remove(0);
-            let branded_val = branded_vec.remove(0).into_inner();
+            let branded_val = branded_vec.remove(0);
             assert_eq!(std_val, branded_val);
         }
     });
@@ -778,7 +778,7 @@ fn branded_vecdeque_comprehensive_vs_std_vecdeque() {
             } else {
                 branded_deque.pop_back()
             };
-            assert_eq!(std_val, branded_val.map(|x| x.into_inner()));
+            assert_eq!(std_val, branded_val);
         }
 
         assert_eq!(std_deque.len(), branded_deque.len());

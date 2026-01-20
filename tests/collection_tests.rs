@@ -12,7 +12,7 @@ fn test_branded_vec_deque_ops() {
         }
         assert_eq!(dq.len(), 10);
         for i in 0..5 {
-            assert_eq!(dq.pop_front().map(|c| c.into_inner()), Some(i));
+            assert_eq!(dq.pop_front(), Some(i));
         }
         assert_eq!(dq.len(), 5);
         dq.for_each_mut(&mut token, |x| *x *= 2);

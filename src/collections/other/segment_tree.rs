@@ -6,6 +6,7 @@
 //! safe splitting of the tree into disjoint mutable regions for parallel processing.
 
 use crate::collections::{BrandedCollection, BrandedVec};
+use crate::token::InvariantLifetime;
 use crate::{GhostCell, GhostToken};
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
@@ -21,7 +22,7 @@ pub struct BrandedSegmentTree<'brand, T, F> {
 /// A mutable view into a sub-tree of the Segment Tree.
 pub struct BrandedSegmentTreeViewMut<'a, 'brand, T, F> {
     /// Pointer to the base of the vector storage (element 0).
-    ptr: *mut GhostCell<'brand, T>,
+    ptr: *mut T,
     /// Index of the current node in the heap layout (0-based).
     node_idx: usize,
     /// The range covered by this node `[start, end)`.
@@ -33,7 +34,8 @@ pub struct BrandedSegmentTreeViewMut<'a, 'brand, T, F> {
     /// Reference to the default value (neutral element).
     default_value: &'a T,
     /// Marker for lifetime.
-    _marker: PhantomData<&'a mut GhostCell<'brand, T>>,
+    _marker: PhantomData<&'a mut T>,
+    _brand: InvariantLifetime<'brand>,
 }
 
 unsafe impl<'a, 'brand, T: Send, F: Sync> Send for BrandedSegmentTreeViewMut<'a, 'brand, T, F> {}
@@ -204,13 +206,14 @@ where
     /// Returns a mutable view of the root of the tree, allowing splitting.
     pub fn view_mut<'a>(&'a mut self) -> BrandedSegmentTreeViewMut<'a, 'brand, T, F> {
         BrandedSegmentTreeViewMut {
-            ptr: self.tree.inner.as_mut_ptr(),
+            ptr: self.tree.as_mut_ptr(),
             node_idx: 0,
             range_start: 0,
             range_end: self.n,
             combinator: &self.combinator,
             default_value: &self.default_value,
             _marker: PhantomData,
+            _brand: InvariantLifetime::default(),
         }
     }
 }
@@ -245,6 +248,7 @@ where
                 combinator: self.combinator,
                 default_value: self.default_value,
                 _marker: PhantomData,
+                _brand: InvariantLifetime::default(),
             };
             let right = Self {
                 ptr: self.ptr,
@@ -254,6 +258,7 @@ where
                 combinator: self.combinator,
                 default_value: self.default_value,
                 _marker: PhantomData,
+                _brand: InvariantLifetime::default(),
             };
             Some((left, right))
         }
@@ -285,7 +290,7 @@ where
         if start == end - 1 {
             unsafe {
                 let cell = &mut *self.ptr.add(node);
-                *cell.get_mut() = val;
+                *cell = val;
             }
             return;
         }
@@ -302,28 +307,15 @@ where
 
         // Pull up
         unsafe {
-            let left_cell = &*self.ptr.add(left_child);
             // We need to read from the cell.
-            // BrandedSegmentTreeViewMut grants MUTABLE access.
             // Reading is safe if we have exclusive access.
-            // However, GhostCell doesn't expose `get` without token.
-            // But we have `ptr` to `GhostCell`.
-            // `GhostCell` is transparent wrapper around `UnsafeCell`.
-            // We can get `&T` via `&mut GhostCell` -> `get_mut` -> `&mut T` -> `&T`.
-            // But `left_cell` is `&GhostCell` here (from `ptr`). We need `&mut` to call `get_mut` without token.
-            // Since `self` owns the *subtree* rooted at `node`, it owns `left_child` and `right_child`.
-            // So we can mutably borrow them.
-
-            let left_cell_mut = &mut *self.ptr.add(left_child);
-            let left_val = left_cell_mut.get_mut(); // Safe, no token needed
-
-            let right_cell_mut = &mut *self.ptr.add(right_child);
-            let right_val = right_cell_mut.get_mut(); // Safe
+            let left_val = &*self.ptr.add(left_child);
+            let right_val = &*self.ptr.add(right_child);
 
             let new_val = (self.combinator)(left_val, right_val);
 
-            let node_cell_mut = &mut *self.ptr.add(node);
-            *node_cell_mut.get_mut() = new_val;
+            let node_cell = &mut *self.ptr.add(node);
+            *node_cell = new_val;
         }
     }
 }

@@ -296,10 +296,9 @@ where
             // Update existing value
             unsafe {
                 let dense_idx = *self.slots.get_unchecked(slot_idx);
-                // We need to swap the value in GhostCell
-                let cell = self.values.inner.get_unchecked_mut(dense_idx);
-                let old = std::mem::replace(cell, GhostCell::new(value));
-                Some(old.into_inner())
+                let cell = self.values.get_unchecked_mut_exclusive(dense_idx);
+                let old = std::mem::replace(cell, value);
+                Some(old)
             }
         } else {
             // Add new entry
@@ -355,7 +354,7 @@ where
                 if dense_idx == last_idx {
                     // Simple case: removing the last element
                     self.keys.pop();
-                    return self.values.pop().map(|c| c.into_inner());
+                    return self.values.pop();
                 }
 
                 // Find the slot for the last element (which will move)
@@ -374,9 +373,9 @@ where
 
                 // Now perform the swap
                 self.keys.swap_remove(dense_idx);
-                let val_cell = self.values.swap_remove(dense_idx);
+                let val = self.values.swap_remove(dense_idx);
 
-                Some(val_cell.into_inner())
+                Some(val)
             }
         } else {
             None

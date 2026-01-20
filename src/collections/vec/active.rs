@@ -43,7 +43,7 @@ impl<'a, 'brand, T> ActiveVec<'a, 'brand, T> {
 
     /// Pops the last element.
     pub fn pop(&mut self) -> Option<T> {
-        self.vec.pop().map(|c| c.into_inner())
+        self.vec.pop()
     }
 
     /// Returns a shared reference to element `idx`.
@@ -70,12 +70,12 @@ impl<'a, 'brand, T> ActiveVec<'a, 'brand, T> {
     ///
     /// This returns a `BrandedSliceMut`, which allows parallel mutation via splitting.
     pub fn as_mut_slice(&mut self) -> BrandedSliceMut<'_, 'brand, T> {
-        BrandedSliceMut::new(&mut self.vec.inner)
+        BrandedSliceMut::new(self.vec.as_mut_slice(self.token))
     }
 
     /// Returns a shared slice of the vector content.
     pub fn as_slice(&self) -> BrandedSlice<'_, 'brand, T> {
-        BrandedSlice::new(&self.vec.inner, self.token)
+        BrandedSlice::new(self.vec.as_slice(self.token), self.token)
     }
 
     /// Returns the underlying slice as a standard `&[T]`.
@@ -163,12 +163,12 @@ impl<'a, 'brand, T> ActiveVecDeque<'a, 'brand, T> {
 
     /// Pops from the back.
     pub fn pop_back(&mut self) -> Option<T> {
-        self.deque.pop_back().map(|c| c.into_inner())
+        self.deque.pop_back()
     }
 
     /// Pops from the front.
     pub fn pop_front(&mut self) -> Option<T> {
-        self.deque.pop_front().map(|c| c.into_inner())
+        self.deque.pop_front()
     }
 
     /// Returns a shared reference to the element at `idx`.

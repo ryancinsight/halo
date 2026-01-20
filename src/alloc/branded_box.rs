@@ -1,10 +1,10 @@
 use super::static_rc::StaticRc;
 use crate::cell::GhostCell;
-use crate::token::InvariantLifetime;
+use crate::foundation::ghost::ptr::BrandedNonNull;
 use crate::GhostToken;
 use core::alloc::Layout;
-use core::marker::PhantomData;
-use core::ptr::{self, NonNull};
+use core::ptr;
+use core::ptr::NonNull;
 use std::alloc::{alloc, dealloc, handle_alloc_error};
 
 /// A uniquely owned heap allocation that is tied to a specific type-level brand.
@@ -12,9 +12,7 @@ use std::alloc::{alloc, dealloc, handle_alloc_error};
 /// Implemented from scratch using raw pointers to ensure full control over allocation
 /// and branding, independent of `Box<T>`.
 pub struct BrandedBox<'id, T> {
-    ptr: NonNull<T>,
-    _brand: InvariantLifetime<'id>,
-    _marker: PhantomData<T>,
+    ptr: BrandedNonNull<'id, T>,
 }
 
 impl<'id, T> BrandedBox<'id, T> {
@@ -38,9 +36,7 @@ impl<'id, T> BrandedBox<'id, T> {
         unsafe {
             ptr::write(raw, value);
             Self {
-                ptr: NonNull::new_unchecked(raw),
-                _brand: InvariantLifetime::default(),
-                _marker: PhantomData,
+                ptr: BrandedNonNull::new_unchecked(raw),
             }
         }
     }
@@ -48,16 +44,16 @@ impl<'id, T> BrandedBox<'id, T> {
     /// Access the inner value using the token.
     ///
     /// Requires `&mut self` (unique ownership of box) and `&mut GhostToken` (unique ownership of token/brand access).
-    pub fn borrow_mut<'a>(&'a mut self, _token: &'a mut GhostToken<'id>) -> &'a mut T {
+    pub fn borrow_mut<'a>(&'a mut self, token: &'a mut GhostToken<'id>) -> &'a mut T {
         // SAFETY: We own the allocation and have exclusive access via &mut self.
         // The token ensures we have the right brand.
-        unsafe { self.ptr.as_mut() }
+        unsafe { self.ptr.borrow_mut(token) }
     }
 
     /// Access the inner value immutably using the token.
-    pub fn borrow<'a>(&'a self, _token: &'a GhostToken<'id>) -> &'a T {
+    pub fn borrow<'a>(&'a self, token: &'a GhostToken<'id>) -> &'a T {
         // SAFETY: We own the allocation.
-        unsafe { self.ptr.as_ref() }
+        unsafe { self.ptr.borrow(token) }
     }
 
     /// Downgrades the BrandedBox into a shared StaticRc.
@@ -78,7 +74,7 @@ impl<'id, T> BrandedBox<'id, T> {
         // 1. ptr is a valid heap allocation of T.
         // 2. We transferred ownership from `self` (consumed) to `StaticRc`.
         // 3. The allocation was created via `std::alloc::alloc`, which is compatible with `StaticRc::drop` (dealloc).
-        unsafe { StaticRc::from_raw(NonNull::new_unchecked(cell_ptr)) }
+        unsafe { StaticRc::from_raw(BrandedNonNull::new_unchecked(cell_ptr)) }
     }
 }
 

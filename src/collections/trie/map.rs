@@ -74,7 +74,7 @@ impl<'brand, K, V> BrandedRadixTrieMap<'brand, K, V> {
             // SAFETY: We have &mut self, so exclusive access to nodes.
             // We can safely interpret the slot as NodeSlot without a token.
             let next_free = unsafe {
-                let slot_ptr = self.nodes.inner.as_mut_ptr().add(idx) as *mut NodeSlot<V>;
+                let slot_ptr = self.nodes.as_mut_ptr().add(idx) as *mut NodeSlot<V>;
                 let slot_ref = &mut *slot_ptr;
 
                 if let NodeSlot::Free(next) = slot_ref {
@@ -91,7 +91,7 @@ impl<'brand, K, V> BrandedRadixTrieMap<'brand, K, V> {
             };
 
             unsafe {
-                let slot_ptr = self.nodes.inner.as_mut_ptr().add(idx) as *mut NodeSlot<V>;
+                let slot_ptr = self.nodes.as_mut_ptr().add(idx) as *mut NodeSlot<V>;
                 *slot_ptr = NodeSlot::Occupied(node);
             }
             idx
@@ -108,7 +108,7 @@ impl<'brand, K, V> BrandedRadixTrieMap<'brand, K, V> {
         self.free_head = Some(idx);
 
         unsafe {
-            let slot_ptr = self.nodes.inner.as_mut_ptr().add(idx) as *mut NodeSlot<V>;
+            let slot_ptr = self.nodes.as_mut_ptr().add(idx) as *mut NodeSlot<V>;
             *slot_ptr = NodeSlot::Free(next);
         }
     }
