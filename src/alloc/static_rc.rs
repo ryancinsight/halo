@@ -2,7 +2,7 @@ use crate::cell::GhostCell;
 use crate::token::InvariantLifetime;
 use crate::GhostToken;
 use core::alloc::Layout;
-use core::mem;
+use core::mem::{self, MaybeUninit};
 use core::ops::Deref;
 use core::ptr::{self, NonNull};
 use std::alloc::{dealloc, handle_alloc_error};
@@ -175,6 +175,84 @@ impl<'id, T, const N: usize, const D: usize> StaticRc<'id, T, N, D> {
     /// Returns a reference to the inner value.
     pub fn get(&self) -> &T {
         unsafe { self.ptr.as_ref() }
+    }
+}
+
+impl<'id, T, const D: usize> StaticRc<'id, T, D, D> {
+    /// Returns a mutable reference to the inner value.
+    ///
+    /// This is only available when the `StaticRc` has full ownership (`N == D`).
+    pub fn get_mut(&mut self) -> &mut T {
+        unsafe { self.ptr.as_mut() }
+    }
+
+    /// Converts a `Box<T>` into a `StaticRc`.
+    ///
+    /// This reuses the allocation from the `Box`, avoiding reallocation.
+    /// The resulting `StaticRc` has full ownership (`N == D`).
+    pub fn from_box(b: Box<T>) -> Self {
+        let ptr = Box::into_raw(b);
+        // SAFETY: Box::into_raw gives a valid non-null pointer.
+        let ptr = unsafe { NonNull::new_unchecked(ptr) };
+        Self {
+            ptr,
+            _brand: InvariantLifetime::default(),
+        }
+    }
+
+    /// Converts the `StaticRc` back into a `Box<T>`.
+    ///
+    /// This is only possible if we hold full ownership (`N == D`).
+    pub fn into_box(self) -> Box<T> {
+        let ptr = self.ptr;
+        mem::forget(self);
+        // SAFETY: The pointer came from `std::alloc` (or compatible Box), and we own it fully.
+        unsafe { Box::from_raw(ptr.as_ptr()) }
+    }
+}
+
+impl<'id, T, const N: usize, const D: usize> StaticRc<'id, MaybeUninit<T>, N, D> {
+    /// Creates a new `StaticRc` with uninitialized memory.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `N != D`.
+    pub fn new_uninit() -> Self {
+        assert_eq!(N, D, "New StaticRc must have N == D");
+
+        let layout = Layout::new::<T>();
+        // SAFETY: T is Sized, layout is valid.
+        let raw = if layout.size() == 0 {
+            NonNull::dangling().as_ptr()
+        } else {
+            unsafe { std::alloc::alloc(layout) as *mut MaybeUninit<T> }
+        };
+
+        if raw.is_null() {
+            handle_alloc_error(layout);
+        }
+
+        // SAFETY: raw is non-null.
+        unsafe {
+            Self {
+                ptr: NonNull::new_unchecked(raw),
+                _brand: InvariantLifetime::default(),
+            }
+        }
+    }
+
+    /// Assumes the memory is initialized and converts to `StaticRc<T>`.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the content has been initialized.
+    pub unsafe fn assume_init(self) -> StaticRc<'id, T, N, D> {
+        let ptr = self.ptr.cast::<T>();
+        mem::forget(self);
+        StaticRc {
+            ptr,
+            _brand: InvariantLifetime::default(),
+        }
     }
 }
 
