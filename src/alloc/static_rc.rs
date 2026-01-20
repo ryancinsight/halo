@@ -1,6 +1,9 @@
+use super::branded_box::BrandedBox;
+use crate::cell::GhostCell;
 use crate::token::InvariantLifetime;
+use crate::GhostToken;
 use core::alloc::Layout;
-use core::mem;
+use core::mem::{self, MaybeUninit};
 use core::ops::Deref;
 use core::ptr::{self, NonNull};
 use std::alloc::{dealloc, handle_alloc_error};
@@ -147,9 +150,130 @@ impl<'id, T, const N: usize, const D: usize> StaticRc<'id, T, N, D> {
         }
     }
 
+    /// Joins two instances back together without checking pointer equality.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that `self` and `other` originate from the same allocation.
+    /// This is guaranteed if the `StaticRc` was created via `StaticRc::scope` and the types match.
+    pub unsafe fn join_unchecked<const M: usize, const SUM: usize>(
+        self,
+        other: StaticRc<'id, T, M, D>,
+    ) -> StaticRc<'id, T, SUM, D> {
+        debug_assert_eq!(self.ptr, other.ptr, "StaticRc::join_unchecked mismatch");
+        assert_eq!(N + M, SUM, "Join result amount must equal sum of shares");
+
+        let ptr = self.ptr;
+        mem::forget(self);
+        mem::forget(other);
+
+        StaticRc {
+            ptr,
+            _brand: InvariantLifetime::default(),
+        }
+    }
+
     /// Returns a reference to the inner value.
     pub fn get(&self) -> &T {
         unsafe { self.ptr.as_ref() }
+    }
+}
+
+impl<'id, T, const D: usize> StaticRc<'id, T, D, D> {
+    /// Returns a mutable reference to the inner value.
+    ///
+    /// This is only available when the `StaticRc` has full ownership (`N == D`).
+    pub fn get_mut(&mut self) -> &mut T {
+        unsafe { self.ptr.as_mut() }
+    }
+
+    /// Converts a `Box<T>` into a `StaticRc`.
+    ///
+    /// This reuses the allocation from the `Box`, avoiding reallocation.
+    /// The resulting `StaticRc` has full ownership (`N == D`).
+    pub fn from_box(b: Box<T>) -> Self {
+        let ptr = Box::into_raw(b);
+        // SAFETY: Box::into_raw gives a valid non-null pointer.
+        let ptr = unsafe { NonNull::new_unchecked(ptr) };
+        Self {
+            ptr,
+            _brand: InvariantLifetime::default(),
+        }
+    }
+
+    /// Converts the `StaticRc` back into a `Box<T>`.
+    ///
+    /// This is only possible if we hold full ownership (`N == D`).
+    pub fn into_box(self) -> Box<T> {
+        let ptr = self.ptr;
+        mem::forget(self);
+        // SAFETY: The pointer came from `std::alloc` (or compatible Box), and we own it fully.
+        unsafe { Box::from_raw(ptr.as_ptr()) }
+    }
+
+    /// Converts a `BrandedBox<'id, T>` into a `StaticRc`.
+    ///
+    /// This reuses the allocation.
+    pub fn from_branded_box(b: BrandedBox<'id, T>) -> Self {
+        let ptr = b.into_raw();
+        unsafe {
+            Self {
+                ptr,
+                _brand: InvariantLifetime::default(),
+            }
+        }
+    }
+
+    /// Converts the `StaticRc` back into a `BrandedBox<'id, T>`.
+    pub fn into_branded_box(self) -> BrandedBox<'id, T> {
+        let ptr = self.ptr;
+        mem::forget(self);
+        unsafe { BrandedBox::from_raw(ptr) }
+    }
+}
+
+impl<'id, T, const N: usize, const D: usize> StaticRc<'id, MaybeUninit<T>, N, D> {
+    /// Creates a new `StaticRc` with uninitialized memory.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `N != D`.
+    pub fn new_uninit() -> Self {
+        assert_eq!(N, D, "New StaticRc must have N == D");
+
+        let layout = Layout::new::<T>();
+        // SAFETY: T is Sized, layout is valid.
+        let raw = if layout.size() == 0 {
+            NonNull::dangling().as_ptr()
+        } else {
+            unsafe { std::alloc::alloc(layout) as *mut MaybeUninit<T> }
+        };
+
+        if raw.is_null() {
+            handle_alloc_error(layout);
+        }
+
+        // SAFETY: raw is non-null.
+        unsafe {
+            Self {
+                ptr: NonNull::new_unchecked(raw),
+                _brand: InvariantLifetime::default(),
+            }
+        }
+    }
+
+    /// Assumes the memory is initialized and converts to `StaticRc<T>`.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the content has been initialized.
+    pub unsafe fn assume_init(self) -> StaticRc<'id, T, N, D> {
+        let ptr = self.ptr.cast::<T>();
+        mem::forget(self);
+        StaticRc {
+            ptr,
+            _brand: InvariantLifetime::default(),
+        }
     }
 }
 
@@ -185,3 +309,59 @@ impl<'id, T, const N: usize, const D: usize> Deref for StaticRc<'id, T, N, D> {
 
 unsafe impl<'id, T: Send + Sync, const N: usize, const D: usize> Send for StaticRc<'id, T, N, D> {}
 unsafe impl<'id, T: Send + Sync, const N: usize, const D: usize> Sync for StaticRc<'id, T, N, D> {}
+
+impl<'id, T> StaticRc<'id, T, 1, 1> {
+    /// Creates a new `StaticRc` within a scoped closure, ensuring a unique brand.
+    ///
+    /// This pattern guarantees that the `StaticRc` and its splits have a unique lifetime `'id`,
+    /// preventing accidental mixing with other `StaticRc` instances.
+    /// This allows for safe optimization when joining.
+    pub fn scope<F, R>(value: T, f: F) -> R
+    where
+        F: for<'new_id> FnOnce(StaticRc<'new_id, T, 1, 1>) -> R,
+    {
+        // We create a new allocation.
+        // We manually construct the StaticRc with a fresh brand via the closure bound.
+        // Since StaticRc::new takes 'id from the caller, we can't use it directly and satisfy higher-ranked bounds cleanly
+        // without some friction, so we inline the logic or use an unsafe cast.
+        // Inlining logic is safer to see.
+        let layout = Layout::new::<T>();
+        let raw = if layout.size() == 0 {
+            NonNull::dangling().as_ptr()
+        } else {
+            unsafe { std::alloc::alloc(layout) as *mut T }
+        };
+
+        if raw.is_null() {
+            handle_alloc_error(layout);
+        }
+
+        unsafe {
+            ptr::write(raw, value);
+            // Construct the branded RC.
+            // The closure expects StaticRc<'new_id, T, 1, 1>.
+            // InvariantLifetime::default() creates the necessary ZST.
+            f(StaticRc {
+                ptr: NonNull::new_unchecked(raw),
+                _brand: InvariantLifetime::default(),
+            })
+        }
+    }
+}
+
+/// Integration with `GhostCell` for ergonomic token-gated access.
+impl<'id, 'brand, T, const N: usize, const D: usize> StaticRc<'id, GhostCell<'brand, T>, N, D> {
+    /// Borrows the inner `GhostCell` immutably using the provided token.
+    ///
+    /// This is a convenience method that forwards to `GhostCell::borrow`.
+    pub fn borrow<'a>(&'a self, token: &'a GhostToken<'brand>) -> &'a T {
+        self.get().borrow(token)
+    }
+
+    /// Borrows the inner `GhostCell` mutably using the provided token.
+    ///
+    /// This is a convenience method that forwards to `GhostCell::borrow_mut`.
+    pub fn borrow_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>) -> &'a mut T {
+        self.get().borrow_mut(token)
+    }
+}
