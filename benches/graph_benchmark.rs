@@ -182,28 +182,9 @@ fn bench_graph_bfs(c: &mut Criterion) {
                     graph.add_edge(&mut token, &nodes[i / 2], &nodes[i], ());
                 }
 
-                let mut q = std::collections::VecDeque::new();
-                let mut visited = vec![false; size];
-
-                let start_node = &*nodes[0];
-                q.push_back(start_node);
-                visited[graph.node_id_from_cell(&token, start_node)] = true;
-
-                let mut count = 0;
-                while let Some(u) = q.pop_front() {
-                    count += 1;
-                    // Use neighbor_indices to avoid touching neighbor memory for visited check
-                    for (neighbor_id, _) in graph.neighbor_indices(&token, u) {
-                        if !visited[neighbor_id] {
-                            visited[neighbor_id] = true;
-                            // Retrieve node pointer only when pushing to queue (visiting)
-                            // Use unsafe get_node_unchecked
-                            let neighbor = unsafe { graph.get_node_unchecked(&token, neighbor_id) };
-                            q.push_back(neighbor);
-                        }
-                    }
-                }
-                black_box(count);
+                let start_id = graph.node_id_from_cell(&token, &*nodes[0]);
+                let visited = graph.bfs(&token, start_id);
+                black_box(visited.len());
             })
         });
     });
