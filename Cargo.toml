@@ -144,3 +144,7 @@ harness = false
 [[bench]]
 name = "fenwick_benchmark"
 harness = false
+
+[[bench]]
+name = "disjoint_set_benchmark"
+harness = false
