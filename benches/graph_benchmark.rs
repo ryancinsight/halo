@@ -304,11 +304,42 @@ fn bench_connected_components(c: &mut Criterion) {
     });
 }
 
+fn bench_clique_remove(c: &mut Criterion) {
+    let size = 100; // Increase size to see impact
+
+    c.bench_function("adj_list_graph_clique_remove", |b| {
+        b.iter(|| {
+            GhostToken::new(|mut token| {
+                let graph = halo::graph::AdjListGraph::new();
+                let mut nodes = Vec::with_capacity(size);
+                for i in 0..size {
+                    nodes.push(graph.add_node(&mut token, i));
+                }
+                // Create Clique
+                for i in 0..size {
+                    for j in 0..size {
+                        if i != j {
+                            graph.add_edge(&mut token, &nodes[i], &nodes[j], ());
+                        }
+                    }
+                }
+
+                // Remove half of the nodes
+                let to_remove = size / 2;
+                for _ in 0..to_remove {
+                    black_box(graph.remove_node(&mut token, nodes.pop().unwrap()));
+                }
+            })
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_graph_sparse_remove,
     bench_graph_bfs,
     bench_graph_snapshot,
-    bench_connected_components
+    bench_connected_components,
+    bench_clique_remove
 );
 criterion_main!(benches);
