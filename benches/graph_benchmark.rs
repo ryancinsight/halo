@@ -210,6 +210,29 @@ fn bench_graph_bfs(c: &mut Criterion) {
         });
     });
 
+    c.bench_function("adj_list_graph_bfs_iter", |b| {
+        b.iter(|| {
+            GhostToken::new(|mut token| {
+                let graph = halo::graph::AdjListGraph::new();
+                let mut nodes = Vec::with_capacity(size);
+                for i in 0..size {
+                    nodes.push(graph.add_node(&mut token, i));
+                }
+                // Tree-like
+                for i in 1..size {
+                    graph.add_edge(&mut token, &nodes[i / 2], &nodes[i], ());
+                }
+
+                let start_id = graph.node_id_from_cell(&token, &*nodes[0]);
+                let mut count = 0;
+                for _ in graph.bfs_iter(&token, start_id) {
+                    count += 1;
+                }
+                black_box(count);
+            })
+        });
+    });
+
     c.bench_function("petgraph_bfs", |b| {
         use petgraph::visit::Bfs;
         use petgraph::Graph;
@@ -258,10 +281,34 @@ fn bench_graph_snapshot(c: &mut Criterion) {
     });
 }
 
+fn bench_connected_components(c: &mut Criterion) {
+    let size = 1000;
+
+    c.bench_function("adj_list_graph_connected_components", |b| {
+        b.iter(|| {
+            GhostToken::new(|mut token| {
+                let graph = halo::graph::AdjListGraph::new_undirected();
+                let mut nodes = Vec::with_capacity(size);
+                for i in 0..size {
+                    nodes.push(graph.add_node(&mut token, i));
+                }
+                // Disconnected graph (pairs)
+                for i in 0..size / 2 {
+                    graph.add_undirected_edge(&mut token, &nodes[2 * i], &nodes[2 * i + 1], ());
+                }
+
+                let components = graph.connected_components(&token);
+                black_box(components);
+            })
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_graph_sparse_remove,
     bench_graph_bfs,
-    bench_graph_snapshot
+    bench_graph_snapshot,
+    bench_connected_components
 );
 criterion_main!(benches);
