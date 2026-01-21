@@ -17,6 +17,7 @@
 use crate::alloc::{BrandedPool, StaticRc};
 use crate::cell::GhostCell;
 use crate::collections::other::trusted_index::TrustedIndex;
+use super::algorithms::{Bfs, Dfs};
 use crate::GhostToken;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
@@ -570,6 +571,37 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
         handle.get()
     }
 
+    /// Returns a zero-copy BFS iterator starting from `start_node`.
+    pub fn bfs_iter<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+        start_node: usize,
+    ) -> Bfs<'a, 'brand, E> {
+        let view = self.as_fast_view(token);
+        Bfs::new(view, start_node)
+    }
+
+    /// Returns a zero-copy DFS iterator starting from `start_node`.
+    pub fn dfs_iter<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+        start_node: usize,
+    ) -> Dfs<'a, 'brand, E> {
+        let view = self.as_fast_view(token);
+        Dfs::new(view, start_node)
+    }
+
+    /// Computes the connected components of the graph.
+    ///
+    /// Returns a vector where the index is the node ID and the value is the component ID.
+    pub fn connected_components(
+        &self,
+        token: &GhostToken<'brand>,
+    ) -> Vec<usize> {
+        let view = self.as_fast_view(token);
+        super::algorithms::connected_components(view)
+    }
+
     /// Performs a Breadth-First Search (BFS) starting from `start_node`.
     ///
     /// This method is fully optimized for the SoA layout:
@@ -718,6 +750,12 @@ pub struct FastAdjListGraph<'a, 'brand, E> {
 }
 
 impl<'a, 'brand, E> FastAdjListGraph<'a, 'brand, E> {
+    /// Returns the number of nodes in the graph.
+    #[inline]
+    pub fn node_count(&self) -> usize {
+        self.topology.len()
+    }
+
     /// Iterates over outgoing neighbor IDs and edge weights given a node ID.
     #[inline]
     pub fn neighbor_indices(
@@ -1105,6 +1143,65 @@ mod tests {
             assert_eq!(preds[n1_id], Some(n2_id));
             assert_eq!(preds[n2_id], Some(n0_id));
             assert_eq!(preds[n3_id], Some(n1_id));
+
+            graph.remove_node(&mut token, n0);
+            graph.remove_node(&mut token, n1);
+            graph.remove_node(&mut token, n2);
+            graph.remove_node(&mut token, n3);
+        });
+    }
+
+    #[test]
+    fn test_bfs_iter() {
+        GhostToken::new(|mut token| {
+            let graph = AdjListGraph::new();
+            let n0 = graph.add_node(&mut token, 0);
+            let n1 = graph.add_node(&mut token, 1);
+            let n2 = graph.add_node(&mut token, 2);
+            let n3 = graph.add_node(&mut token, 3);
+
+            graph.add_edge(&mut token, &n0, &n1, ());
+            graph.add_edge(&mut token, &n0, &n2, ());
+            graph.add_edge(&mut token, &n1, &n3, ());
+
+            let n0_id = graph.node_id(&token, &n0);
+            let visited: Vec<_> = graph.bfs_iter(&token, n0_id).collect();
+
+            assert_eq!(visited.len(), 4);
+            assert!(visited.contains(&graph.node_id(&token, &n0)));
+            assert!(visited.contains(&graph.node_id(&token, &n1)));
+            assert!(visited.contains(&graph.node_id(&token, &n2)));
+            assert!(visited.contains(&graph.node_id(&token, &n3)));
+
+            graph.remove_node(&mut token, n0);
+            graph.remove_node(&mut token, n1);
+            graph.remove_node(&mut token, n2);
+            graph.remove_node(&mut token, n3);
+        });
+    }
+
+    #[test]
+    fn test_connected_components() {
+        GhostToken::new(|mut token| {
+            let graph = AdjListGraph::new_undirected();
+            let n0 = graph.add_node(&mut token, 0);
+            let n1 = graph.add_node(&mut token, 1);
+            let n2 = graph.add_node(&mut token, 2);
+            let n3 = graph.add_node(&mut token, 3);
+
+            // 0-1 and 2-3
+            graph.add_undirected_edge(&mut token, &n0, &n1, ());
+            graph.add_undirected_edge(&mut token, &n2, &n3, ());
+
+            let components = graph.connected_components(&token);
+            let n0_id = graph.node_id(&token, &n0);
+            let n1_id = graph.node_id(&token, &n1);
+            let n2_id = graph.node_id(&token, &n2);
+            let n3_id = graph.node_id(&token, &n3);
+
+            assert_eq!(components[n0_id], components[n1_id]);
+            assert_eq!(components[n2_id], components[n3_id]);
+            assert_ne!(components[n0_id], components[n2_id]);
 
             graph.remove_node(&mut token, n0);
             graph.remove_node(&mut token, n1);

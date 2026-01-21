@@ -5,6 +5,7 @@
 
 pub mod adjacency_graph;
 pub mod adj_list;
+pub mod algorithms;
 pub mod bipartite_graph;
 pub mod dag;
 pub mod pool_graph;
