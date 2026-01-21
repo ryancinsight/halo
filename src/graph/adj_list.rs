@@ -82,6 +82,8 @@ pub(crate) struct ForwardEdge<'brand, E> {
 pub(crate) struct BackwardEdge<'brand> {
     pub source_idx: TrustedIndex<'brand>,
     pub next_incoming: Option<TrustedIndex<'brand>>,
+    pub prev_incoming: Option<TrustedIndex<'brand>>,
+    pub prev_outgoing: Option<TrustedIndex<'brand>>,
 }
 
 /// A custom SoA store for graph edges.
@@ -197,6 +199,12 @@ impl<'brand, E> EdgeStore<'brand, E> {
                 source_idx: unsafe { TrustedIndex::new_unchecked(bwd.source_idx.get()) },
                 next_incoming: bwd
                     .next_incoming
+                    .map(|i| unsafe { TrustedIndex::new_unchecked(i.get()) }),
+                prev_incoming: bwd
+                    .prev_incoming
+                    .map(|i| unsafe { TrustedIndex::new_unchecked(i.get()) }),
+                prev_outgoing: bwd
+                    .prev_outgoing
                     .map(|i| unsafe { TrustedIndex::new_unchecked(i.get()) }),
             });
         }
@@ -397,8 +405,8 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
 
         // Read current heads
         let (next_outgoing, next_incoming) = {
-             let topo = self.node_topology.borrow(token);
-             (topo[source_idx].head_outgoing, topo[target_idx].head_incoming)
+            let topo = self.node_topology.borrow(token);
+            (topo[source_idx].head_outgoing, topo[target_idx].head_incoming)
         };
 
         // Allocate edge
@@ -410,10 +418,30 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
         let backward = BackwardEdge {
             source_idx: source_idx_trusted,
             next_incoming,
+            prev_incoming: None,
+            prev_outgoing: None,
         };
 
         let edge_idx = self.edges.borrow_mut(token).alloc(forward, backward);
         let edge_idx_trusted = unsafe { TrustedIndex::new_unchecked(edge_idx) };
+
+        // Link old heads to new edge
+        if let Some(old_head) = next_outgoing {
+            unsafe {
+                self.edges
+                    .borrow_mut(token)
+                    .get_backward_unchecked_mut(old_head.get())
+                    .prev_outgoing = Some(edge_idx_trusted);
+            }
+        }
+        if let Some(old_head) = next_incoming {
+            unsafe {
+                self.edges
+                    .borrow_mut(token)
+                    .get_backward_unchecked_mut(old_head.get())
+                    .prev_incoming = Some(edge_idx_trusted);
+            }
+        }
 
         // Update heads
         let topo = self.node_topology.borrow_mut(token);
@@ -428,31 +456,26 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
         node_idx: usize,
         edge_idx: usize,
     ) {
-        // 1. Read head.
-        let head = self.node_topology.borrow(token)[node_idx].head_incoming;
+        let (prev, next) = {
+            let edges = self.edges.borrow(token);
+            let bwd = edges.get_backward_unchecked(edge_idx);
+            (bwd.prev_incoming, bwd.next_incoming)
+        };
 
-        let mut curr = head;
-        let mut prev_idx: Option<usize> = None;
+        if let Some(prev_idx) = prev {
+            self.edges
+                .borrow_mut(token)
+                .get_backward_unchecked_mut(prev_idx.get())
+                .next_incoming = next;
+        } else {
+            self.node_topology.borrow_mut(token)[node_idx].head_incoming = next;
+        }
 
-        while let Some(curr_idx_trusted) = curr {
-            let curr_idx = curr_idx_trusted.get();
-            let next = {
-                let edges = self.edges.borrow(token);
-                edges.get_backward_unchecked(curr_idx).next_incoming
-            };
-
-            if curr_idx == edge_idx {
-                if let Some(p) = prev_idx {
-                    self.edges.borrow_mut(token).get_backward_unchecked_mut(p).next_incoming = next;
-                } else {
-                    // Update head in topology
-                    self.node_topology.borrow_mut(token)[node_idx].head_incoming = next;
-                }
-                return;
-            }
-
-            prev_idx = Some(curr_idx);
-            curr = next;
+        if let Some(next_idx) = next {
+            self.edges
+                .borrow_mut(token)
+                .get_backward_unchecked_mut(next_idx.get())
+                .prev_incoming = prev;
         }
     }
 
@@ -463,29 +486,29 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
         node_idx: usize,
         edge_idx: usize,
     ) {
-        let head = self.node_topology.borrow(token)[node_idx].head_outgoing;
+        let (prev, next) = {
+            let edges = self.edges.borrow(token);
+            // Access BackwardEdge to get prev_outgoing
+            let bwd = edges.get_backward_unchecked(edge_idx);
+            // Access ForwardEdge to get next_outgoing
+            let fwd = edges.get_forward_unchecked(edge_idx);
+            (bwd.prev_outgoing, fwd.next_outgoing)
+        };
 
-        let mut curr = head;
-        let mut prev_idx: Option<usize> = None;
+        if let Some(prev_idx) = prev {
+            self.edges
+                .borrow_mut(token)
+                .get_forward_unchecked_mut(prev_idx.get())
+                .next_outgoing = next;
+        } else {
+            self.node_topology.borrow_mut(token)[node_idx].head_outgoing = next;
+        }
 
-        while let Some(curr_idx_trusted) = curr {
-            let curr_idx = curr_idx_trusted.get();
-            let next = {
-                let edges = self.edges.borrow(token);
-                edges.get_forward_unchecked(curr_idx).next_outgoing
-            };
-
-            if curr_idx == edge_idx {
-                if let Some(p) = prev_idx {
-                    self.edges.borrow_mut(token).get_forward_unchecked_mut(p).next_outgoing = next;
-                } else {
-                    self.node_topology.borrow_mut(token)[node_idx].head_outgoing = next;
-                }
-                return;
-            }
-
-            prev_idx = Some(curr_idx);
-            curr = next;
+        if let Some(next_idx) = next {
+            self.edges
+                .borrow_mut(token)
+                .get_backward_unchecked_mut(next_idx.get())
+                .prev_outgoing = prev;
         }
     }
 
