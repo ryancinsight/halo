@@ -164,3 +164,7 @@ harness = false
 [[bench]]
 name = "graph_benchmark"
 harness = false
+
+[[bench]]
+name = "csr_benchmark"
+harness = false
