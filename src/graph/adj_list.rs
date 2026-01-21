@@ -17,7 +17,7 @@
 use crate::alloc::{BrandedPool, StaticRc};
 use crate::cell::GhostCell;
 use crate::collections::other::trusted_index::TrustedIndex;
-use super::algorithms::{Bfs, Dfs};
+use super::traversal::{Bfs, Dfs};
 use crate::GhostToken;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
@@ -599,7 +599,7 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
         token: &GhostToken<'brand>,
     ) -> Vec<usize> {
         let view = self.as_fast_view(token);
-        super::algorithms::connected_components(view)
+        super::traversal::connected_components(view)
     }
 
     /// Performs a Breadth-First Search (BFS) starting from `start_node`.

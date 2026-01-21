@@ -5,7 +5,7 @@
 //! efficiency and direct integration with `GhostToken` scopes.
 
 use crate::collections::{ActiveDisjointSet, BrandedDisjointSet};
-use crate::graph::basic::adj_list::FastAdjListGraph;
+use crate::graph::adj_list::FastAdjListGraph;
 use crate::GhostToken;
 use std::collections::VecDeque;
 
