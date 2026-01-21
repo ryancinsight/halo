@@ -529,13 +529,13 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
         &'a self,
         token: &'a GhostToken<'brand>,
         node: &'a GhostCell<'brand, NodeData<'brand, V>>,
-    ) -> NeighborIndices<'a, 'brand, V, E, Ty> {
+    ) -> NeighborIndices<'a, 'brand, E> {
         let pool_idx = node.borrow(token).pool_idx;
         let curr_edge = self.node_topology.borrow(token)[pool_idx].head_outgoing;
+        let edges = self.edges.borrow(token);
         NeighborIndices {
-            graph: self,
+            edges,
             curr_edge,
-            _token: token,
         }
     }
 
@@ -547,15 +547,15 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
         &'a self,
         token: &'a GhostToken<'brand>,
         node_id: usize,
-    ) -> NeighborIndices<'a, 'brand, V, E, Ty> {
+    ) -> NeighborIndices<'a, 'brand, E> {
         // Direct vector access, no GhostCell deref of NodeData!
         // Safety: Caller must ensure node_id is valid (allocated).
         // If out of bounds, Vec index panics (safe).
         let curr_edge = self.node_topology.borrow(token)[node_id].head_outgoing;
+        let edges = self.edges.borrow(token);
         NeighborIndices {
-            graph: self,
+            edges,
             curr_edge,
-            _token: token,
         }
     }
 
@@ -573,7 +573,7 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
     /// Performs a Breadth-First Search (BFS) starting from `start_node`.
     ///
     /// This method is fully optimized for the SoA layout:
-    /// - Uses `Vec<u64>` (bitset) for dense visited tracking (cache friendly).
+    /// - Uses `Vec<bool>` for dense visited tracking (cache friendly).
     /// - Uses `neighbor_indices_by_id` to traverse topology without heap accesses.
     /// - Returns a vector of visited node IDs in traversal order.
     pub fn bfs(
@@ -582,13 +582,12 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
         start_node: usize,
     ) -> Vec<usize> {
         let topology = self.node_topology.borrow(token);
-        let len = topology.len();
-        let mut visited = vec![0u64; (len + 63) / 64];
+        let mut visited = vec![false; topology.len()];
         let mut queue = std::collections::VecDeque::new();
         let mut result = Vec::new();
 
-        if start_node < len {
-            visited[start_node / 64] |= 1 << (start_node % 64);
+        if start_node < visited.len() {
+            visited[start_node] = true;
             queue.push_back(start_node);
         }
 
@@ -596,13 +595,9 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
             result.push(u);
 
             for (v, _) in self.neighbor_indices_by_id(token, u) {
-                if v < len {
-                    let word_idx = v / 64;
-                    let mask = 1 << (v % 64);
-                    if (visited[word_idx] & mask) == 0 {
-                        visited[word_idx] |= mask;
-                        queue.push_back(v);
-                    }
+                if v < visited.len() && !visited[v] {
+                    visited[v] = true;
+                    queue.push_back(v);
                 }
             }
         }
@@ -619,13 +614,12 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
         start_node: usize,
     ) -> Vec<usize> {
         let topology = self.node_topology.borrow(token);
-        let len = topology.len();
-        let mut visited = vec![0u64; (len + 63) / 64];
+        let mut visited = vec![false; topology.len()];
         let mut stack = Vec::new();
         let mut result = Vec::new();
 
-        if start_node < len {
-            visited[start_node / 64] |= 1 << (start_node % 64);
+        if start_node < visited.len() {
+            visited[start_node] = true;
             stack.push(start_node);
         }
 
@@ -633,13 +627,9 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
             result.push(u);
 
             for (v, _) in self.neighbor_indices_by_id(token, u) {
-                if v < len {
-                    let word_idx = v / 64;
-                    let mask = 1 << (v % 64);
-                    if (visited[word_idx] & mask) == 0 {
-                        visited[word_idx] |= mask;
-                        stack.push(v);
-                    }
+                if v < visited.len() && !visited[v] {
+                    visited[v] = true;
+                    stack.push(v);
                 }
             }
         }
@@ -701,6 +691,93 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
 
         (dist, pred)
     }
+
+    /// Creates a zero-overhead "fast view" of the graph.
+    ///
+    /// This view holds references to the internal graph structure, avoiding
+    /// the need to repeatedly borrow the `GhostCell`s during traversal.
+    /// This is ideal for tight loops or algorithms that access the graph structure frequently.
+    pub fn as_fast_view<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+    ) -> FastAdjListGraph<'a, 'brand, E> {
+        FastAdjListGraph {
+            topology: self.node_topology.borrow(token),
+            edges: self.edges.borrow(token),
+        }
+    }
+}
+
+/// A zero-overhead view of the `AdjListGraph`.
+///
+/// Holds direct references to the internal storage arrays.
+#[derive(Copy, Clone)]
+pub struct FastAdjListGraph<'a, 'brand, E> {
+    topology: &'a Vec<NodeTopology<'brand>>,
+    edges: &'a EdgeStore<'brand, E>,
+}
+
+impl<'a, 'brand, E> FastAdjListGraph<'a, 'brand, E> {
+    /// Iterates over outgoing neighbor IDs and edge weights given a node ID.
+    #[inline]
+    pub fn neighbor_indices(
+        &self,
+        node_id: usize,
+    ) -> NeighborIndices<'a, 'brand, E> {
+        let curr_edge = self.topology.get(node_id).and_then(|t| t.head_outgoing);
+        NeighborIndices {
+            edges: self.edges,
+            curr_edge,
+        }
+    }
+
+    /// Optimized BFS on the fast view.
+    pub fn bfs(&self, start_node: usize) -> Vec<usize> {
+        let len = self.topology.len();
+        let mut visited = vec![false; len];
+        let mut queue = std::collections::VecDeque::new();
+        let mut result = Vec::new();
+
+        if start_node < len {
+            visited[start_node] = true;
+            queue.push_back(start_node);
+        }
+
+        while let Some(u) = queue.pop_front() {
+            result.push(u);
+            for (v, _) in self.neighbor_indices(u) {
+                if v < len && !visited[v] {
+                    visited[v] = true;
+                    queue.push_back(v);
+                }
+            }
+        }
+        result
+    }
+
+    /// Optimized DFS on the fast view.
+    pub fn dfs(&self, start_node: usize) -> Vec<usize> {
+        let len = self.topology.len();
+        let mut visited = vec![false; len];
+        let mut stack = Vec::new();
+        let mut result = Vec::new();
+
+        if start_node < len {
+            visited[start_node] = true;
+            stack.push(start_node);
+        }
+
+        while let Some(u) = stack.pop() {
+            result.push(u);
+            for (v, _) in self.neighbor_indices(u) {
+                if v < len && !visited[v] {
+                    visited[v] = true;
+                    stack.push(v);
+                }
+            }
+        }
+        result
+    }
 }
 
 impl<'brand, V, E, Ty> Default for AdjListGraph<'brand, V, E, Ty> {
@@ -739,22 +816,21 @@ impl<'a, 'brand, V, E, Ty> Iterator for Neighbors<'a, 'brand, V, E, Ty> {
     }
 }
 
-pub struct NeighborIndices<'a, 'brand, V, E, Ty> {
-    graph: &'a AdjListGraph<'brand, V, E, Ty>,
+pub struct NeighborIndices<'a, 'brand, E> {
+    edges: &'a EdgeStore<'brand, E>,
     curr_edge: Option<TrustedIndex<'brand>>,
-    _token: &'a GhostToken<'brand>,
 }
 
-impl<'a, 'brand, V, E, Ty> Iterator for NeighborIndices<'a, 'brand, V, E, Ty> {
+impl<'a, 'brand, E> Iterator for NeighborIndices<'a, 'brand, E> {
     type Item = (usize, &'a E);
 
     fn next(&mut self) -> Option<Self::Item> {
         let trusted_idx = self.curr_edge?;
         let idx = trusted_idx.get();
 
-        let edges = self.graph.edges.borrow(self._token);
         // SAFETY: `trusted_idx` is a `TrustedIndex` valid for this brand.
-        let forward = unsafe { edges.get_forward_unchecked(idx) };
+        // We hold a valid reference to EdgeStore, so no token borrow needed.
+        let forward = unsafe { self.edges.get_forward_unchecked(idx) };
 
         self.curr_edge = forward.next_outgoing;
 

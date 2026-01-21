@@ -24,6 +24,27 @@ fn bench_graph_sparse_remove(c: &mut Criterion) {
         });
     });
 
+    c.bench_function("adj_list_graph_fast_bfs", |b| {
+        b.iter(|| {
+            GhostToken::new(|mut token| {
+                let graph = halo::graph::AdjListGraph::new();
+                let mut nodes = Vec::with_capacity(size);
+                for i in 0..size {
+                    nodes.push(graph.add_node(&mut token, i));
+                }
+                // Tree-like
+                for i in 1..size {
+                    graph.add_edge(&mut token, &nodes[i / 2], &nodes[i], ());
+                }
+
+                let start_id = graph.node_id_from_cell(&token, &*nodes[0]);
+                let view = graph.as_fast_view(&token);
+                let visited = view.bfs(start_id);
+                black_box(visited.len());
+            })
+        });
+    });
+
     c.bench_function("adj_graph_sparse_remove", |b| {
         b.iter(|| {
             GhostToken::new(|mut token| {
