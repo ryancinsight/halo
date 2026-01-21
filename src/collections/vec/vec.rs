@@ -119,6 +119,30 @@ impl<'brand, T> BrandedVec<'brand, T> {
         self.inner.clear();
     }
 
+    /// Shortens the vector, keeping the first `len` elements and dropping
+    /// the rest.
+    ///
+    /// If `len` is greater than the vector's current length, this has no
+    /// effect.
+    pub fn truncate(&mut self, len: usize) {
+        self.inner.truncate(len);
+    }
+
+    /// Resizes the `BrandedVec` in-place so that `len` is equal to `new_len`.
+    ///
+    /// If `new_len` is greater than `len`, the `BrandedVec` is extended by the
+    /// difference, with each additional slot filled with the result of
+    /// calling the closure `f`. The closure is called once for each
+    /// element created.
+    ///
+    /// If `new_len` is less than `len`, the `BrandedVec` is simply truncated.
+    pub fn resize_with<F>(&mut self, new_len: usize, mut f: F)
+    where
+        F: FnMut() -> T,
+    {
+        self.inner.resize_with(new_len, || GhostCell::new(f()));
+    }
+
     /// Retains only the elements specified by the predicate.
     pub fn retain<F>(&mut self, token: &mut GhostToken<'brand>, mut f: F)
     where
