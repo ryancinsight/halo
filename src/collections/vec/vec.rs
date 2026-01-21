@@ -16,6 +16,7 @@
 
 use crate::{GhostCell, GhostToken};
 use core::slice;
+use core::mem::MaybeUninit;
 
 /// Compile-time assertion types for const generics bounds checking
 pub struct Assert<const COND: bool>;
@@ -43,7 +44,7 @@ pub struct BrandedVec<'brand, T> {
 #[repr(C, align(64))] // Cache line alignment for SIMD operations
 pub struct BrandedArray<'brand, T, const CAPACITY: usize> {
     /// The actual storage array - aligned for optimal access
-    inner: [GhostCell<'brand, T>; CAPACITY],
+    inner: [MaybeUninit<GhostCell<'brand, T>>; CAPACITY],
     /// Current length (tracked at runtime for safety)
     len: usize,
 }
@@ -475,16 +476,11 @@ impl<'brand, T> Extend<T> for BrandedVec<'brand, T> {
 impl<'brand, T, const CAPACITY: usize> BrandedArray<'brand, T, CAPACITY> {
     /// Creates a new empty array.
     ///
-    /// All elements are initialized with their `Default` value.
-    ///
-    /// # Panics
-    /// Panics if `T` does not implement `Default`.
-    pub fn new() -> Self
-    where
-        T: Default,
-    {
+    /// Elements are lazily initialized.
+    pub fn new() -> Self {
         Self {
-            inner: core::array::from_fn(|_| GhostCell::new(T::default())),
+            // Safety: Array of MaybeUninit is always initialized
+            inner: unsafe { MaybeUninit::uninit().assume_init() },
             len: 0,
         }
     }
@@ -496,7 +492,6 @@ impl<'brand, T, const CAPACITY: usize> BrandedArray<'brand, T, CAPACITY> {
     pub fn from_iter<I>(iter: I) -> Self
     where
         I: IntoIterator<Item = T>,
-        T: Default,
     {
         let mut array = Self::new();
         iter.into_iter().for_each(|item| array.push(item));
@@ -511,7 +506,8 @@ impl<'brand, T, const CAPACITY: usize> BrandedArray<'brand, T, CAPACITY> {
         token: &'a GhostToken<'brand>,
     ) -> Option<&'a T> {
         if IDX < self.len && IDX < CAPACITY {
-            Some(self.inner[IDX].borrow(token))
+            // Safety: We verified IDX < len, so the element is initialized
+            Some(unsafe { self.inner[IDX].assume_init_ref() }.borrow(token))
         } else {
             None
         }
@@ -526,7 +522,7 @@ impl<'brand, T, const CAPACITY: usize> BrandedArray<'brand, T, CAPACITY> {
         self.inner
             .iter()
             .take(self.len)
-            .map(|cell| cell.borrow(token))
+            .map(|cell| unsafe { cell.assume_init_ref() }.borrow(token))
     }
 
     /// Returns the current number of elements in the array.
@@ -559,46 +555,36 @@ impl<'brand, T, const CAPACITY: usize> BrandedArray<'brand, T, CAPACITY> {
     /// Panics if the array is already at capacity.
     pub fn push(&mut self, value: T) {
         assert!(self.len < CAPACITY, "BrandedArray is at capacity");
-        self.inner[self.len] = GhostCell::new(value);
+        self.inner[self.len].write(GhostCell::new(value));
         self.len += 1;
     }
 
     /// Pops the last element from the array.
-    ///
-    /// This method requires `T: Default` because we need to leave a valid value in the array.
-    pub fn pop(&mut self) -> Option<T>
-    where
-        T: Default,
-    {
+    pub fn pop(&mut self) -> Option<T> {
         if self.len == 0 {
             None
         } else {
             self.len -= 1;
-            // Use replace to avoid moving out of array
-            let replacement = GhostCell::new(T::default());
-            Some(core::mem::replace(&mut self.inner[self.len], replacement).into_inner())
+            // Safety: We just checked len > 0, so inner[len] was initialized.
+            // We are reducing len, so this element is now effectively removed.
+            unsafe { Some(self.inner[self.len].assume_init_read().into_inner()) }
         }
     }
 
     /// Clears the array, dropping all elements.
-    ///
-    /// This method requires `T: Default` because we need to leave valid values in the array.
-    pub fn clear(&mut self)
-    where
-        T: Default,
-    {
-        // Drop elements in reverse order for safety
+    pub fn clear(&mut self) {
         while self.len > 0 {
             self.len -= 1;
-            // GhostCell will handle dropping the inner value
-            let _ = core::mem::replace(&mut self.inner[self.len], GhostCell::new(T::default()));
+            // Safety: We are dropping elements that were initialized.
+            unsafe { self.inner[self.len].assume_init_drop() };
         }
     }
 
     /// Returns a token-gated shared reference to element `idx`, if in bounds.
     pub fn get<'a>(&'a self, token: &'a GhostToken<'brand>, idx: usize) -> Option<&'a T> {
         if idx < self.len {
-            Some(self.inner[idx].borrow(token))
+            // Safety: idx < len ensures initialization
+            Some(unsafe { self.inner[idx].assume_init_ref() }.borrow(token))
         } else {
             None
         }
@@ -611,7 +597,8 @@ impl<'brand, T, const CAPACITY: usize> BrandedArray<'brand, T, CAPACITY> {
         idx: usize,
     ) -> Option<&'a mut T> {
         if idx < self.len {
-            Some(self.inner[idx].borrow_mut(token))
+            // Safety: idx < len ensures initialization
+            Some(unsafe { self.inner[idx].assume_init_ref() }.borrow_mut(token))
         } else {
             None
         }
@@ -629,7 +616,7 @@ impl<'brand, T, const CAPACITY: usize> BrandedArray<'brand, T, CAPACITY> {
             idx,
             self.len
         );
-        self.inner[idx].borrow(token)
+        unsafe { self.inner[idx].assume_init_ref() }.borrow(token)
     }
 
     /// Returns a token-gated exclusive reference to element `idx`.
@@ -644,13 +631,14 @@ impl<'brand, T, const CAPACITY: usize> BrandedArray<'brand, T, CAPACITY> {
             idx,
             self.len
         );
-        self.inner[idx].borrow_mut(token)
+        unsafe { self.inner[idx].assume_init_ref() }.borrow_mut(token)
     }
 
     /// Returns a slice of the underlying elements.
     #[inline(always)]
     pub fn as_slice<'a>(&'a self, _token: &'a GhostToken<'brand>) -> &'a [T] {
         unsafe {
+            // Cast *const MaybeUninit<GhostCell<T>> to *const T is valid because layouts match
             let ptr = self.inner.as_ptr() as *const T;
             std::slice::from_raw_parts(ptr, self.len)
         }
@@ -660,6 +648,8 @@ impl<'brand, T, const CAPACITY: usize> BrandedArray<'brand, T, CAPACITY> {
     #[inline(always)]
     pub fn as_mut_slice<'a>(&'a self, _token: &'a mut GhostToken<'brand>) -> &'a mut [T] {
         unsafe {
+            // Cast *const MaybeUninit<GhostCell<T>> to *mut T is valid because layouts match
+            // We have exclusive access to the token, which grants exclusive access to the cells
             let ptr = self.inner.as_ptr() as *mut T;
             std::slice::from_raw_parts_mut(ptr, self.len)
         }
@@ -670,7 +660,9 @@ impl<'brand, T, const CAPACITY: usize> BrandedArray<'brand, T, CAPACITY> {
         &'a self,
         token: &'a GhostToken<'brand>,
     ) -> impl Iterator<Item = &'a T> + 'a + use<'a, 'brand, T, CAPACITY> {
-        self.inner[..self.len].iter().map(|cell| cell.borrow(token))
+        self.inner[..self.len]
+            .iter()
+            .map(|cell| unsafe { cell.assume_init_ref() }.borrow(token))
     }
 
     /// Applies `f` to each element by exclusive reference.
@@ -679,14 +671,14 @@ impl<'brand, T, const CAPACITY: usize> BrandedArray<'brand, T, CAPACITY> {
     /// each `&mut T` is scoped to one callback invocation, preserving token linearity.
     pub fn for_each_mut(&self, token: &mut GhostToken<'brand>, mut f: impl FnMut(&mut T)) {
         self.inner[..self.len].iter().for_each(|cell| {
-            f(cell.borrow_mut(token));
+            f(unsafe { cell.assume_init_ref() }.borrow_mut(token));
         });
     }
 
     /// Returns the underlying array as a slice of cells.
     ///
     /// This is useful for advanced operations that need direct cell access.
-    pub fn as_cells(&self) -> &[GhostCell<'brand, T>; CAPACITY] {
+    pub fn as_cells(&self) -> &[MaybeUninit<GhostCell<'brand, T>>; CAPACITY] {
         &self.inner
     }
 
@@ -694,12 +686,18 @@ impl<'brand, T, const CAPACITY: usize> BrandedArray<'brand, T, CAPACITY> {
     ///
     /// # Safety
     /// This bypasses the token system. Use with extreme caution.
-    pub fn as_cells_mut(&mut self) -> &mut [GhostCell<'brand, T>; CAPACITY] {
+    pub fn as_cells_mut(&mut self) -> &mut [MaybeUninit<GhostCell<'brand, T>>; CAPACITY] {
         &mut self.inner
     }
 }
 
-impl<'brand, T: Default, const CAPACITY: usize> Default for BrandedArray<'brand, T, CAPACITY> {
+impl<'brand, T, const CAPACITY: usize> Drop for BrandedArray<'brand, T, CAPACITY> {
+    fn drop(&mut self) {
+        self.clear();
+    }
+}
+
+impl<'brand, T, const CAPACITY: usize> Default for BrandedArray<'brand, T, CAPACITY> {
     fn default() -> Self {
         Self::new()
     }
