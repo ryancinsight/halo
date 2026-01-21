@@ -122,10 +122,12 @@ impl<'brand> BrandedBitSet<'brand> {
 
     /// Unions with another bit set: `self |= other`.
     pub fn union_with(&mut self, token: &mut GhostToken<'brand>, other: &BrandedBitSet<'brand>) {
+        let self_len = self.words.len();
         let other_len = other.words.len();
+
         // Ensure self is large enough
-        while self.words.len() < other_len {
-            self.words.push(0);
+        if self_len < other_len {
+            self.words.resize_with(other_len, || 0);
         }
 
         // Use direct slice access for performance
@@ -211,9 +213,11 @@ impl<'brand> BrandedBitSet<'brand> {
 
     /// Symmetric difference with another bit set: `self ^= other`.
     pub fn symmetric_difference_with(&mut self, token: &mut GhostToken<'brand>, other: &BrandedBitSet<'brand>) {
+        let self_len = self.words.len();
         let other_len = other.words.len();
-        while self.words.len() < other_len {
-            self.words.push(0);
+
+        if self_len < other_len {
+            self.words.resize_with(other_len, || 0);
         }
 
         let self_slice = self.words.as_mut_slice_exclusive();
