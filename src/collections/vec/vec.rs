@@ -958,4 +958,21 @@ mod tests {
             assert_eq!(arr.as_slice(&token), &[30, 20]);
         });
     }
+
+    #[test]
+    fn branded_array_pop_no_default() {
+        struct NoDefault {
+            val: i32,
+        }
+        GhostToken::new(|mut token| {
+            let mut arr: BrandedArray<'_, NoDefault, 4> = BrandedArray::new();
+            arr.push(NoDefault { val: 1 });
+
+            // This should compile and run without needing T: Default
+            let popped = arr.pop();
+            assert!(popped.is_some());
+            assert_eq!(popped.unwrap().val, 1);
+            assert_eq!(arr.len(), 0);
+        });
+    }
 }
