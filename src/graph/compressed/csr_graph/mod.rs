@@ -40,6 +40,9 @@ pub struct GhostCsrGraph<'brand, const EDGE_CHUNK: usize> {
     offsets: Vec<usize>,
     edges: ChunkedVec<usize, EDGE_CHUNK>,
     visited: VisitedSet<'brand>,
+    // Incoming edges in CSR format (CSC)
+    in_offsets: Vec<usize>,
+    in_edges: ChunkedVec<usize, EDGE_CHUNK>,
 }
 
 impl<'brand, const EDGE_CHUNK: usize> GhostCsrGraph<'brand, EDGE_CHUNK> {
@@ -63,11 +66,43 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCsrGraph<'brand, EDGE_CHUNK> {
         let mut edges: ChunkedVec<usize, EDGE_CHUNK> = ChunkedVec::new();
         edges.reserve(total_edges);
 
+        // Pre-calculate in-degrees for CSC construction
+        let mut in_degrees = vec![0; n];
+
         for (u, nbrs) in adjacency.iter().enumerate() {
             for &v in nbrs {
                 assert!(v < n, "edge {u}->{v} is out of bounds for n={n}");
                 edges.push(v);
+                in_degrees[v] += 1;
             }
+        }
+
+        // Build in_offsets
+        let mut in_offsets = Vec::with_capacity(n + 1);
+        in_offsets.push(0);
+        let mut running_sum = 0;
+        for &d in &in_degrees {
+            running_sum += d;
+            in_offsets.push(running_sum);
+        }
+
+        // Build in_edges (CSC)
+        // buckets[v] will track the next position to write for node v
+        let mut buckets = in_offsets[0..n].to_vec();
+        let mut in_edges_vec = vec![0; total_edges];
+
+        for (u, nbrs) in adjacency.iter().enumerate() {
+            for &v in nbrs {
+                let pos = buckets[v];
+                buckets[v] += 1;
+                in_edges_vec[pos] = u;
+            }
+        }
+
+        let mut in_edges: ChunkedVec<usize, EDGE_CHUNK> = ChunkedVec::new();
+        in_edges.reserve(total_edges);
+        for u in in_edges_vec {
+            in_edges.push(u);
         }
 
         let visited = VisitedSet::new(n);
@@ -76,6 +111,8 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCsrGraph<'brand, EDGE_CHUNK> {
             offsets,
             edges,
             visited,
+            in_offsets,
+            in_edges,
         }
     }
 
@@ -97,16 +134,55 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCsrGraph<'brand, EDGE_CHUNK> {
             assert!(v < n, "edge to {v} out of bounds for n={n}");
         }
 
+        // Build CSC from CSR
+        let mut in_degrees = vec![0; n];
+        for &v in &edges {
+            in_degrees[v] += 1;
+        }
+
+        let mut in_offsets = Vec::with_capacity(n + 1);
+        in_offsets.push(0);
+        let mut running_sum = 0;
+        for &d in &in_degrees {
+            running_sum += d;
+            in_offsets.push(running_sum);
+        }
+
+        let mut buckets = in_offsets[0..n].to_vec();
+        let mut in_edges_vec = vec![0; m];
+
+        // Iterate again to fill in_edges
+        for u in 0..n {
+            let start = offsets[u];
+            let end = offsets[u + 1];
+            for i in start..end {
+                // edges is Vec<usize> here
+                let v = edges[i];
+                let pos = buckets[v];
+                buckets[v] += 1;
+                in_edges_vec[pos] = u;
+            }
+        }
+
         let mut e: ChunkedVec<usize, EDGE_CHUNK> = ChunkedVec::new();
         e.reserve(edges.len());
         for v in edges {
             e.push(v);
         }
+
+        let mut ie: ChunkedVec<usize, EDGE_CHUNK> = ChunkedVec::new();
+        ie.reserve(in_edges_vec.len());
+        for u in in_edges_vec {
+            ie.push(u);
+        }
+
         let visited = VisitedSet::new(n);
         Self {
             offsets,
             edges: e,
             visited,
+            in_offsets,
+            in_edges: ie,
         }
     }
 
@@ -164,14 +240,15 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCsrGraph<'brand, EDGE_CHUNK> {
 
     /// Returns the in-neighbors of `node` (all `u` such that `u -> node`).
     ///
-    /// This is \(O(m)\) (scan of all edges) for CSR.
+    /// This is \(O(k)\) where \(k\) is the in-degree (using internal CSC structure).
     pub fn in_neighbors(&self, node: usize) -> Vec<usize> {
         assert!(node < self.node_count(), "node {node} out of bounds");
-        let mut preds = Vec::new();
-        for u in 0..self.node_count() {
-            if self.neighbors(u).any(|v| v == node) {
-                preds.push(u);
-            }
+        let start = self.in_offsets[node];
+        let end = self.in_offsets[node + 1];
+        let mut preds = Vec::with_capacity(end - start);
+        for i in start..end {
+             // SAFETY: CSC construction ensures `i < edge_count()`.
+            preds.push(unsafe { *self.in_edges.get_unchecked(i) });
         }
         preds
     }
@@ -186,7 +263,10 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCsrGraph<'brand, EDGE_CHUNK> {
 
     /// Returns the in-degree of a node.
     pub fn in_degree(&self, node: usize) -> usize {
-        self.in_neighbors(node).len()
+        assert!(node < self.node_count(), "node index out of bounds");
+        let start = self.in_offsets[node];
+        let end = self.in_offsets[node + 1];
+        end - start
     }
 
     /// Checks if an edge exists from `from` to `to`.
