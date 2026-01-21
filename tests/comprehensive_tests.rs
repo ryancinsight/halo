@@ -136,26 +136,23 @@ fn test_replace_and_swap() {
 }
 
 #[test]
-fn test_update_and_map() {
-    // Test implementation would go here
-}
-
-// Property-based tests disabled for now due to GhostToken return type incompatibility
-// TODO: Re-enable when proptest integration is properly structured
-
-#[test]
 fn test_update_and_map_operations() {
-    // Test functional update and map operations
-    GhostToken::new(|mut token| {
-        let cell = GhostCell::new(42);
+    run_proptest((any::<i32>(), any::<i32>()), |(val, factor)| {
+        GhostToken::new(|mut token| {
+            let cell = GhostCell::new(val);
 
-        // Test update
-        cell.update(&mut token, |x| *x *= 2);
-        assert_eq!(*cell.borrow(&token), 84);
+            // Test update
+            cell.update(&mut token, |x| *x = x.wrapping_mul(factor));
+            prop_assert_eq!(*cell.borrow(&token), val.wrapping_mul(factor));
 
-        // Test map (consumes the cell)
-        let new_cell = cell.map(&token, |x| x.to_string());
-        assert_eq!(*new_cell.borrow(&token), "84");
+            // Test map
+            let new_cell = cell.map(&token, |x| x.to_string());
+            prop_assert_eq!(
+                new_cell.borrow(&token),
+                &val.wrapping_mul(factor).to_string()
+            );
+            Ok(())
+        })
     });
 }
 
