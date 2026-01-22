@@ -76,15 +76,17 @@ where
 {
     /// Helper to compute two hashes.
     fn get_hashes(&self, item: &T) -> (u64, u64) {
-        let mut hasher1 = self.hasher.build_hasher();
-        item.hash(&mut hasher1);
-        let h1 = hasher1.finish();
+        let mut hasher = self.hasher.build_hasher();
+        item.hash(&mut hasher);
+        let h1 = hasher.finish();
 
-        let mut hasher2 = self.hasher.build_hasher();
-        // Perturb the hash for h2
-        hasher2.write_u64(h1);
-        item.hash(&mut hasher2);
-        let h2 = hasher2.finish();
+        // Use a mixing strategy to generate a second hash h2 from h1.
+        // This avoids traversing the item a second time.
+        // The mixing constants are from MurmurHash3's 64-bit finalizer.
+        let mut h2 = h1;
+        h2 = (h2 ^ (h2 >> 33)).wrapping_mul(0xff51_afd7_ed55_8ccd);
+        h2 = (h2 ^ (h2 >> 33)).wrapping_mul(0xc4ce_b9fe_1a85_ec53);
+        h2 = h2 ^ (h2 >> 33);
 
         (h1, h2)
     }

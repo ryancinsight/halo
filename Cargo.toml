@@ -172,3 +172,7 @@ harness = false
 [[bench]]
 name = "interner_benchmark"
 harness = false
+
+[[bench]]
+name = "bloom_benchmark"
+harness = false
