@@ -71,6 +71,35 @@ fn bench_segment_tree(c: &mut Criterion) {
         });
     });
 
+    group.bench_function("query_expensive", |b| {
+        GhostToken::new(|mut token| {
+            let n_exp = 1000;
+            // Setup expensive tree
+            let data: Vec<_> = (0..n_exp).map(|i| vec![(i % 255) as u8; 1024]).collect();
+            let default_val = vec![0u8; 1024];
+            let mut st = BrandedSegmentTree::new(
+                n_exp,
+                |a, b| {
+                    let mut res = Vec::with_capacity(a.len());
+                    res.extend_from_slice(a);
+                    if !b.is_empty() {
+                         for i in 0..res.len() {
+                             res[i] = res[i].wrapping_add(b[i]);
+                         }
+                    }
+                    res
+                },
+                default_val
+            );
+            st.build(&mut token, &data);
+
+            b.iter(|| {
+                // Query range [n/4, 3n/4]
+                st.query(&token, black_box(n_exp / 4), black_box(3 * n_exp / 4));
+            });
+        });
+    });
+
     // Comparison with naive Vec (sum query)
     group.bench_function("naive_vec_query", |b| {
         let data: Vec<usize> = (0..n).collect();
