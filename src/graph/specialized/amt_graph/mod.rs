@@ -155,31 +155,27 @@ impl<'brand, const EDGE_CHUNK: usize> GhostAmtGraph<'brand, EDGE_CHUNK> {
     }
 
     fn upgrade_to_dense(&mut self, node: usize) {
-        // Swap out the current node with a placeholder to take ownership of neighbors
-        // avoiding an O(N) clone during the upgrade.
-        let old_node = core::mem::replace(
-            &mut self.nodes[node],
-            representation::NodeRepresentation::Sparse {
-                neighbors: Vec::new(),
-            },
-        );
-
-        let current_neighbors = match old_node {
-            representation::NodeRepresentation::Sorted { neighbors } => neighbors,
-            representation::NodeRepresentation::Sparse { neighbors } => neighbors,
-            // If it was already dense or other (shouldn't happen given call sites), restore it
-            other => {
-                self.nodes[node] = other;
-                return;
+        let new_dense_node = match &self.nodes[node] {
+            representation::NodeRepresentation::Sorted { neighbors }
+            | representation::NodeRepresentation::Sparse { neighbors } => {
+                Self::create_dense_representation(self.node_count, neighbors)
             }
+            _ => return,
         };
-        self.upgrade_to_dense_with_neighbors(node, current_neighbors);
+        self.nodes[node] = new_dense_node;
     }
 
     fn upgrade_to_dense_with_neighbors(&mut self, node: usize, neighbors: Vec<usize>) {
-        let mut bitset = vec![0u64; (self.node_count + 63) / 64];
+        self.nodes[node] = Self::create_dense_representation(self.node_count, &neighbors);
+    }
+
+    fn create_dense_representation(
+        node_count: usize,
+        neighbors: &[usize],
+    ) -> representation::NodeRepresentation {
+        let mut bitset = vec![0u64; (node_count + 63) / 64];
         let mut degree = 0usize;
-        for &neighbor in &neighbors {
+        for &neighbor in neighbors {
             let word_idx = neighbor / 64;
             let bit_idx = neighbor % 64;
             if (bitset[word_idx] & (1u64 << bit_idx)) == 0 {
@@ -187,7 +183,7 @@ impl<'brand, const EDGE_CHUNK: usize> GhostAmtGraph<'brand, EDGE_CHUNK> {
                 degree += 1;
             }
         }
-        self.nodes[node] = representation::NodeRepresentation::Dense { bitset, degree };
+        representation::NodeRepresentation::Dense { bitset, degree }
     }
 
     /// Clears the visited set for traversals.
