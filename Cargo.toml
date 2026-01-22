@@ -176,3 +176,7 @@ harness = false
 [[bench]]
 name = "bloom_benchmark"
 harness = false
+
+[[bench]]
+name = "amt_graph_benchmark"
+harness = false
