@@ -33,6 +33,27 @@ fn bench_amt_upgrade(c: &mut Criterion) {
             BatchSize::SmallInput,
         );
     });
+
+    // Focused benchmark for Sparse -> Sorted transition
+    c.bench_function("amt_upgrade_sparse_to_sorted", |b| {
+        b.iter_batched(
+            || {
+                 let node_count = 100;
+                 let mut graph = GhostAmtGraph::<32>::new(node_count);
+                 // Prepare state right before upgrade (SPARSE_THRESHOLD is 32)
+                 // Add 31 edges (1..32)
+                 for i in 1..32 {
+                     graph.add_edge(0, i);
+                 }
+                 graph
+            },
+            |mut graph| {
+                // This adds the 32nd edge, triggering upgrade to Sorted
+                graph.add_edge(0, 32);
+            },
+            BatchSize::SmallInput,
+        );
+    });
 }
 
 criterion_group!(benches, bench_amt_upgrade);

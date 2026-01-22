@@ -136,9 +136,19 @@ impl<'brand, const EDGE_CHUNK: usize> GhostAmtGraph<'brand, EDGE_CHUNK> {
     }
 
     fn upgrade_representation(&mut self, node: usize) {
-        let current_neighbors = match &self.nodes[node] {
-            representation::NodeRepresentation::Sparse { neighbors } => neighbors.clone(),
-            _ => return,
+        let old_node = core::mem::replace(
+            &mut self.nodes[node],
+            representation::NodeRepresentation::Sparse {
+                neighbors: Vec::new(),
+            },
+        );
+
+        let current_neighbors = match old_node {
+            representation::NodeRepresentation::Sparse { neighbors } => neighbors,
+            other => {
+                self.nodes[node] = other;
+                return;
+            }
         };
 
         let degree = current_neighbors.len();

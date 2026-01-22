@@ -7,9 +7,10 @@
 /// ```rust
 /// use halo::scope;
 ///
-/// scope! { |token|
+/// scope! { |token| {
 ///     // use token
-/// }
+///     let _ = token;
+/// }}
 /// ```
 ///
 /// You can also create a nested scope from an existing token:
