@@ -1,51 +1,39 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use halo::{BrandedInterner, GhostToken};
-use std::collections::HashSet;
+use halo::collections::BrandedInterner;
+use halo::GhostToken;
 
-fn benchmark_interner(c: &mut Criterion) {
+fn bench_interner(c: &mut Criterion) {
     let mut group = c.benchmark_group("interner");
 
-    // Dataset: 1000 strings with 100 unique values (high duplication)
-    let strings: Vec<String> = (0..1000).map(|i| format!("string_{}", i % 100)).collect();
-    let strings_ref: Vec<&str> = strings.iter().map(|s| s.as_str()).collect();
+    // Benchmark interning many unique strings to trigger resize
+    // We use a pre-allocated vector of strings to minimize string allocation noise during the measurement loop
+    let strings: Vec<String> = (0..5000).map(|i| i.to_string()).collect();
 
-    group.bench_function("std_hashset_insert", |b| {
-        b.iter(|| {
-            let mut set = HashSet::new();
-            for s in &strings {
-                set.insert(s.clone());
-            }
-            black_box(set)
-        })
-    });
-
-    group.bench_function("branded_interner_insert", |b| {
+    group.bench_function("intern_unique_strings", |b| {
         b.iter(|| {
             GhostToken::new(|token| {
                 let mut interner = BrandedInterner::new();
                 for s in &strings {
-                    interner.intern(&token, s.clone());
+                    interner.intern(&token, black_box(s.clone()));
                 }
-                black_box(interner);
-            })
-        })
+            });
+        });
     });
 
-    group.bench_function("branded_interner_insert_cow", |b| {
+    // Benchmark interning integers - cheaper key, more focus on map mechanics
+    group.bench_function("intern_unique_ints", |b| {
         b.iter(|| {
             GhostToken::new(|token| {
                 let mut interner = BrandedInterner::new();
-                for s in &strings_ref {
-                    // Use intern_cow with Borrowed to avoid allocation
-                    interner.intern_cow(&token, std::borrow::Cow::Borrowed(s));
+                for i in 0..5000 {
+                    interner.intern(&token, black_box(i));
                 }
-                black_box(interner);
-            })
-        })
+            });
+        });
     });
 
     group.finish();
 }
 
-criterion_group!(benches, benchmark_interner);
+criterion_group!(benches, bench_interner);
 criterion_main!(benches);
