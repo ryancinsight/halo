@@ -93,8 +93,8 @@ impl<'brand, V, E> BrandedPoolGraph<'brand, V, E> {
                 if u < view.storage.len() {
                     let word_idx = u >> 6;
                     let bit_idx = u & 63;
-                    if (view.occupied[word_idx] & (1 << bit_idx)) != 0 {
-                        let node = &mut view.storage[u].occupied;
+                    if (*view.occupied.get_unchecked(word_idx) & (1 << bit_idx)) != 0 {
+                        let node = &mut view.storage.get_unchecked_mut(u).occupied;
                         node.outgoing.push((v, weight));
                         node.incoming.push(u);
                     } else {
@@ -111,11 +111,11 @@ impl<'brand, V, E> BrandedPoolGraph<'brand, V, E> {
 
                 let word_idx_u = u >> 6;
                 let bit_idx_u = u & 63;
-                let occupied_u = (view.occupied[word_idx_u] & (1 << bit_idx_u)) != 0;
+                let occupied_u = (*view.occupied.get_unchecked(word_idx_u) & (1 << bit_idx_u)) != 0;
 
                 let word_idx_v = v >> 6;
                 let bit_idx_v = v & 63;
-                let occupied_v = (view.occupied[word_idx_v] & (1 << bit_idx_v)) != 0;
+                let occupied_v = (*view.occupied.get_unchecked(word_idx_v) & (1 << bit_idx_v)) != 0;
 
                 if occupied_u && occupied_v {
                     let ptr = view.storage.as_mut_ptr();
@@ -156,7 +156,7 @@ impl<'brand, V, E> BrandedPoolGraph<'brand, V, E> {
             unsafe {
                 let word_idx = inc_idx >> 6;
                 let bit_idx = inc_idx & 63;
-                if (view.occupied[word_idx] & (1 << bit_idx)) != 0 {
+                if (*view.occupied.get_unchecked(word_idx) & (1 << bit_idx)) != 0 {
                     let data = &mut (*ptr.add(inc_idx)).occupied;
                     if let Some(pos) = data.outgoing.iter().position(|(target, _)| *target == u) {
                         data.outgoing.swap_remove(pos);
@@ -173,7 +173,7 @@ impl<'brand, V, E> BrandedPoolGraph<'brand, V, E> {
             unsafe {
                 let word_idx = *out_idx >> 6;
                 let bit_idx = *out_idx & 63;
-                if (view.occupied[word_idx] & (1 << bit_idx)) != 0 {
+                if (*view.occupied.get_unchecked(word_idx) & (1 << bit_idx)) != 0 {
                     let data = &mut (*ptr.add(*out_idx)).occupied;
                     if let Some(pos) = data.incoming.iter().position(|&source| source == u) {
                         data.incoming.swap_remove(pos);
@@ -205,7 +205,7 @@ impl<'brand, V, E> BrandedPoolGraph<'brand, V, E> {
             if u < view.storage.len() {
                 let word_idx = u >> 6;
                 let bit_idx = u & 63;
-                if (view.occupied[word_idx] & (1 << bit_idx)) != 0 {
+                if (*view.occupied.get_unchecked(word_idx) & (1 << bit_idx)) != 0 {
                     let data_u = &mut (*ptr.add(u)).occupied;
                     if let Some(pos) = data_u.outgoing.iter().position(|(t, _)| *t == v) {
                         removed_data = Some(data_u.outgoing.swap_remove(pos).1);
@@ -217,7 +217,7 @@ impl<'brand, V, E> BrandedPoolGraph<'brand, V, E> {
             if removed_data.is_some() && v < view.storage.len() {
                 let word_idx = v >> 6;
                 let bit_idx = v & 63;
-                if (view.occupied[word_idx] & (1 << bit_idx)) != 0 {
+                if (*view.occupied.get_unchecked(word_idx) & (1 << bit_idx)) != 0 {
                     let data_v = &mut (*ptr.add(v)).occupied;
                     if let Some(pos) = data_v.incoming.iter().position(|&s| s == u) {
                         data_v.incoming.swap_remove(pos);
@@ -303,13 +303,13 @@ impl<'brand, V, E> BrandedPoolGraph<'brand, V, E> {
             .filter_map(move |(i, slot)| {
                 let word_idx = i >> 6;
                 let bit_idx = i & 63;
-                if (view.occupied[word_idx] & (1 << bit_idx)) != 0 {
-                    unsafe {
+                unsafe {
+                    if (*view.occupied.get_unchecked(word_idx) & (1 << bit_idx)) != 0 {
                         let data = &slot.occupied;
                         Some((NodeIdx::new(i), &data.value))
+                    } else {
+                        None
                     }
-                } else {
-                    None
                 }
             })
     }

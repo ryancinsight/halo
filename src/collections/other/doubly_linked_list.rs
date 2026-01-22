@@ -35,14 +35,15 @@ impl<'a, 'brand, T> Iterator for BrandedDoublyLinkedListIter<'a, 'brand, T> {
             let word_idx = idx >> 6;
             let bit_idx = idx & 63;
             // Check occupancy
-            if (self.view.occupied[word_idx] & (1 << bit_idx)) != 0 {
-                unsafe {
-                    let node = &self.view.storage[idx].occupied;
+            // Safety: alloc ensures occupied covers all allocated indices
+            unsafe {
+                if (*self.view.occupied.get_unchecked(word_idx) & (1 << bit_idx)) != 0 {
+                    let node = &self.view.storage.get_unchecked(idx).occupied;
                     self.current = node.next;
                     Some(&node.value)
+                } else {
+                    None // Should not happen
                 }
-            } else {
-                None // Should not happen
             }
         } else {
             None
@@ -70,7 +71,7 @@ impl<'a, 'brand, T> Iterator for BrandedDoublyLinkedListIterMut<'a, 'brand, T> {
             let word_idx = idx >> 6;
             let bit_idx = idx & 63;
 
-            if (self.view.occupied[word_idx] & (1 << bit_idx)) != 0 {
+            if (*self.view.occupied.get_unchecked(word_idx) & (1 << bit_idx)) != 0 {
                 let ptr = self.view.storage.as_mut_ptr().add(idx);
                 let node = &mut (*ptr).occupied;
                 self.current = node.next;
