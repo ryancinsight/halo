@@ -143,16 +143,10 @@ impl<'brand> BrandedBitSet<'brand> {
         for i in 0..common_len {
             let old_val = self_slice[i];
             let new_val = old_val | other_slice[i];
-            if old_val != new_val {
-                // To keep len accurate, we'd need to count bits.
-                // Recomputing len from scratch might be faster if changes are frequent,
-                // or using popcount on the diff.
-                // popcount(new_val) - popcount(old_val) doesn't work directly if bits were already set.
-                // diff = new_val ^ old_val. All these bits were 0 and are now 1.
-                let diff = new_val ^ old_val;
-                new_bits += diff.count_ones() as usize;
-                self_slice[i] = new_val;
-            }
+
+            let diff = new_val ^ old_val;
+            new_bits += diff.count_ones() as usize;
+            self_slice[i] = new_val;
         }
         self.len += new_bits;
     }
