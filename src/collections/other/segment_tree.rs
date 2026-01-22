@@ -7,6 +7,7 @@
 
 use crate::collections::{BrandedCollection, BrandedVec};
 use crate::{GhostCell, GhostToken};
+use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 
@@ -145,27 +146,32 @@ where
     }
 
     /// Queries the range `[q_start, q_end)`.
-    pub fn query(&self, token: &GhostToken<'brand>, q_start: usize, q_end: usize) -> T {
+    pub fn query<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+        q_start: usize,
+        q_end: usize,
+    ) -> Cow<'a, T> {
         if q_start >= q_end || q_start >= self.n {
-            return self.default_value.clone();
+            return Cow::Borrowed(&self.default_value);
         }
         self.query_recursive(token, 0, 0, self.n, q_start, q_end)
     }
 
-    fn query_recursive(
-        &self,
-        token: &GhostToken<'brand>,
+    fn query_recursive<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
         node: usize,
         start: usize,
         end: usize,
         q_start: usize,
         q_end: usize,
-    ) -> T {
+    ) -> Cow<'a, T> {
         if q_start <= start && end <= q_end {
-            return self.tree.borrow(token, node).clone();
+            return Cow::Borrowed(self.tree.borrow(token, node));
         }
         if end <= q_start || start >= q_end {
-            return self.default_value.clone();
+            return Cow::Borrowed(&self.default_value);
         }
 
         let mid = start + (end - start) / 2;
@@ -175,7 +181,7 @@ where
         let l_res = self.query_recursive(token, left_child, start, mid, q_start, q_end);
         let r_res = self.query_recursive(token, right_child, mid, end, q_start, q_end);
 
-        (self.combinator)(&l_res, &r_res)
+        Cow::Owned((self.combinator)(&l_res, &r_res))
     }
 
     /// Repair the tree consistency after bulk updates via views.
@@ -359,12 +365,12 @@ mod tests {
             let data = vec![1, 2, 3, 4, 5, 6, 7, 8];
             st.build(&mut token, &data);
 
-            assert_eq!(st.query(&token, 0, 8), 36);
-            assert_eq!(st.query(&token, 0, 4), 10); // 1+2+3+4
-            assert_eq!(st.query(&token, 4, 8), 26); // 5+6+7+8
+            assert_eq!(*st.query(&token, 0, 8), 36);
+            assert_eq!(*st.query(&token, 0, 4), 10); // 1+2+3+4
+            assert_eq!(*st.query(&token, 4, 8), 26); // 5+6+7+8
 
             st.update(&mut token, 0, 10); // 1 -> 10. Sum should increase by 9.
-            assert_eq!(st.query(&token, 0, 8), 45);
+            assert_eq!(*st.query(&token, 0, 8), 45);
         });
     }
 
@@ -379,9 +385,9 @@ mod tests {
             st.update(&mut token, 2, 20);
             st.update(&mut token, 3, 8);
 
-            assert_eq!(st.query(&token, 0, 4), 5);
-            assert_eq!(st.query(&token, 0, 2), 5);
-            assert_eq!(st.query(&token, 2, 4), 8);
+            assert_eq!(*st.query(&token, 0, 4), 5);
+            assert_eq!(*st.query(&token, 0, 2), 5);
+            assert_eq!(*st.query(&token, 2, 4), 8);
         });
     }
 
@@ -395,7 +401,7 @@ mod tests {
             st.update(&mut token, 1, 1);
             st.update(&mut token, 2, 1);
             st.update(&mut token, 3, 1);
-            assert_eq!(st.query(&token, 0, 4), 4);
+            assert_eq!(*st.query(&token, 0, 4), 4);
 
             {
                 let mut view = st.view_mut();
@@ -414,7 +420,7 @@ mod tests {
             st.repair(&mut token);
 
             // Verify
-            assert_eq!(st.query(&token, 0, 4), 10 + 1 + 1 + 10);
+            assert_eq!(*st.query(&token, 0, 4), 10 + 1 + 1 + 10);
         });
     }
 
@@ -424,7 +430,7 @@ mod tests {
             let mut st = BrandedSegmentTree::new(0, |a, b: &i32| a + b, 0);
             st.build(&mut token, &[]);
             st.repair(&mut token);
-            assert_eq!(st.query(&token, 0, 0), 0);
+            assert_eq!(*st.query(&token, 0, 0), 0);
         });
     }
 
