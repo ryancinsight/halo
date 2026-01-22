@@ -6,7 +6,7 @@
 //!
 //! Backed by `BrandedPool` for zero-overhead, cache-friendly storage.
 
-use crate::alloc::pool::PoolSlot;
+use crate::alloc::pool::{PoolSlot, PoolView, PoolViewMut};
 use crate::alloc::BrandedPool;
 use crate::collections::ZeroCopyOps;
 use crate::GhostToken;
@@ -23,7 +23,7 @@ struct TripodNode<T> {
 
 /// Zero-cost iterator for TripodList.
 pub struct TripodListIter<'a, 'brand, T> {
-    storage: &'a [PoolSlot<TripodNode<T>>],
+    view: PoolView<'a, TripodNode<T>>,
     current: Option<usize>,
     _marker: PhantomData<fn(&'brand ()) -> &'brand ()>,
 }
@@ -34,13 +34,17 @@ impl<'a, 'brand, T> Iterator for TripodListIter<'a, 'brand, T> {
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let idx = self.current?;
-        if let Some(slot) = self.storage.get(idx) {
-            match slot {
-                PoolSlot::Occupied(node) => {
+        if idx < self.view.storage.len() {
+            let word_idx = idx >> 6;
+            let bit_idx = idx & 63;
+            if (self.view.occupied[word_idx] & (1 << bit_idx)) != 0 {
+                unsafe {
+                    let node = &self.view.storage[idx].occupied;
                     self.current = node.next;
                     Some(&node.value)
                 }
-                PoolSlot::Free(_) => None,
+            } else {
+                None
             }
         } else {
             None
@@ -50,7 +54,7 @@ impl<'a, 'brand, T> Iterator for TripodListIter<'a, 'brand, T> {
 
 /// Mutable iterator for TripodList.
 pub struct TripodListIterMut<'a, 'brand, T> {
-    storage: &'a mut [PoolSlot<TripodNode<T>>],
+    view: PoolViewMut<'a, TripodNode<T>>,
     current: Option<usize>,
     _marker: PhantomData<fn(&'brand ()) -> &'brand ()>,
 }
@@ -62,16 +66,18 @@ impl<'a, 'brand, T> Iterator for TripodListIterMut<'a, 'brand, T> {
     fn next(&mut self) -> Option<Self::Item> {
         let idx = self.current?;
         unsafe {
-            if idx >= self.storage.len() {
+            if idx >= self.view.storage.len() {
                 return None;
             }
-            let ptr = self.storage.as_mut_ptr().add(idx);
-            match &mut *ptr {
-                PoolSlot::Occupied(node) => {
-                    self.current = node.next;
-                    Some(&mut node.value)
-                }
-                PoolSlot::Free(_) => None,
+            let word_idx = idx >> 6;
+            let bit_idx = idx & 63;
+            if (self.view.occupied[word_idx] & (1 << bit_idx)) != 0 {
+                let ptr = self.view.storage.as_mut_ptr().add(idx);
+                let node = &mut (*ptr).occupied;
+                self.current = node.next;
+                Some(&mut node.value)
+            } else {
+                None
             }
         }
     }
@@ -236,7 +242,7 @@ impl<'brand, T> TripodList<'brand, T> {
     /// Iterates over the list.
     pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> TripodListIter<'a, 'brand, T> {
         TripodListIter {
-            storage: self.pool.as_slice(token),
+            view: self.pool.view(token),
             current: self.head,
             _marker: PhantomData,
         }
@@ -248,7 +254,7 @@ impl<'brand, T> TripodList<'brand, T> {
         token: &'a mut GhostToken<'brand>,
     ) -> TripodListIterMut<'a, 'brand, T> {
         TripodListIterMut {
-            storage: self.pool.as_mut_slice(token),
+            view: self.pool.view_mut(token),
             current: self.head,
             _marker: PhantomData,
         }

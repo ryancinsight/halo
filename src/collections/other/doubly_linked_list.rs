@@ -4,7 +4,7 @@
 //! allowing safe index-based pointers with the `GhostCell` pattern.
 //! It supports O(1) insertion and removal at arbitrary positions via Cursors.
 
-use crate::alloc::pool::PoolSlot;
+use crate::alloc::pool::{PoolSlot, PoolView, PoolViewMut};
 use crate::alloc::BrandedPool;
 use crate::collections::ZeroCopyOps;
 use crate::GhostToken;
@@ -20,7 +20,7 @@ struct ListNode<T> {
 
 /// Zero-cost iterator for BrandedDoublyLinkedList.
 pub struct BrandedDoublyLinkedListIter<'a, 'brand, T> {
-    storage: &'a [PoolSlot<ListNode<T>>],
+    view: PoolView<'a, ListNode<T>>,
     current: Option<usize>,
     _marker: PhantomData<fn(&'brand ()) -> &'brand ()>,
 }
@@ -31,15 +31,18 @@ impl<'a, 'brand, T> Iterator for BrandedDoublyLinkedListIter<'a, 'brand, T> {
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let idx = self.current?;
-        // SAFETY: Internal indices are guaranteed to be valid and synchronized.
-        // We use get_unchecked because the list structure invariants guarantee valid indices.
-        if let Some(slot) = self.storage.get(idx) {
-            match slot {
-                PoolSlot::Occupied(node) => {
+        if idx < self.view.storage.len() {
+            let word_idx = idx >> 6;
+            let bit_idx = idx & 63;
+            // Check occupancy
+            if (self.view.occupied[word_idx] & (1 << bit_idx)) != 0 {
+                unsafe {
+                    let node = &self.view.storage[idx].occupied;
                     self.current = node.next;
                     Some(&node.value)
                 }
-                PoolSlot::Free(_) => None, // Should not happen
+            } else {
+                None // Should not happen
             }
         } else {
             None
@@ -49,7 +52,7 @@ impl<'a, 'brand, T> Iterator for BrandedDoublyLinkedListIter<'a, 'brand, T> {
 
 /// Mutable iterator for BrandedDoublyLinkedList.
 pub struct BrandedDoublyLinkedListIterMut<'a, 'brand, T> {
-    storage: &'a mut [PoolSlot<ListNode<T>>],
+    view: PoolViewMut<'a, ListNode<T>>,
     current: Option<usize>,
     _marker: PhantomData<fn(&'brand ()) -> &'brand ()>,
 }
@@ -60,21 +63,20 @@ impl<'a, 'brand, T> Iterator for BrandedDoublyLinkedListIterMut<'a, 'brand, T> {
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let idx = self.current?;
-        // SAFETY: Internal indices are guaranteed to be valid and synchronized.
-        // We use raw pointers to bypass borrow checker because we know we yield unique nodes.
         unsafe {
-            // Check bounds just in case, though invariant should hold
-            if idx >= self.storage.len() {
+            if idx >= self.view.storage.len() {
                 return None;
             }
+            let word_idx = idx >> 6;
+            let bit_idx = idx & 63;
 
-            let ptr = self.storage.as_mut_ptr().add(idx);
-            match &mut *ptr {
-                PoolSlot::Occupied(node) => {
-                    self.current = node.next;
-                    Some(&mut node.value)
-                }
-                PoolSlot::Free(_) => None, // Should not happen
+            if (self.view.occupied[word_idx] & (1 << bit_idx)) != 0 {
+                let ptr = self.view.storage.as_mut_ptr().add(idx);
+                let node = &mut (*ptr).occupied;
+                self.current = node.next;
+                Some(&mut node.value)
+            } else {
+                None
             }
         }
     }
@@ -242,7 +244,7 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
         token: &'a GhostToken<'brand>,
     ) -> BrandedDoublyLinkedListIter<'a, 'brand, T> {
         BrandedDoublyLinkedListIter {
-            storage: self.pool.as_slice(token),
+            view: self.pool.view(token),
             current: self.head,
             _marker: PhantomData,
         }
@@ -254,7 +256,7 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
         token: &'a mut GhostToken<'brand>,
     ) -> BrandedDoublyLinkedListIterMut<'a, 'brand, T> {
         BrandedDoublyLinkedListIterMut {
-            storage: self.pool.as_mut_slice(token),
+            view: self.pool.view_mut(token),
             current: self.head,
             _marker: PhantomData,
         }

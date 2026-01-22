@@ -86,31 +86,44 @@ impl<'brand, V, E> BrandedPoolGraph<'brand, V, E> {
         let u = source.index();
         let v = target.index();
 
-        let storage = self.pool.as_mut_slice(token);
+        let view = self.pool.view_mut(token);
 
         if u == v {
-            if let Some(crate::alloc::pool::PoolSlot::Occupied(node)) = storage.get_mut(u) {
-                node.outgoing.push((v, weight));
-                node.incoming.push(u);
-            } else {
-                panic!("Node invalid");
+            unsafe {
+                if u < view.storage.len() {
+                    let word_idx = u >> 6;
+                    let bit_idx = u & 63;
+                    if (view.occupied[word_idx] & (1 << bit_idx)) != 0 {
+                        let node = &mut view.storage[u].occupied;
+                        node.outgoing.push((v, weight));
+                        node.incoming.push(u);
+                    } else {
+                        panic!("Node invalid");
+                    }
+                } else {
+                    panic!("Node invalid");
+                }
             }
         } else {
-            assert!(u < storage.len());
-            assert!(v < storage.len());
-
-            let ptr = storage.as_mut_ptr();
             unsafe {
-                let node_u = &mut *ptr.add(u);
-                let node_v = &mut *ptr.add(v);
+                assert!(u < view.storage.len());
+                assert!(v < view.storage.len());
 
-                if let (
-                    crate::alloc::pool::PoolSlot::Occupied(data_u),
-                    crate::alloc::pool::PoolSlot::Occupied(data_v),
-                ) = (node_u, node_v)
-                {
-                    data_u.outgoing.push((v, weight));
-                    data_v.incoming.push(u);
+                let word_idx_u = u >> 6;
+                let bit_idx_u = u & 63;
+                let occupied_u = (view.occupied[word_idx_u] & (1 << bit_idx_u)) != 0;
+
+                let word_idx_v = v >> 6;
+                let bit_idx_v = v & 63;
+                let occupied_v = (view.occupied[word_idx_v] & (1 << bit_idx_v)) != 0;
+
+                if occupied_u && occupied_v {
+                    let ptr = view.storage.as_mut_ptr();
+                    let node_u = &mut (*ptr.add(u)).occupied;
+                    let node_v = &mut (*ptr.add(v)).occupied;
+
+                    node_u.outgoing.push((v, weight));
+                    node_v.incoming.push(u);
                 } else {
                     panic!("Node invalid");
                 }
@@ -132,8 +145,8 @@ impl<'brand, V, E> BrandedPoolGraph<'brand, V, E> {
 
         let node_data = unsafe { self.pool.take(token, u) };
 
-        let storage = self.pool.as_mut_slice(token);
-        let ptr = storage.as_mut_ptr();
+        let view = self.pool.view_mut(token);
+        let ptr = view.storage.as_mut_ptr();
 
         // Remove `u` from incoming neighbors' outgoing lists
         for &inc_idx in &node_data.incoming {
@@ -141,8 +154,10 @@ impl<'brand, V, E> BrandedPoolGraph<'brand, V, E> {
                 continue;
             }
             unsafe {
-                let neighbor = &mut *ptr.add(inc_idx);
-                if let crate::alloc::pool::PoolSlot::Occupied(data) = neighbor {
+                let word_idx = inc_idx >> 6;
+                let bit_idx = inc_idx & 63;
+                if (view.occupied[word_idx] & (1 << bit_idx)) != 0 {
+                    let data = &mut (*ptr.add(inc_idx)).occupied;
                     if let Some(pos) = data.outgoing.iter().position(|(target, _)| *target == u) {
                         data.outgoing.swap_remove(pos);
                     }
@@ -156,8 +171,10 @@ impl<'brand, V, E> BrandedPoolGraph<'brand, V, E> {
                 continue;
             }
             unsafe {
-                let neighbor = &mut *ptr.add(*out_idx);
-                if let crate::alloc::pool::PoolSlot::Occupied(data) = neighbor {
+                let word_idx = *out_idx >> 6;
+                let bit_idx = *out_idx & 63;
+                if (view.occupied[word_idx] & (1 << bit_idx)) != 0 {
+                    let data = &mut (*ptr.add(*out_idx)).occupied;
                     if let Some(pos) = data.incoming.iter().position(|&source| source == u) {
                         data.incoming.swap_remove(pos);
                     }
@@ -178,16 +195,18 @@ impl<'brand, V, E> BrandedPoolGraph<'brand, V, E> {
         let u = source.index();
         let v = target.index();
 
-        let storage = self.pool.as_mut_slice(token);
-        let ptr = storage.as_mut_ptr();
+        let view = self.pool.view_mut(token);
+        let ptr = view.storage.as_mut_ptr();
 
         let mut removed_data = None;
 
         unsafe {
             // Remove from source outgoing
-            if u < storage.len() {
-                let node_u = &mut *ptr.add(u);
-                if let crate::alloc::pool::PoolSlot::Occupied(data_u) = node_u {
+            if u < view.storage.len() {
+                let word_idx = u >> 6;
+                let bit_idx = u & 63;
+                if (view.occupied[word_idx] & (1 << bit_idx)) != 0 {
+                    let data_u = &mut (*ptr.add(u)).occupied;
                     if let Some(pos) = data_u.outgoing.iter().position(|(t, _)| *t == v) {
                         removed_data = Some(data_u.outgoing.swap_remove(pos).1);
                     }
@@ -195,9 +214,11 @@ impl<'brand, V, E> BrandedPoolGraph<'brand, V, E> {
             }
 
             // Remove from target incoming
-            if removed_data.is_some() && v < storage.len() {
-                let node_v = &mut *ptr.add(v);
-                if let crate::alloc::pool::PoolSlot::Occupied(data_v) = node_v {
+            if removed_data.is_some() && v < view.storage.len() {
+                let word_idx = v >> 6;
+                let bit_idx = v & 63;
+                if (view.occupied[word_idx] & (1 << bit_idx)) != 0 {
+                    let data_v = &mut (*ptr.add(v)).occupied;
                     if let Some(pos) = data_v.incoming.iter().position(|&s| s == u) {
                         data_v.incoming.swap_remove(pos);
                     }
@@ -214,10 +235,6 @@ impl<'brand, V, E> BrandedPoolGraph<'brand, V, E> {
         token: &'a GhostToken<'brand>,
         node: NodeIdx<'brand>,
     ) -> Option<&'a V> {
-        // We can use get_unchecked since NodeIdx implies validity within the brand?
-        // NodeIdx is opaque, created by add_node.
-        // However, a node can be removed. NodeIdx doesn't track removal.
-        // So we must check.
         self.pool.get(token, node.index()).map(|n| &n.value)
     }
 
@@ -231,19 +248,11 @@ impl<'brand, V, E> BrandedPoolGraph<'brand, V, E> {
     }
 
     /// Get neighbors (outgoing edges).
-    ///
-    /// # Safety
-    /// If `node` has been removed, this returns an empty iterator (safe behavior).
-    /// If `node` is valid, it uses unchecked access for speed.
     pub fn neighbors<'a>(
         &'a self,
         token: &'a GhostToken<'brand>,
         node: NodeIdx<'brand>,
     ) -> impl Iterator<Item = (NodeIdx<'brand>, &'a E)> + 'a {
-        // Optimization: Use get_unchecked if we are sure?
-        // We aren't sure if the node was removed.
-        // But for traversal, if we got the node from iteration or neighbors, it should be valid.
-
         self.pool
             .get(token, node.index())
             .map(|n| n.outgoing.iter().map(|(idx, w)| (NodeIdx::new(*idx), w)))
@@ -287,13 +296,18 @@ impl<'brand, V, E> BrandedPoolGraph<'brand, V, E> {
         &'a self,
         token: &'a GhostToken<'brand>,
     ) -> impl Iterator<Item = (NodeIdx<'brand>, &'a V)> + 'a {
-        self.pool
-            .storage(token)
-            .iter(token)
+        let view = self.pool.view(token);
+        view.storage
+            .iter()
             .enumerate()
-            .filter_map(|(i, slot)| {
-                if let crate::alloc::pool::PoolSlot::Occupied(data) = slot {
-                    Some((NodeIdx::new(i), &data.value))
+            .filter_map(move |(i, slot)| {
+                let word_idx = i >> 6;
+                let bit_idx = i & 63;
+                if (view.occupied[word_idx] & (1 << bit_idx)) != 0 {
+                    unsafe {
+                        let data = &slot.occupied;
+                        Some((NodeIdx::new(i), &data.value))
+                    }
                 } else {
                     None
                 }
