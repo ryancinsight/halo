@@ -154,8 +154,8 @@ where
         }
 
         // Generic approach: remove then insert
-        for _ in 0..to_remove {
-            self.entries.remove(first_idx);
+        if to_remove > 0 {
+            self.entries.drain(first_idx..(first_idx + to_remove));
         }
 
         // Insert new parts
