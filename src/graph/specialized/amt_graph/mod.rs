@@ -155,10 +155,23 @@ impl<'brand, const EDGE_CHUNK: usize> GhostAmtGraph<'brand, EDGE_CHUNK> {
     }
 
     fn upgrade_to_dense(&mut self, node: usize) {
-        let current_neighbors = match &self.nodes[node] {
-            representation::NodeRepresentation::Sorted { neighbors } => neighbors.clone(),
-            representation::NodeRepresentation::Sparse { neighbors } => neighbors.clone(),
-            _ => return,
+        // Swap out the current node with a placeholder to take ownership of neighbors
+        // avoiding an O(N) clone during the upgrade.
+        let old_node = core::mem::replace(
+            &mut self.nodes[node],
+            representation::NodeRepresentation::Sparse {
+                neighbors: Vec::new(),
+            },
+        );
+
+        let current_neighbors = match old_node {
+            representation::NodeRepresentation::Sorted { neighbors } => neighbors,
+            representation::NodeRepresentation::Sparse { neighbors } => neighbors,
+            // If it was already dense or other (shouldn't happen given call sites), restore it
+            other => {
+                self.nodes[node] = other;
+                return;
+            }
         };
         self.upgrade_to_dense_with_neighbors(node, current_neighbors);
     }
