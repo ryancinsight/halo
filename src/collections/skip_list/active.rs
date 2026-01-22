@@ -85,5 +85,35 @@ impl<'brand, K, V> ActivateSkipList<'brand, K, V> for BrandedSkipList<'brand, K,
     }
 }
 
-// TODO: Implement FromIterator and Extend if possible, but that requires token access which traits don't provide.
-// Active structs allow providing methods that look like standard ones but we can't implement standard traits easily.
+impl<'a, 'brand, K, V> Extend<(K, V)> for ActiveSkipList<'a, 'brand, K, V>
+where
+    K: Ord,
+{
+    fn extend<T: IntoIterator<Item = (K, V)>>(&mut self, iter: T) {
+        for (k, v) in iter {
+            self.insert(k, v);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::GhostToken;
+
+    #[test]
+    fn test_active_skip_list_extend() {
+        GhostToken::new(|mut token| {
+            let mut list = BrandedSkipList::new();
+            {
+                let mut active = list.activate(&mut token);
+                active.extend(vec![(1, 10), (2, 20), (3, 30)]);
+            }
+
+            assert_eq!(list.len(), 3);
+            assert_eq!(*list.get(&token, &1).unwrap(), 10);
+            assert_eq!(*list.get(&token, &2).unwrap(), 20);
+            assert_eq!(*list.get(&token, &3).unwrap(), 30);
+        });
+    }
+}
