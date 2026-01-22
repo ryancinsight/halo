@@ -17,6 +17,7 @@ use std::borrow::Cow;
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::marker::PhantomData;
+use std::num::NonZeroUsize;
 
 /// A handle to an interned value.
 ///
@@ -53,14 +54,16 @@ impl<'brand> InternId<'brand> {
 struct Entry {
     /// Cached hash of the key to speed up probing and resizing.
     hash: u64,
-    /// Index into the `storage` vector.
-    index: usize,
+    /// Index into the `storage` vector (1-based to allow niche optimization).
+    index: NonZeroUsize,
 }
 
 /// A generic interner with token-gated access.
 pub struct BrandedInterner<'brand, T, S = RandomState> {
     /// Backing storage for values.
     storage: BrandedVec<'brand, T>,
+    /// Parallel storage for hashes to speed up resize.
+    hashes: Vec<u64>,
     /// Hash table mapping hash -> index.
     /// Uses open addressing with linear probing.
     /// Size is always a power of 2.
@@ -93,6 +96,7 @@ impl<'brand, T, S> BrandedInterner<'brand, T, S> {
         };
         Self {
             storage: BrandedVec::with_capacity(capacity),
+            hashes: Vec::with_capacity(capacity),
             buckets: vec![None; cap],
             len: 0,
             hash_builder,
@@ -139,9 +143,11 @@ where
                     if entry.hash == hash {
                         // Potential match, verify with token
                         // SAFETY: entry.index is valid because we only insert valid indices
-                        if let Some(stored_val) = self.storage.get(token, entry.index) {
+                        // Convert 1-based index to 0-based
+                        let index = entry.index.get() - 1;
+                        if let Some(stored_val) = self.storage.get(token, index) {
                             if stored_val.borrow() == key {
-                                return Ok(entry.index);
+                                return Ok(index);
                             }
                         }
                     }
@@ -162,12 +168,15 @@ where
         let mut new_buckets = vec![None; new_cap];
         let mask = new_cap - 1;
 
-        for entry in self.buckets.iter().flatten() {
-            let mut idx = (entry.hash as usize) & mask;
+        // Iterate over dense hashes/storage instead of sparse buckets
+        for (i, &hash) in self.hashes.iter().enumerate() {
+            let mut idx = (hash as usize) & mask;
             while new_buckets[idx].is_some() {
                 idx = (idx + 1) & mask;
             }
-            new_buckets[idx] = Some(*entry);
+            // SAFETY: i is index from 0..len, so i+1 is non-zero
+            let entry_index = unsafe { NonZeroUsize::new_unchecked(i + 1) };
+            new_buckets[idx] = Some(Entry { hash, index: entry_index });
         }
 
         self.buckets = new_buckets;
@@ -201,7 +210,10 @@ where
             Err(slot) => {
                 let idx = self.storage.len();
                 self.storage.push(value.into_owned());
-                self.buckets[slot] = Some(Entry { hash, index: idx });
+                self.hashes.push(hash);
+                // SAFETY: idx+1 is non-zero because idx starts at 0
+                let entry_index = unsafe { NonZeroUsize::new_unchecked(idx + 1) };
+                self.buckets[slot] = Some(Entry { hash, index: entry_index });
                 self.len += 1;
                 InternId::new(idx)
             }
