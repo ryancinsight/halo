@@ -382,22 +382,13 @@ impl<'brand, K, V> BrandedBPlusTree<'brand, K, V> {
             self.pool.alloc(token, Node::new_internal())
         };
 
-        let pool_slice = self.pool.as_mut_slice(token);
-        let ptr = pool_slice.as_mut_ptr();
+        let view = self.pool.view_mut(token);
+        let ptr = view.storage.as_mut_ptr();
 
         unsafe {
-            let parent = match &mut *ptr.add(parent_idx) {
-                PoolSlot::Occupied(n) => n,
-                _ => unreachable!(),
-            };
-            let child = match &mut *ptr.add(child_idx) {
-                PoolSlot::Occupied(n) => n,
-                _ => unreachable!(),
-            };
-            let sibling = match &mut *ptr.add(sibling_idx) {
-                PoolSlot::Occupied(n) => n,
-                _ => unreachable!(),
-            };
+            let parent = &mut *(*ptr.add(parent_idx)).occupied;
+            let child = &mut *(*ptr.add(child_idx)).occupied;
+            let sibling = &mut *(*ptr.add(sibling_idx)).occupied;
 
             if let Node::Internal {
                 len: c_len,

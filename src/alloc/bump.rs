@@ -205,7 +205,12 @@ impl<'brand> GhostAlloc<'brand> for BrandedBumpAllocator<'brand> {
         Ok(self.alloc_layout(layout, token))
     }
 
-    unsafe fn deallocate(&self, _ptr: NonNull<u8>, _layout: Layout) {
+    unsafe fn deallocate(
+        &self,
+        _token: &mut GhostToken<'brand>,
+        _ptr: NonNull<u8>,
+        _layout: Layout
+    ) {
         // No-op: memory is freed when allocator is dropped
     }
 }

@@ -22,7 +22,12 @@ pub trait GhostAlloc<'brand> {
     /// # Safety
     /// `ptr` must denote a block of memory currently allocated by this allocator.
     /// `layout` must be the same layout that was used to allocate that block of memory.
-    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout);
+    unsafe fn deallocate(
+        &self,
+        token: &mut GhostToken<'brand>,
+        ptr: NonNull<u8>,
+        layout: Layout,
+    );
 }
 
 /// The error type for allocation failures.
