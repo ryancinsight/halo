@@ -20,6 +20,33 @@ fn bench_segment_tree(c: &mut Criterion) {
         );
     });
 
+    // Expensive clone benchmark
+    group.bench_function("build_expensive", |b| {
+        b.iter_batched(
+            || {
+                (0..n).map(|i| vec![i; 64]).collect::<Vec<_>>()
+            },
+            |data| {
+                GhostToken::new(|mut token| {
+                    let mut st = BrandedSegmentTree::new(
+                        n,
+                        |a, b| {
+                             let mut res = Vec::with_capacity(a.len());
+                             for (x, y) in a.iter().zip(b.iter()) {
+                                 res.push(x + y);
+                             }
+                             res
+                        },
+                        vec![0; 64]
+                    );
+                    st.build(&mut token, &data);
+                    black_box(st);
+                });
+            },
+            BatchSize::SmallInput,
+        );
+    });
+
     group.bench_function("update", |b| {
         GhostToken::new(|mut token| {
             let mut st = BrandedSegmentTree::new(n, |a, b| a + b, 0);

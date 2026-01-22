@@ -97,9 +97,12 @@ where
         self.build_recursive(token, data, left_child, start, mid);
         self.build_recursive(token, data, right_child, mid, end);
 
-        let left_val = self.tree.borrow(token, left_child).clone();
-        let right_val = self.tree.borrow(token, right_child).clone();
-        *self.tree.borrow_mut(token, node) = (self.combinator)(&left_val, &right_val);
+        let new_val = {
+            let left_val = self.tree.borrow(token, left_child);
+            let right_val = self.tree.borrow(token, right_child);
+            (self.combinator)(left_val, right_val)
+        };
+        *self.tree.borrow_mut(token, node) = new_val;
     }
 
     /// Updates the value at `index` to `value`.
@@ -133,9 +136,12 @@ where
         }
 
         // Pull up
-        let left_val = self.tree.borrow(token, left_child).clone();
-        let right_val = self.tree.borrow(token, right_child).clone();
-        *self.tree.borrow_mut(token, node) = (self.combinator)(&left_val, &right_val);
+        let new_val = {
+            let left_val = self.tree.borrow(token, left_child);
+            let right_val = self.tree.borrow(token, right_child);
+            (self.combinator)(left_val, right_val)
+        };
+        *self.tree.borrow_mut(token, node) = new_val;
     }
 
     /// Queries the range `[q_start, q_end)`.
@@ -196,9 +202,12 @@ where
         self.repair_recursive(token, left_child, start, mid);
         self.repair_recursive(token, right_child, mid, end);
 
-        let left_val = self.tree.borrow(token, left_child).clone();
-        let right_val = self.tree.borrow(token, right_child).clone();
-        *self.tree.borrow_mut(token, node) = (self.combinator)(&left_val, &right_val);
+        let new_val = {
+            let left_val = self.tree.borrow(token, left_child);
+            let right_val = self.tree.borrow(token, right_child);
+            (self.combinator)(left_val, right_val)
+        };
+        *self.tree.borrow_mut(token, node) = new_val;
     }
 
     /// Returns a mutable view of the root of the tree, allowing splitting.
