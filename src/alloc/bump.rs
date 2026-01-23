@@ -134,7 +134,8 @@ impl<'brand> BrandedBumpAllocator<'brand> {
         }
     }
 
-    fn alloc_layout(&self, layout: Layout, token: &mut GhostToken<'brand>) -> NonNull<u8> {
+    /// Allocates memory with a specific layout.
+    pub fn alloc_layout(&self, layout: Layout, token: &mut GhostToken<'brand>) -> NonNull<u8> {
         // Try to allocate from current chunk
         let full_chunk = {
             let current_slot = self.current.get_mut(token);

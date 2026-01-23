@@ -27,7 +27,7 @@ fn test_bump_allocator() {
 
         // Trait usage
         let layout = Layout::new::<u64>();
-        let ptr = allocator.alloc(&mut token, layout).unwrap();
+        let ptr = allocator.alloc_layout(layout, &mut token);
         unsafe {
             *(ptr.as_ptr() as *mut u64) = 999;
             assert_eq!(*(ptr.as_ptr() as *mut u64), 999);

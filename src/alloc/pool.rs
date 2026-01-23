@@ -131,6 +131,14 @@ impl<'brand, T> BrandedPool<'brand, T> {
         }
     }
 
+    /// Reserves capacity for at least `additional` more elements to be allocated.
+    pub fn reserve(&self, token: &mut GhostToken<'brand>, additional: usize) {
+        let state = self.state.borrow_mut(token);
+        state.storage.reserve(additional);
+        let additional_words = (additional + 63) / 64;
+        state.occupied.reserve(additional_words);
+    }
+
     /// Allocates a value in the pool, returning its index.
     #[inline]
     pub fn alloc(&self, token: &mut GhostToken<'brand>, value: T) -> usize {
@@ -165,7 +173,7 @@ impl<'brand, T> BrandedPool<'brand, T> {
             }
         } else {
             // Push new slot
-            // TODO: Optimize bulk allocation by reserving capacity ahead of time if possible.
+            // Note: Users can call `reserve` to optimize bulk allocation.
             let idx = state.storage.len();
             state.storage.push(PoolSlot {
                 occupied: ManuallyDrop::new(value),
@@ -328,7 +336,7 @@ impl<'brand, T> BrandedPool<'brand, T> {
     /// Returns the current capacity of the pool.
     #[inline]
     pub fn capacity(&self, token: &GhostToken<'brand>) -> usize {
-        self.state.borrow(token).storage.len()
+        self.state.borrow(token).storage.capacity()
     }
 
     /// Returns the number of allocated items.
@@ -508,6 +516,19 @@ mod tests {
             for i in 0..50 {
                 assert_eq!(*pool.get(&token, indices[i]).unwrap(), i);
             }
+        });
+    }
+
+    #[test]
+    fn test_pool_reserve() {
+        GhostToken::new(|mut token| {
+            let pool: BrandedPool<'_, i32> = BrandedPool::new();
+            pool.reserve(&mut token, 100);
+            assert!(pool.capacity(&token) >= 100);
+
+            // Verify we can alloc without issues
+            let idx = pool.alloc(&mut token, 42);
+            assert_eq!(*pool.get(&token, idx).unwrap(), 42);
         });
     }
 }
