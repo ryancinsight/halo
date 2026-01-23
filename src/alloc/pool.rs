@@ -49,6 +49,59 @@ pub struct PoolViewMut<'a, T> {
     pub occupied: &'a [u64],
 }
 
+impl<'brand, T> PoolState<'brand, T> {
+    fn maybe_shrink(&mut self) {
+        let capacity = self.storage.len();
+        // Shrink only if capacity is large enough and utilization is low (< 25%)
+        if capacity <= 64 || self.len * 4 > capacity {
+            return;
+        }
+
+        // Find the last occupied index
+        let mut last_occupied_idx = None;
+        for (word_idx, &word) in self.occupied.iter().enumerate().rev() {
+            if word != 0 {
+                let lz = word.leading_zeros();
+                let bit_idx = 63 - lz as usize;
+                let idx = (word_idx << 6) + bit_idx;
+                last_occupied_idx = Some(idx);
+                break;
+            }
+        }
+
+        let new_len = match last_occupied_idx {
+            Some(idx) => idx + 1,
+            None => 0,
+        };
+
+        // Only shrink if we can reclaim significant memory (e.g. > 50% of current capacity)
+        if new_len < capacity / 2 {
+            self.storage.truncate(new_len);
+            self.storage.shrink_to_fit();
+
+            let new_occupied_len = (new_len + 63) / 64;
+            self.occupied.truncate(new_occupied_len);
+            self.occupied.shrink_to_fit();
+
+            // Rebuild free list to ensure valid indices and optimal reuse order
+            self.free_head = None;
+            for i in (0..new_len).rev() {
+                let word_idx = i >> 6;
+                let bit_idx = i & 63;
+                // Safety: i < new_len, so word_idx is in bounds of truncated occupied vec
+                if (self.occupied[word_idx] & (1 << bit_idx)) == 0 {
+                    // Slot is free
+                    unsafe {
+                        let slot = self.storage.get_unchecked_mut_exclusive(i);
+                        slot.next_free = self.free_head.unwrap_or(usize::MAX);
+                    }
+                    self.free_head = Some(i);
+                }
+            }
+        }
+    }
+}
+
 const BIT_SHIFT: usize = 6;
 const BIT_MASK: usize = 63;
 
@@ -155,7 +208,7 @@ impl<'brand, T> BrandedPool<'brand, T> {
         slot.next_free = state.free_head.unwrap_or(usize::MAX);
         state.free_head = Some(index);
 
-        // TODO: Implement pool shrinking (reclaiming memory) when utilization drops below a threshold.
+        state.maybe_shrink();
     }
 
     /// Deallocates the value at `index` and returns it.
@@ -181,6 +234,8 @@ impl<'brand, T> BrandedPool<'brand, T> {
         // Add to free list
         slot.next_free = state.free_head.unwrap_or(usize::MAX);
         state.free_head = Some(index);
+
+        state.maybe_shrink();
 
         value
     }
@@ -268,6 +323,12 @@ impl<'brand, T> BrandedPool<'brand, T> {
     #[inline]
     pub fn capacity_len(&mut self) -> usize {
         self.state.get_mut().storage.len()
+    }
+
+    /// Returns the current capacity of the pool.
+    #[inline]
+    pub fn capacity(&self, token: &GhostToken<'brand>) -> usize {
+        self.state.borrow(token).storage.len()
     }
 
     /// Returns the number of allocated items.
@@ -359,5 +420,94 @@ impl<'brand, T> BrandedPool<'brand, T> {
 impl<'brand, T> Default for BrandedPool<'brand, T> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::GhostToken;
+
+    #[test]
+    fn test_pool_shrinking() {
+        GhostToken::new(|mut token| {
+            let pool = BrandedPool::new();
+            let mut indices = Vec::new();
+
+            // Push 100 items
+            for i in 0..100 {
+                indices.push(pool.alloc(&mut token, i));
+            }
+
+            let capacity_initial = pool.capacity(&token);
+            assert!(capacity_initial >= 100);
+
+            // Free all
+            for idx in indices.drain(..) {
+                unsafe { pool.free(&mut token, idx); }
+            }
+
+            // Should have shrunk to 0 because all free
+            let capacity_after = pool.capacity(&token);
+            assert!(capacity_after < capacity_initial);
+            assert_eq!(capacity_after, 0);
+
+            // Check free list is valid by allocating again
+            for i in 0..10 {
+                indices.push(pool.alloc(&mut token, i));
+            }
+            // Indices should be small (0..10 ideally because we rebuilt free list)
+            for &idx in &indices {
+                assert!(idx < 100);
+            }
+        });
+    }
+
+    #[test]
+    fn test_pool_shrinking_partial() {
+        GhostToken::new(|mut token| {
+            let pool = BrandedPool::new();
+            let mut indices = Vec::new();
+
+            // Push 200 items
+            for i in 0..200 {
+                indices.push(pool.alloc(&mut token, i));
+            }
+
+            let capacity_initial = pool.capacity(&token);
+
+            // Free the second half (indices 100..200)
+            for i in 100..200 {
+                unsafe { pool.free(&mut token, indices[i]); }
+            }
+
+            // Utilization: 100/200 = 50%.
+            // Threshold is < 25%. So NO shrink.
+            assert_eq!(pool.capacity(&token), capacity_initial);
+
+            // Free more: 50..100.
+            for i in 50..100 {
+                 unsafe { pool.free(&mut token, indices[i]); }
+            }
+
+            // Utilization: 50/200 = 25%. Borderline.
+            // My condition: `len * 4 > capacity` (50*4 = 200 > 200 is FALSE).
+            // So 25% exactly triggers shrink? `200 > 200` is False.
+            // So YES shrink.
+
+            // Last occupied index is 49.
+            // New len = 50.
+            // New len < capacity / 2 (50 < 100). Yes.
+            // Should shrink to 50.
+
+            let capacity_after = pool.capacity(&token);
+            assert!(capacity_after < capacity_initial);
+            assert_eq!(capacity_after, 50);
+
+            // Verify items 0..50 are still accessible.
+            for i in 0..50 {
+                assert_eq!(*pool.get(&token, indices[i]).unwrap(), i);
+            }
+        });
     }
 }
