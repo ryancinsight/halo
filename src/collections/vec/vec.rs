@@ -129,6 +129,14 @@ impl<'brand, T> BrandedVec<'brand, T> {
         self.inner.truncate(len);
     }
 
+    /// Shrinks the capacity of the vector as much as possible.
+    ///
+    /// It will drop down as close as possible to the length but the allocator
+    /// may still inform the vector that there is space for a few more elements.
+    pub fn shrink_to_fit(&mut self) {
+        self.inner.shrink_to_fit();
+    }
+
     /// Resizes the `BrandedVec` in-place so that `len` is equal to `new_len`.
     ///
     /// If `new_len` is greater than `len`, the `BrandedVec` is extended by the
