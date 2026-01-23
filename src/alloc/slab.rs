@@ -6,6 +6,7 @@
 
 use crate::{GhostToken, GhostCell};
 use crate::alloc::{GhostAlloc, ConcurrentGhostAlloc, AllocError};
+use crate::concurrency::CachePadded;
 use core::alloc::Layout;
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicUsize, Ordering};
@@ -29,7 +30,11 @@ struct Page {
     block_size: usize,
     free_head: AtomicUsize, // Index of the first free block (relative to first block)
     capacity: usize,
-    // The actual blocks follow this struct in memory.
+    // Padding to ensure the header size is a multiple of cache line (128 bytes)
+    // to prevent false sharing between the header (metadata) and the first block (user data).
+    // Current size: 8 + 8 + 8 + 8 = 32 bytes (on 64-bit).
+    // We need 96 bytes of padding.
+    _padding: [u8; 96],
 }
 
 impl Page {
@@ -86,6 +91,7 @@ impl Page {
                 block_size,
                 free_head: AtomicUsize::new(0),
                 capacity,
+                _padding: [0; 96],
             });
 
             Some(NonNull::new_unchecked(page_ptr))
@@ -224,23 +230,14 @@ impl Page {
 struct SlabState {
     // Array of page lists, one for each size class (powers of 2, starting at 8)
     // Stored as AtomicUsize (pointers to Page) to support shared access.
-    heads: [AtomicUsize; 9],
+    // CachePadded to prevent false sharing between heads of different size classes.
+    heads: [CachePadded<AtomicUsize>; 9],
 }
 
 impl SlabState {
     fn new() -> Self {
         Self {
-            heads: [
-                AtomicUsize::new(0),
-                AtomicUsize::new(0),
-                AtomicUsize::new(0),
-                AtomicUsize::new(0),
-                AtomicUsize::new(0),
-                AtomicUsize::new(0),
-                AtomicUsize::new(0),
-                AtomicUsize::new(0),
-                AtomicUsize::new(0),
-            ],
+            heads: core::array::from_fn(|_| CachePadded::new(AtomicUsize::new(0))),
         }
     }
 
@@ -283,6 +280,20 @@ impl Drop for SlabState {
 }
 
 /// A branded slab allocator.
+///
+/// # TODOs and Future Optimizations
+///
+/// - **TODO(perf): Thread-Local Caching (TLH)**:
+///   Currently, `ConcurrentGhostAlloc` suffers from contention on the `head` page of each size class.
+///   Implementing a thread-local cache (via `ThreadLocal` or `SharedGhostToken` sharding) would
+///   significantly improve throughput for high-concurrency workloads, similar to `mimalloc`'s free list sharding.
+///
+/// - **TODO(perf): Restartable Sequences (RSEQ)**:
+///   On Linux, using RSEQ could allow faster per-cpu operations without atomics for the fast path.
+///
+/// - **TODO(mem): Eager Page Return**:
+///   Currently, empty pages are only returned when the Slab is dropped. Implementing logic to
+///   return pages to the OS (or a global pool) when they become empty would reduce memory footprint.
 pub struct BrandedSlab<'brand> {
     state: GhostCell<'brand, SlabState>,
 }
@@ -329,10 +340,10 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
 
             // Head full or empty, allocate new page
             // Optimization: We push new page to front
-            if let Some(mut new_page_ptr) = Page::new(block_size, page_ptr_val) {
+            if let Some(new_page_ptr) = Page::new(block_size, page_ptr_val) {
                 unsafe {
-                    let new_page = new_page_ptr.as_mut();
-                    let ptr = new_page.alloc_mut().ok_or(AllocError)?;
+                    let mut new_page = new_page_ptr;
+                    let ptr = new_page.as_mut().alloc_mut().ok_or(AllocError)?;
 
                     *head_atomic.get_mut() = new_page_ptr.as_ptr() as usize;
 
@@ -357,19 +368,6 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
         layout: Layout,
     ) {
         let size = layout.size().max(layout.align()).max(std::mem::size_of::<usize>());
-        // Ensure we have access to state (though dealloc mainly needs the page)
-        // We technically don't need `state` if we trust `ptr` is from this slab.
-        // But `Page::from_ptr` gives us the Page.
-        // We need mutable access to Page.
-        // Since we have `&mut token`, we "have" mutable access to all branded data.
-        // Is that true? `GhostCell` gives interior mutability.
-        // The Page memory is effectively owned by the Slab which is in a GhostCell.
-        // So `&mut token` implies we can mutate the Page.
-        // However, `Page::dealloc_mut` takes `&mut Page`.
-        // We can get `&mut Page` from `ptr` unsafely.
-        // BUT, wait. Is it possible another thread is accessing `Page` via `ConcurrentGhostAlloc`?
-        // NO. `&mut GhostToken` is linear. If we have it, no one else has ANY token (shared or mut).
-        // So we have exclusive access.
 
         if SlabState::get_class_index(size).is_some() {
             let mut page_ptr = Page::from_ptr(ptr);

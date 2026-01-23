@@ -21,6 +21,7 @@
 //!   - Sets `writer_active` (SeqCst).
 //!   - Waits for the sum of *all* shard counters to be zero (with backoff).
 
+use crate::concurrency::CachePadded;
 use crate::GhostToken;
 use std::cell::{Cell, UnsafeCell};
 use std::collections::hash_map::DefaultHasher;
@@ -37,26 +38,6 @@ const SHARD_MASK: usize = SHARD_COUNT - 1;
 thread_local! {
     /// Caches the shard index for the current thread to avoid re-hashing.
     static THREAD_SHARD_INDEX: Cell<Option<usize>> = const { Cell::new(None) };
-}
-
-/// Helper struct for cache line padding to avoid false sharing.
-/// We use 128 bytes to be safe for most architectures (x86 is 64, Apple Silicon can be 128).
-#[repr(align(128))]
-struct CachePadded<T> {
-    value: T,
-}
-
-impl<T> CachePadded<T> {
-    const fn new(value: T) -> Self {
-        Self { value }
-    }
-}
-
-impl<T> Deref for CachePadded<T> {
-    type Target = T;
-    fn deref(&self) -> &T {
-        &self.value
-    }
 }
 
 /// A thread-safe, shared handle to a ghost token with scalable read performance.
