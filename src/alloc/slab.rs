@@ -13,6 +13,8 @@ use std::alloc::{alloc, dealloc, handle_alloc_error};
 const PAGE_SIZE: usize = 4096;
 const MAX_SMALL_SIZE: usize = 2048; // Anything larger goes to global allocator
 
+// TODO: Support custom page sizes or huge pages for better performance with large working sets.
+
 /// A memory page containing blocks of a specific size.
 ///
 /// This struct is embedded at the START of the allocated 4KB page.
@@ -92,6 +94,7 @@ impl Page {
 
     /// Allocates a block from this page.
     unsafe fn alloc(&mut self) -> Option<NonNull<u8>> {
+        // TODO: Implement a more sophisticated free list search (e.g., bitmask or intrusive list) for better locality.
         if let Some(idx) = self.free_head {
             let page_addr = self as *mut Page as usize;
 
@@ -207,6 +210,8 @@ impl<'brand> BrandedSlab<'brand> {
     }
 }
 
+// TODO: Add thread-local caching or stealing mechanisms if we extend SharedGhostToken usage.
+
 impl<'brand> Default for BrandedSlab<'brand> {
     fn default() -> Self {
         Self::new()
@@ -285,6 +290,7 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
             // Note: We don't eagerly return empty pages to OS in this simple implementation,
             // nor do we maintain a "partial" list vs "full" list.
             // This is a basic slab.
+            // TODO: Implement eager return of empty pages to the OS to reduce memory pressure.
         } else {
             dealloc(ptr.as_ptr(), layout);
         }

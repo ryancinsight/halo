@@ -112,6 +112,7 @@ impl<'brand, T> BrandedPool<'brand, T> {
             }
         } else {
             // Push new slot
+            // TODO: Optimize bulk allocation by reserving capacity ahead of time if possible.
             let idx = state.storage.len();
             state.storage.push(PoolSlot {
                 occupied: ManuallyDrop::new(value),
@@ -153,6 +154,8 @@ impl<'brand, T> BrandedPool<'brand, T> {
         // Add to free list
         slot.next_free = state.free_head.unwrap_or(usize::MAX);
         state.free_head = Some(index);
+
+        // TODO: Implement pool shrinking (reclaiming memory) when utilization drops below a threshold.
     }
 
     /// Deallocates the value at `index` and returns it.
