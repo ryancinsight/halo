@@ -6,6 +6,7 @@
 
 pub mod atomic;
 pub mod cache_padded;
+pub mod channel;
 pub mod scoped;
 pub mod sync;
 pub mod worklist;

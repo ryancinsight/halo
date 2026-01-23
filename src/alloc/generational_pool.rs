@@ -5,8 +5,8 @@
 
 use crate::collections::vec::BrandedVec;
 use crate::{GhostCell, GhostToken};
-use core::mem::ManuallyDrop;
 use core::marker::PhantomData;
+use core::mem::ManuallyDrop;
 
 /// A generational index.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -106,7 +106,9 @@ impl<'brand, T> GenerationalPool<'brand, T> {
             let idx = state.storage.len();
             state.storage.push(Slot {
                 generation: 0,
-                data: SlotData { occupied: ManuallyDrop::new(value) },
+                data: SlotData {
+                    occupied: ManuallyDrop::new(value),
+                },
             });
 
             let word_idx = idx >> BIT_SHIFT;
@@ -124,23 +126,31 @@ impl<'brand, T> GenerationalPool<'brand, T> {
         }
     }
 
-    pub fn get<'a>(&'a self, token: &'a GhostToken<'brand>, idx: GenerationalIndex<'brand>) -> Option<&'a T> {
+    pub fn get<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+        idx: GenerationalIndex<'brand>,
+    ) -> Option<&'a T> {
         let state = self.state.borrow(token);
         let i = idx.index;
         if i < state.storage.len() {
-             let word_idx = i >> BIT_SHIFT;
-             let bit_idx = i & BIT_MASK;
-             if (state.occupied[word_idx] & (1 << bit_idx)) != 0 {
-                 let slot = unsafe { state.storage.get_unchecked(token, i) };
-                 if slot.generation == idx.generation {
-                     return Some(unsafe { &slot.data.occupied });
-                 }
-             }
+            let word_idx = i >> BIT_SHIFT;
+            let bit_idx = i & BIT_MASK;
+            if (state.occupied[word_idx] & (1 << bit_idx)) != 0 {
+                let slot = unsafe { state.storage.get_unchecked(token, i) };
+                if slot.generation == idx.generation {
+                    return Some(unsafe { &slot.data.occupied });
+                }
+            }
         }
         None
     }
 
-    pub fn get_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>, idx: GenerationalIndex<'brand>) -> Option<&'a mut T> {
+    pub fn get_mut<'a>(
+        &'a self,
+        token: &'a mut GhostToken<'brand>,
+        idx: GenerationalIndex<'brand>,
+    ) -> Option<&'a mut T> {
         let state = self.state.borrow_mut(token);
         let i = idx.index;
         // We need unsafe access because we borrowed state
@@ -148,12 +158,12 @@ impl<'brand, T> GenerationalPool<'brand, T> {
             if i < state.storage.len() {
                 let word_idx = i >> BIT_SHIFT;
                 let bit_idx = i & BIT_MASK;
-                 if (state.occupied[word_idx] & (1 << bit_idx)) != 0 {
-                     let slot = state.storage.get_unchecked_mut_exclusive(i);
-                     if slot.generation == idx.generation {
-                         return Some(&mut slot.data.occupied);
-                     }
-                 }
+                if (state.occupied[word_idx] & (1 << bit_idx)) != 0 {
+                    let slot = state.storage.get_unchecked_mut_exclusive(i);
+                    if slot.generation == idx.generation {
+                        return Some(&mut slot.data.occupied);
+                    }
+                }
             }
         }
         None
@@ -165,23 +175,23 @@ impl<'brand, T> GenerationalPool<'brand, T> {
 
         unsafe {
             if i < state.storage.len() {
-                 let word_idx = i >> BIT_SHIFT;
-                 let bit_idx = i & BIT_MASK;
-                 if (state.occupied[word_idx] & (1 << bit_idx)) != 0 {
-                     let slot = state.storage.get_unchecked_mut_exclusive(i);
-                     if slot.generation == idx.generation {
-                         // Valid free
-                         ManuallyDrop::drop(&mut slot.data.occupied);
+                let word_idx = i >> BIT_SHIFT;
+                let bit_idx = i & BIT_MASK;
+                if (state.occupied[word_idx] & (1 << bit_idx)) != 0 {
+                    let slot = state.storage.get_unchecked_mut_exclusive(i);
+                    if slot.generation == idx.generation {
+                        // Valid free
+                        ManuallyDrop::drop(&mut slot.data.occupied);
 
-                         state.occupied[word_idx] &= !(1 << bit_idx);
+                        state.occupied[word_idx] &= !(1 << bit_idx);
 
-                         slot.data.next_free = state.free_head.unwrap_or(usize::MAX);
-                         state.free_head = Some(i);
+                        slot.data.next_free = state.free_head.unwrap_or(usize::MAX);
+                        state.free_head = Some(i);
 
-                         state.len -= 1;
-                         return true;
-                     }
-                 }
+                        state.len -= 1;
+                        return true;
+                    }
+                }
             }
         }
         false

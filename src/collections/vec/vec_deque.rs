@@ -433,7 +433,9 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
                 let new_cap = self.cap;
                 let new_layout = Layout::array::<GhostCell<'brand, T>>(new_cap).unwrap();
                 let new_ptr = alloc(new_layout) as *mut GhostCell<'brand, T>;
-                if new_ptr.is_null() { handle_alloc_error(new_layout); }
+                if new_ptr.is_null() {
+                    handle_alloc_error(new_layout);
+                }
 
                 // Copy head part to start of new buffer
                 ptr::copy_nonoverlapping(ptr.add(head), new_ptr, head_len);
@@ -467,11 +469,7 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
     /// # logic
     /// This method rotates the deque to bring the range to the front, yields elements,
     /// pushes new elements to the back, and rotates again to restore order.
-    pub fn splice<R, I>(
-        &mut self,
-        range: R,
-        replace_with: I,
-    ) -> Splice<'_, 'brand, T, I::IntoIter>
+    pub fn splice<R, I>(&mut self, range: R, replace_with: I) -> Splice<'_, 'brand, T, I::IntoIter>
     where
         R: std::ops::RangeBounds<usize>,
         I: IntoIterator<Item = T>,

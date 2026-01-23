@@ -70,17 +70,17 @@ where
             }
             idx = idx | (idx + 1);
             if idx < n {
-                 unsafe {
+                unsafe {
                     *self.tree.get_unchecked_mut(token, idx) += delta;
                 }
                 idx = idx | (idx + 1);
                 if idx < n {
-                     unsafe {
+                    unsafe {
                         *self.tree.get_unchecked_mut(token, idx) += delta;
                     }
                     idx = idx | (idx + 1);
                     if idx < n {
-                         unsafe {
+                        unsafe {
                             *self.tree.get_unchecked_mut(token, idx) += delta;
                         }
                         idx = idx | (idx + 1);
@@ -98,7 +98,7 @@ where
     pub fn prefix_sum(&self, token: &GhostToken<'brand>, index: usize) -> T {
         let n = self.len();
         if index >= n {
-             panic!("Index out of bounds");
+            panic!("Index out of bounds");
         }
 
         let mut sum = T::default();
@@ -110,28 +110,36 @@ where
             }
             // idx = (idx & (idx + 1)) - 1
             let next_idx = (idx & (idx + 1)).wrapping_sub(1);
-            if next_idx >= idx { break; } // Wrapped around
-            idx = next_idx;
-
-             unsafe {
-                sum += *self.tree.get_unchecked(token, idx);
-            }
-            let next_idx = (idx & (idx + 1)).wrapping_sub(1);
-            if next_idx >= idx { break; }
+            if next_idx >= idx {
+                break;
+            } // Wrapped around
             idx = next_idx;
 
             unsafe {
                 sum += *self.tree.get_unchecked(token, idx);
             }
             let next_idx = (idx & (idx + 1)).wrapping_sub(1);
-            if next_idx >= idx { break; }
+            if next_idx >= idx {
+                break;
+            }
             idx = next_idx;
 
             unsafe {
                 sum += *self.tree.get_unchecked(token, idx);
             }
             let next_idx = (idx & (idx + 1)).wrapping_sub(1);
-            if next_idx >= idx { break; }
+            if next_idx >= idx {
+                break;
+            }
+            idx = next_idx;
+
+            unsafe {
+                sum += *self.tree.get_unchecked(token, idx);
+            }
+            let next_idx = (idx & (idx + 1)).wrapping_sub(1);
+            if next_idx >= idx {
+                break;
+            }
             idx = next_idx;
         }
         sum
@@ -303,7 +311,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "Index out of bounds")]
     fn test_fenwick_tree_oob_add() {
-         GhostToken::new(|mut token| {
+        GhostToken::new(|mut token| {
             let mut ft = BrandedFenwickTree::<i32>::new();
             ft.add(&mut token, 0, 1);
         });

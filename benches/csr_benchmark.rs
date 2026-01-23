@@ -34,7 +34,7 @@ fn bench_csr_in_neighbors(c: &mut Criterion) {
 
     c.bench_function("csr_in_degree", |b| {
         b.iter(|| {
-             for i in 0..10 {
+            for i in 0..10 {
                 let target = (i * 100) % nodes;
                 black_box(graph.in_degree(target));
             }

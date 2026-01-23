@@ -115,7 +115,6 @@ where
         }
         true
     }
-
 }
 
 impl<'brand, T> Default for BrandedBloomFilter<'brand, T> {

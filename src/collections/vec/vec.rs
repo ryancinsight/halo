@@ -15,8 +15,8 @@
 //! This is exactly the separation of *permissions* (token) from *data* (cells).
 
 use crate::{GhostCell, GhostToken};
-use core::slice;
 use core::mem::MaybeUninit;
+use core::slice;
 
 /// Compile-time assertion types for const generics bounds checking
 pub struct Assert<const COND: bool>;

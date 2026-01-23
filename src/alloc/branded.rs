@@ -37,12 +37,7 @@ impl<'brand> GhostAlloc<'brand> for BrandedAllocator<'brand> {
         NonNull::new(ptr).ok_or(AllocError)
     }
 
-    unsafe fn deallocate(
-        &self,
-        token: &GhostToken<'brand>,
-        ptr: NonNull<u8>,
-        layout: Layout,
-    ) {
+    unsafe fn deallocate(&self, token: &GhostToken<'brand>, ptr: NonNull<u8>, layout: Layout) {
         self.heap.dealloc(token, ptr.as_ptr(), layout);
     }
 }

@@ -154,11 +154,7 @@ impl<'brand, T> BrandedPool<'brand, T> {
                 // Read next_free from the slot (it was free)
                 let next = slot.next_free;
 
-                state.free_head = if next == usize::MAX {
-                    None
-                } else {
-                    Some(next)
-                };
+                state.free_head = if next == usize::MAX { None } else { Some(next) };
 
                 // Write value
                 slot.occupied = ManuallyDrop::new(value);
@@ -259,9 +255,7 @@ impl<'brand, T> BrandedPool<'brand, T> {
             let bit_idx = index & BIT_MASK;
             if (state.occupied[word_idx] & (1 << bit_idx)) != 0 {
                 // Safety: checked occupied bit
-                unsafe {
-                    Some(&state.storage.get_unchecked(token, index).occupied)
-                }
+                unsafe { Some(&state.storage.get_unchecked(token, index).occupied) }
             } else {
                 None
             }
@@ -275,7 +269,11 @@ impl<'brand, T> BrandedPool<'brand, T> {
     /// # Safety
     /// The caller must ensure that `index` is within bounds and points to an `Occupied` slot.
     #[inline]
-    pub unsafe fn get_unchecked<'a>(&'a self, token: &'a GhostToken<'brand>, index: usize) -> &'a T {
+    pub unsafe fn get_unchecked<'a>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+        index: usize,
+    ) -> &'a T {
         let state = self.state.borrow(token);
         &state.storage.get_unchecked(token, index).occupied
     }
@@ -399,12 +397,12 @@ impl<'brand, T> BrandedPool<'brand, T> {
                 if is_occupied {
                     let (new_val, aux) = clone_fn(&slot.occupied);
                     new_storage.push(PoolSlot {
-                        occupied: ManuallyDrop::new(new_val)
+                        occupied: ManuallyDrop::new(new_val),
                     });
                     aux_vec.push(Some(aux));
                 } else {
                     new_storage.push(PoolSlot {
-                        next_free: slot.next_free
+                        next_free: slot.next_free,
                     });
                     aux_vec.push(None);
                 }
@@ -452,7 +450,9 @@ mod tests {
 
             // Free all
             for idx in indices.drain(..) {
-                unsafe { pool.free(&mut token, idx); }
+                unsafe {
+                    pool.free(&mut token, idx);
+                }
             }
 
             // Should have shrunk to 0 because all free
@@ -486,7 +486,9 @@ mod tests {
 
             // Free the second half (indices 100..200)
             for i in 100..200 {
-                unsafe { pool.free(&mut token, indices[i]); }
+                unsafe {
+                    pool.free(&mut token, indices[i]);
+                }
             }
 
             // Utilization: 100/200 = 50%.
@@ -495,7 +497,9 @@ mod tests {
 
             // Free more: 50..100.
             for i in 50..100 {
-                 unsafe { pool.free(&mut token, indices[i]); }
+                unsafe {
+                    pool.free(&mut token, indices[i]);
+                }
             }
 
             // Utilization: 50/200 = 25%. Borderline.

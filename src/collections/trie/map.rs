@@ -196,7 +196,8 @@ where
                     .get(token, curr_idx)
                     .expect("Node index out of bounds");
                 if let NodeSlot::Occupied(node) = slot {
-                    let common = common_prefix_len(&key_bytes[key_offset..], node.prefix.as_slice());
+                    let common =
+                        common_prefix_len(&key_bytes[key_offset..], node.prefix.as_slice());
                     (common, node.prefix.len())
                 } else {
                     panic!("Corrupted trie: pointing to free slot");

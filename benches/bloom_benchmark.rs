@@ -16,15 +16,14 @@ fn bit_set_benchmark(c: &mut Criterion) {
             || unsafe {
                 // Create with 'static lifetime for transport
                 mem::transmute::<BrandedBitSet<'_>, BrandedBitSet<'static>>(
-                    BrandedBitSet::with_capacity(size * 64)
+                    BrandedBitSet::with_capacity(size * 64),
                 )
             },
             |set| {
                 GhostToken::new(|mut token| {
                     // Cast to current token
-                    let mut set = unsafe {
-                        mem::transmute::<BrandedBitSet<'static>, BrandedBitSet<'_>>(set)
-                    };
+                    let mut set =
+                        unsafe { mem::transmute::<BrandedBitSet<'static>, BrandedBitSet<'_>>(set) };
                     for i in 0..size {
                         set.insert(&mut token, black_box(i * 3));
                     }
@@ -64,7 +63,7 @@ fn bit_set_benchmark(c: &mut Criterion) {
 
         b.iter(|| {
             GhostToken::new(|token| {
-                 let set = unsafe {
+                let set = unsafe {
                     mem::transmute::<&BrandedBitSet<'static>, &BrandedBitSet<'_>>(&set_static)
                 };
                 for i in 0..size {
@@ -91,7 +90,7 @@ fn bit_set_benchmark(c: &mut Criterion) {
     group.bench_function("BrandedBitSet union", |b| {
         b.iter_batched(
             || {
-                 let (s1, s2) = GhostToken::new(|mut token| {
+                let (s1, s2) = GhostToken::new(|mut token| {
                     let mut set1 = BrandedBitSet::with_capacity(size * 64);
                     let mut set2 = BrandedBitSet::with_capacity(size * 64);
                     for i in 0..size {
@@ -101,16 +100,18 @@ fn bit_set_benchmark(c: &mut Criterion) {
                     unsafe {
                         (
                             mem::transmute::<BrandedBitSet<'_>, BrandedBitSet<'static>>(set1),
-                            mem::transmute::<BrandedBitSet<'_>, BrandedBitSet<'static>>(set2)
+                            mem::transmute::<BrandedBitSet<'_>, BrandedBitSet<'static>>(set2),
                         )
                     }
-                 });
-                 (s1, s2)
+                });
+                (s1, s2)
             },
             |(s1, s2)| {
                 GhostToken::new(|mut token| {
-                    let mut set1 = unsafe { mem::transmute::<BrandedBitSet<'static>, BrandedBitSet<'_>>(s1) };
-                    let set2 = unsafe { mem::transmute::<BrandedBitSet<'static>, BrandedBitSet<'_>>(s2) };
+                    let mut set1 =
+                        unsafe { mem::transmute::<BrandedBitSet<'static>, BrandedBitSet<'_>>(s1) };
+                    let set2 =
+                        unsafe { mem::transmute::<BrandedBitSet<'static>, BrandedBitSet<'_>>(s2) };
 
                     set1.union_with(&mut token, &set2);
                 });
@@ -149,13 +150,16 @@ fn bloom_filter_benchmark(c: &mut Criterion) {
         b.iter_batched(
             || unsafe {
                 mem::transmute::<BrandedBloomFilter<usize>, BrandedBloomFilter<'static, usize>>(
-                    BrandedBloomFilter::<usize>::with_capacity_and_fp_rate(size, 0.01)
+                    BrandedBloomFilter::<usize>::with_capacity_and_fp_rate(size, 0.01),
                 )
             },
             |bloom| {
                 GhostToken::new(|mut token| {
                     let mut bloom = unsafe {
-                        mem::transmute::<BrandedBloomFilter<'static, usize>, BrandedBloomFilter<'_, usize>>(bloom)
+                        mem::transmute::<
+                            BrandedBloomFilter<'static, usize>,
+                            BrandedBloomFilter<'_, usize>,
+                        >(bloom)
                     };
                     for i in 0..size {
                         bloom.insert(&mut token, black_box(&i));
@@ -174,14 +178,19 @@ fn bloom_filter_benchmark(c: &mut Criterion) {
                 bloom.insert(&mut token, &i);
             }
             unsafe {
-                mem::transmute::<BrandedBloomFilter<usize>, BrandedBloomFilter<'static, usize>>(bloom)
+                mem::transmute::<BrandedBloomFilter<usize>, BrandedBloomFilter<'static, usize>>(
+                    bloom,
+                )
             }
         });
 
         b.iter(|| {
             GhostToken::new(|token| {
                 let bloom = unsafe {
-                    mem::transmute::<&BrandedBloomFilter<'static, usize>, &BrandedBloomFilter<'_, usize>>(&bloom_static)
+                    mem::transmute::<
+                        &BrandedBloomFilter<'static, usize>,
+                        &BrandedBloomFilter<'_, usize>,
+                    >(&bloom_static)
                 };
                 for i in 0..size {
                     black_box(bloom.contains(&token, black_box(&i)));

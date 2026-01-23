@@ -109,9 +109,7 @@ impl<'a, 'brand, E> Iterator for Dfs<'a, 'brand, E> {
 /// and the value is the component ID (representative node ID).
 ///
 /// This function uses `BrandedDisjointSet` internally for efficiency.
-pub fn connected_components<'a, 'brand, E>(
-    graph: FastAdjListGraph<'a, 'brand, E>,
-) -> Vec<usize> {
+pub fn connected_components<'a, 'brand, E>(graph: FastAdjListGraph<'a, 'brand, E>) -> Vec<usize> {
     let len = graph.node_count();
 
     // Create a new branded scope for the disjoint set

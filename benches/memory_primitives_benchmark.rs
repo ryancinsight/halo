@@ -93,10 +93,8 @@ fn bench_static_rc(c: &mut Criterion) {
                 let rc = StaticRc::<'_, i32, 10, 10>::new(42);
                 rc.split::<5, 5>()
             },
-            |(r1, r2)| {
-                unsafe {
-                    black_box(r1.join_unchecked::<5, 10>(r2));
-                }
+            |(r1, r2)| unsafe {
+                black_box(r1.join_unchecked::<5, 10>(r2));
             },
             BatchSize::SmallInput,
         )
