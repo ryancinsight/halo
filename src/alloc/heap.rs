@@ -17,6 +17,9 @@ use std::alloc::{alloc, dealloc, handle_alloc_error, realloc};
 /// In a more advanced "ground up" implementation, this would manage raw memory blocks
 /// (e.g., via mmap) and implement a slab/buddy allocator. For now, it wraps `std::alloc`
 /// to establish the API pattern.
+///
+/// TODO: Implement a true heap manager (buddy system or slab) instead of wrapping `std::alloc`.
+/// This would allow for complete isolation and potentially better performance for specific workloads.
 pub struct BrandedHeap<'brand> {
     // Phantom data to tie this heap instance to the brand lifetime.
     // In a real implementation, this might hold state like a list of allocated blocks
