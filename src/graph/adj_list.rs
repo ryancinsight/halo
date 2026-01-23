@@ -14,10 +14,10 @@
 //! graph traversals (BFS/DFS) iterate over contiguous vectors and avoid pointer
 //! chasing to random heap locations for each visited node.
 
+use super::traversal::{Bfs, Dfs};
 use crate::alloc::{BrandedPool, StaticRc};
 use crate::cell::GhostCell;
 use crate::collections::other::trusted_index::TrustedIndex;
-use super::traversal::{Bfs, Dfs};
 use crate::GhostToken;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
@@ -104,11 +104,7 @@ impl<'brand, E> EdgeStore<'brand, E> {
         }
     }
 
-    fn alloc(
-        &mut self,
-        forward: ForwardEdge<'brand, E>,
-        backward: BackwardEdge<'brand>,
-    ) -> usize {
+    fn alloc(&mut self, forward: ForwardEdge<'brand, E>, backward: BackwardEdge<'brand>) -> usize {
         self.len += 1;
         if let Some(idx) = self.free_head {
             match &mut self.forward[idx] {
@@ -166,10 +162,7 @@ impl<'brand, E> EdgeStore<'brand, E> {
         self.backward.get_unchecked_mut(idx)
     }
 
-    fn clone_structure<'new_brand, F, NewE>(
-        &self,
-        mut clone_fn: F,
-    ) -> EdgeStore<'new_brand, NewE>
+    fn clone_structure<'new_brand, F, NewE>(&self, mut clone_fn: F) -> EdgeStore<'new_brand, NewE>
     where
         F: FnMut(&E) -> NewE,
     {
@@ -301,24 +294,24 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
         // Ensure topology storage
         let topology = self.node_topology.borrow_mut(token);
         if idx >= topology.len() {
-             // We need to resize. Since alloc usually fills holes or appends 1,
-             // and we want dense indexing matching pool storage, we can push default.
-             // Pool index can be anything < pool capacity.
-             // BrandedPool logic: if free_head, use it. Else push.
-             // If push, idx == len.
-             // If free_head, idx < len.
-             // So we only need to push if idx == len (which is >= len).
-             if idx == topology.len() {
-                 topology.push(NodeTopology::default());
-             } else {
-                 // Should be already allocated if reusing.
-                 // Ensure bounds just in case logic drifts (e.g. pool impl changes)
-                 while topology.len() <= idx {
-                     topology.push(NodeTopology::default());
-                 }
-                 // Reset the slot if it was reused (though fields are overwritten anyway)
-                 topology[idx] = NodeTopology::default();
-             }
+            // We need to resize. Since alloc usually fills holes or appends 1,
+            // and we want dense indexing matching pool storage, we can push default.
+            // Pool index can be anything < pool capacity.
+            // BrandedPool logic: if free_head, use it. Else push.
+            // If push, idx == len.
+            // If free_head, idx < len.
+            // So we only need to push if idx == len (which is >= len).
+            if idx == topology.len() {
+                topology.push(NodeTopology::default());
+            } else {
+                // Should be already allocated if reusing.
+                // Ensure bounds just in case logic drifts (e.g. pool impl changes)
+                while topology.len() <= idx {
+                    topology.push(NodeTopology::default());
+                }
+                // Reset the slot if it was reused (though fields are overwritten anyway)
+                topology[idx] = NodeTopology::default();
+            }
         } else {
             // Reusing a slot, clear it
             topology[idx] = NodeTopology::default();
@@ -331,11 +324,7 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
     ///
     /// Requires the user to surrender their `NodeHandle`.
     /// Returns the value stored in the node.
-    pub fn remove_node(
-        &self,
-        token: &mut GhostToken<'brand>,
-        handle: NodeHandle<'brand, V>,
-    ) -> V {
+    pub fn remove_node(&self, token: &mut GhostToken<'brand>, handle: NodeHandle<'brand, V>) -> V {
         // 1. Get the pool index from the handle.
         let pool_idx = handle.borrow(token).pool_idx;
 
@@ -406,7 +395,10 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
         // Read current heads
         let (next_outgoing, next_incoming) = {
             let topo = self.node_topology.borrow(token);
-            (topo[source_idx].head_outgoing, topo[target_idx].head_incoming)
+            (
+                topo[source_idx].head_outgoing,
+                topo[target_idx].head_incoming,
+            )
         };
 
         // Allocate edge
@@ -528,11 +520,7 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
     }
 
     /// Returns the unique integer ID (pool index) of a node.
-    pub fn node_id(
-        &self,
-        token: &GhostToken<'brand>,
-        handle: &NodeHandle<'brand, V>,
-    ) -> usize {
+    pub fn node_id(&self, token: &GhostToken<'brand>, handle: &NodeHandle<'brand, V>) -> usize {
         handle.borrow(token).pool_idx
     }
 
@@ -557,10 +545,7 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
         let pool_idx = node.borrow(token).pool_idx;
         let curr_edge = self.node_topology.borrow(token)[pool_idx].head_outgoing;
         let edges = self.edges.borrow(token);
-        NeighborIndices {
-            edges,
-            curr_edge,
-        }
+        NeighborIndices { edges, curr_edge }
     }
 
     /// Iterates over outgoing neighbor IDs and edge weights given a node ID.
@@ -577,10 +562,7 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
         // If out of bounds, Vec index panics (safe).
         let curr_edge = self.node_topology.borrow(token)[node_id].head_outgoing;
         let edges = self.edges.borrow(token);
-        NeighborIndices {
-            edges,
-            curr_edge,
-        }
+        NeighborIndices { edges, curr_edge }
     }
 
     /// Returns a reference to the node cell given its ID.
@@ -617,10 +599,7 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
     /// Computes the connected components of the graph.
     ///
     /// Returns a vector where the index is the node ID and the value is the component ID.
-    pub fn connected_components(
-        &self,
-        token: &GhostToken<'brand>,
-    ) -> Vec<usize> {
+    pub fn connected_components(&self, token: &GhostToken<'brand>) -> Vec<usize> {
         let view = self.as_fast_view(token);
         super::traversal::connected_components(view)
     }
@@ -631,11 +610,7 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
     /// - Uses `Vec<bool>` for dense visited tracking (cache friendly).
     /// - Uses `neighbor_indices_by_id` to traverse topology without heap accesses.
     /// - Returns a vector of visited node IDs in traversal order.
-    pub fn bfs(
-        &self,
-        token: &GhostToken<'brand>,
-        start_node: usize,
-    ) -> Vec<usize> {
+    pub fn bfs(&self, token: &GhostToken<'brand>, start_node: usize) -> Vec<usize> {
         let topology = self.node_topology.borrow(token);
         let mut visited = vec![false; topology.len()];
         let mut queue = std::collections::VecDeque::new();
@@ -663,11 +638,7 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
     /// Performs a Depth-First Search (DFS) starting from `start_node`.
     ///
     /// This method is fully optimized for the SoA layout.
-    pub fn dfs(
-        &self,
-        token: &GhostToken<'brand>,
-        start_node: usize,
-    ) -> Vec<usize> {
+    pub fn dfs(&self, token: &GhostToken<'brand>, start_node: usize) -> Vec<usize> {
         let topology = self.node_topology.borrow(token);
         let mut visited = vec![false; topology.len()];
         let mut stack = Vec::new();
@@ -781,10 +752,7 @@ impl<'a, 'brand, E> FastAdjListGraph<'a, 'brand, E> {
 
     /// Iterates over outgoing neighbor IDs and edge weights given a node ID.
     #[inline]
-    pub fn neighbor_indices(
-        &self,
-        node_id: usize,
-    ) -> NeighborIndices<'a, 'brand, E> {
+    pub fn neighbor_indices(&self, node_id: usize) -> NeighborIndices<'a, 'brand, E> {
         let curr_edge = self.topology.get(node_id).and_then(|t| t.head_outgoing);
         NeighborIndices {
             edges: self.edges,
@@ -871,7 +839,11 @@ impl<'a, 'brand, V, E, Ty> Iterator for Neighbors<'a, 'brand, V, E, Ty> {
 
         self.curr_edge = forward.next_outgoing;
 
-        let target_handle = unsafe { self.graph.nodes.get_unchecked(self._token, forward.target_idx.get()) };
+        let target_handle = unsafe {
+            self.graph
+                .nodes
+                .get_unchecked(self._token, forward.target_idx.get())
+        };
         let target_node = target_handle.get();
         Some((target_node, &forward.weight))
     }
@@ -940,25 +912,30 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
                 _marker: PhantomData,
             };
 
-            let full_rc: StaticRc<'new_brand, _, 2, 2> =
-                StaticRc::new(GhostCell::new(new_data));
+            let full_rc: StaticRc<'new_brand, _, 2, 2> = StaticRc::new(GhostCell::new(new_data));
             let (h1, h2) = full_rc.split::<1, 1>();
             (h1, h2)
         });
 
         // 2. Clone topology
         let old_topology = self.node_topology.borrow(token);
-        let new_topology_vec: Vec<NodeTopology<'new_brand>> = old_topology.iter().map(|t| {
-             NodeTopology {
-                 head_outgoing: t.head_outgoing.map(|i| unsafe { TrustedIndex::new_unchecked(i.get()) }),
-                 head_incoming: t.head_incoming.map(|i| unsafe { TrustedIndex::new_unchecked(i.get()) }),
-             }
-        }).collect();
+        let new_topology_vec: Vec<NodeTopology<'new_brand>> = old_topology
+            .iter()
+            .map(|t| NodeTopology {
+                head_outgoing: t
+                    .head_outgoing
+                    .map(|i| unsafe { TrustedIndex::new_unchecked(i.get()) }),
+                head_incoming: t
+                    .head_incoming
+                    .map(|i| unsafe { TrustedIndex::new_unchecked(i.get()) }),
+            })
+            .collect();
 
         // 3. Clone edges
-        let new_edges_store = self.edges.borrow(token).clone_structure(|old_weight| {
-            old_weight.clone()
-        });
+        let new_edges_store = self
+            .edges
+            .borrow(token)
+            .clone_structure(|old_weight| old_weight.clone());
 
         (
             AdjListGraph {

@@ -1,6 +1,6 @@
+use core::ops::Deref;
 use std::boxed::Box;
 use std::vec::Vec;
-use core::ops::Deref;
 
 /// Max size for inline prefix. 15 bytes leaves 1 byte for length in a 16-byte alignment.
 const INLINE_PREFIX_CAP: usize = 15;
@@ -12,7 +12,10 @@ const INLINE_PREFIX_CAP: usize = 15;
 /// - Heap: arbitrarily long, stored in a `Box<[u8]>`.
 #[derive(Debug, Clone)]
 pub enum NodePrefix {
-    Inline { len: u8, data: [u8; INLINE_PREFIX_CAP] },
+    Inline {
+        len: u8,
+        data: [u8; INLINE_PREFIX_CAP],
+    },
     Heap(Box<[u8]>),
 }
 
@@ -43,7 +46,7 @@ impl NodePrefix {
     /// Returns the length of the prefix.
     #[inline]
     pub fn len(&self) -> usize {
-         match self {
+        match self {
             NodePrefix::Inline { len, .. } => *len as usize,
             NodePrefix::Heap(b) => b.len(),
         }

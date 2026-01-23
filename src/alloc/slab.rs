@@ -4,9 +4,9 @@
 //! Access is protected by `GhostToken`, ensuring exclusive access without locks,
 //! or concurrent access via `GhostAlloc`.
 
-use crate::{GhostToken, GhostCell};
-use crate::alloc::{GhostAlloc, AllocError};
+use crate::alloc::{AllocError, GhostAlloc};
 use crate::concurrency::CachePadded;
+use crate::{GhostCell, GhostToken};
 use core::alloc::Layout;
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicUsize, Ordering};
@@ -86,13 +86,16 @@ impl Page {
 
             // Write the header
             // Note: free_head starts at 0 with tag 0.
-            std::ptr::write(page_ptr, Page {
-                next: AtomicUsize::new(next_ptr),
-                block_size,
-                free_head: AtomicUsize::new(0),
-                capacity,
-                _padding: [0; 96],
-            });
+            std::ptr::write(
+                page_ptr,
+                Page {
+                    next: AtomicUsize::new(next_ptr),
+                    block_size,
+                    free_head: AtomicUsize::new(0),
+                    capacity,
+                    _padding: [0; 96],
+                },
+            );
 
             Some(NonNull::new_unchecked(page_ptr))
         }
@@ -242,8 +245,12 @@ impl SlabState {
     }
 
     fn get_class_index(size: usize) -> Option<usize> {
-        if size <= 8 { return Some(0); }
-        if size > MAX_SMALL_SIZE { return None; }
+        if size <= 8 {
+            return Some(0);
+        }
+        if size > MAX_SMALL_SIZE {
+            return None;
+        }
 
         let mut idx = 0;
         let mut s = 8;
@@ -314,7 +321,10 @@ impl<'brand> BrandedSlab<'brand> {
         token: &mut GhostToken<'brand>,
         layout: Layout,
     ) -> Result<NonNull<u8>, AllocError> {
-        let size = layout.size().max(layout.align()).max(std::mem::size_of::<usize>());
+        let size = layout
+            .size()
+            .max(layout.align())
+            .max(std::mem::size_of::<usize>());
         let state = self.state.borrow_mut(token);
 
         if let Some(class_idx) = SlabState::get_class_index(size) {
@@ -362,7 +372,10 @@ impl<'brand> BrandedSlab<'brand> {
         ptr: NonNull<u8>,
         layout: Layout,
     ) {
-        let size = layout.size().max(layout.align()).max(std::mem::size_of::<usize>());
+        let size = layout
+            .size()
+            .max(layout.align())
+            .max(std::mem::size_of::<usize>());
 
         if SlabState::get_class_index(size).is_some() {
             let mut page_ptr = Page::from_ptr(ptr);
@@ -388,11 +401,14 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
         token: &GhostToken<'brand>,
         layout: Layout,
     ) -> Result<NonNull<u8>, AllocError> {
-        let size = layout.size().max(layout.align()).max(std::mem::size_of::<usize>());
+        let size = layout
+            .size()
+            .max(layout.align())
+            .max(std::mem::size_of::<usize>());
         let state = self.state.borrow(token);
 
         if let Some(class_idx) = SlabState::get_class_index(size) {
-             let head_atomic = &state.heads[class_idx];
+            let head_atomic = &state.heads[class_idx];
 
             // 1. Try to allocate from existing pages
             let mut page_ptr_val = head_atomic.load(Ordering::Acquire);
@@ -420,18 +436,14 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
                         Ordering::AcqRel,
                         Ordering::Acquire,
                     ) {
-                        Ok(_) => {
-                            unsafe {
-                                let page = new_page.as_ref();
-                                return page.alloc_atomic().ok_or(AllocError);
-                            }
-                        }
-                        Err(_) => {
-                            unsafe {
-                                let layout = Layout::from_size_align_unchecked(PAGE_SIZE, PAGE_SIZE);
-                                dealloc(new_page.as_ptr() as *mut u8, layout);
-                            }
-                        }
+                        Ok(_) => unsafe {
+                            let page = new_page.as_ref();
+                            return page.alloc_atomic().ok_or(AllocError);
+                        },
+                        Err(_) => unsafe {
+                            let layout = Layout::from_size_align_unchecked(PAGE_SIZE, PAGE_SIZE);
+                            dealloc(new_page.as_ptr() as *mut u8, layout);
+                        },
                     }
                 } else {
                     return Err(AllocError);
@@ -445,13 +457,11 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
         }
     }
 
-    unsafe fn deallocate(
-        &self,
-        _token: &GhostToken<'brand>,
-        ptr: NonNull<u8>,
-        layout: Layout,
-    ) {
-        let size = layout.size().max(layout.align()).max(std::mem::size_of::<usize>());
+    unsafe fn deallocate(&self, _token: &GhostToken<'brand>, ptr: NonNull<u8>, layout: Layout) {
+        let size = layout
+            .size()
+            .max(layout.align())
+            .max(std::mem::size_of::<usize>());
 
         if SlabState::get_class_index(size).is_some() {
             let page_ptr = Page::from_ptr(ptr);

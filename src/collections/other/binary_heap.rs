@@ -72,7 +72,10 @@ impl<'a, T> Drop for Hole<'a, T> {
     fn drop(&mut self) {
         unsafe {
             let pos = self.pos;
-            std::ptr::write(self.data.get_unchecked_mut(pos), ManuallyDrop::take(&mut self.elt));
+            std::ptr::write(
+                self.data.get_unchecked_mut(pos),
+                ManuallyDrop::take(&mut self.elt),
+            );
         }
     }
 }

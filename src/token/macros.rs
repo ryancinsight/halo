@@ -46,9 +46,7 @@ mod tests {
 
     #[test]
     fn test_scope_macro_basic() {
-        let res = scope!(|token| {
-            10
-        });
+        let res = scope!(|token| { 10 });
         assert_eq!(res, 10);
     }
 

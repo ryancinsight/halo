@@ -176,7 +176,10 @@ where
             }
             // SAFETY: i is index from 0..len, so i+1 is non-zero
             let entry_index = unsafe { NonZeroUsize::new_unchecked(i + 1) };
-            new_buckets[idx] = Some(Entry { hash, index: entry_index });
+            new_buckets[idx] = Some(Entry {
+                hash,
+                index: entry_index,
+            });
         }
 
         self.buckets = new_buckets;
@@ -213,7 +216,10 @@ where
                 self.hashes.push(hash);
                 // SAFETY: idx+1 is non-zero because idx starts at 0
                 let entry_index = unsafe { NonZeroUsize::new_unchecked(idx + 1) };
-                self.buckets[slot] = Some(Entry { hash, index: entry_index });
+                self.buckets[slot] = Some(Entry {
+                    hash,
+                    index: entry_index,
+                });
                 self.len += 1;
                 InternId::new(idx)
             }
@@ -222,11 +228,7 @@ where
 
     /// Gets a reference to an interned value by ID.
     #[inline(always)]
-    pub fn get<'a>(
-        &'a self,
-        token: &'a GhostToken<'brand>,
-        id: InternId<'brand>,
-    ) -> Option<&'a T> {
+    pub fn get<'a>(&'a self, token: &'a GhostToken<'brand>, id: InternId<'brand>) -> Option<&'a T> {
         self.storage.get(token, id.index())
     }
 
@@ -248,11 +250,7 @@ where
     /// Looks up a value by reference and returns a reference to the stored value.
     ///
     /// This is useful for canonicalizing values (replacing a lookup key with the stored canonical version).
-    pub fn get_val<'a, Q: ?Sized>(
-        &'a self,
-        token: &'a GhostToken<'brand>,
-        key: &Q,
-    ) -> Option<&'a T>
+    pub fn get_val<'a, Q: ?Sized>(&'a self, token: &'a GhostToken<'brand>, key: &Q) -> Option<&'a T>
     where
         T: std::borrow::Borrow<Q>,
         Q: Hash + Eq,

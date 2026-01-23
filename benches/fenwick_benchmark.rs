@@ -1,6 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use halo::collections::other::active::ActiveFenwickTree;
 use halo::collections::other::active::ActivateFenwickTree;
+use halo::collections::other::active::ActiveFenwickTree;
 use halo::collections::other::BrandedFenwickTree;
 use halo::collections::trie::active::ActivateRadixTrieMap;
 use halo::collections::trie::ActiveRadixTrieMap;
@@ -60,7 +60,9 @@ fn bench_fenwick_tree(c: &mut Criterion) {
     group.bench_function("Branded Add (Active)", |b| {
         b.iter_batched(
             || {
-                std::iter::repeat(0i64).take(size).collect::<BrandedFenwickTree<_>>()
+                std::iter::repeat(0i64)
+                    .take(size)
+                    .collect::<BrandedFenwickTree<_>>()
             },
             |mut ft| {
                 GhostToken::new(|mut token| {
@@ -68,7 +70,8 @@ fn bench_fenwick_tree(c: &mut Criterion) {
                     // This is safe in this context because we have exclusive access to the tree
                     // and we are simply allowing the token to govern it for this scope.
                     let ft_ptr = &mut ft as *mut BrandedFenwickTree<'_, i64>;
-                    let ft_casted: &mut BrandedFenwickTree<'_, i64> = unsafe { std::mem::transmute(ft_ptr) };
+                    let ft_casted: &mut BrandedFenwickTree<'_, i64> =
+                        unsafe { std::mem::transmute(ft_ptr) };
 
                     let mut active = ft_casted.activate(&mut token);
                     for i in 0..1000 {
@@ -127,7 +130,8 @@ fn bench_radix_trie(c: &mut Criterion) {
                 GhostToken::new(|mut token| {
                     // Safety: Transmute brand to match token
                     let map_ptr = &mut map as *mut BrandedRadixTrieMap<'_, &[u8], i32>;
-                    let map_casted: &mut BrandedRadixTrieMap<'_, &[u8], i32> = unsafe { std::mem::transmute(map_ptr) };
+                    let map_casted: &mut BrandedRadixTrieMap<'_, &[u8], i32> =
+                        unsafe { std::mem::transmute(map_ptr) };
 
                     let mut active = map_casted.activate(&mut token);
                     for key in &keys {

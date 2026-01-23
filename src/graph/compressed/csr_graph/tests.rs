@@ -25,12 +25,7 @@ fn test_csr_in_neighbors_complex() {
     // 1 -> 2
     // 2 ->
     // 3 -> 1
-    let adjacency = vec![
-        vec![1, 2],
-        vec![2],
-        vec![],
-        vec![1],
-    ];
+    let adjacency = vec![vec![1, 2], vec![2], vec![], vec![1]];
     let graph = GhostCsrGraph::<4>::from_adjacency(&adjacency);
 
     // In-neighbors of 0: []

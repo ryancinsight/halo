@@ -100,8 +100,7 @@ impl<'brand, T> GhostRingBuffer<'brand, T> {
                             (*slot.data.get()).write(value);
                         }
                         // Commit sequence.
-                        slot.sequence
-                            .store(head.wrapping_add(1), Ordering::Release);
+                        slot.sequence.store(head.wrapping_add(1), Ordering::Release);
                         return Ok(());
                     }
                     Err(h) => {

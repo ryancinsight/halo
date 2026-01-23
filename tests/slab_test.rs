@@ -1,6 +1,6 @@
-use halo::{GhostToken, SharedGhostToken};
-use halo::alloc::{BrandedSlab, GhostAlloc};
 use core::alloc::Layout;
+use halo::alloc::{BrandedSlab, GhostAlloc};
+use halo::{GhostToken, SharedGhostToken};
 use std::thread;
 
 #[test]
@@ -98,7 +98,9 @@ fn test_mixed_alloc_phases() {
 
         // Cleanup all using exclusive optimization where possible
         for ptr in ptrs {
-            unsafe { slab.deallocate_mut(&mut token, ptr, layout); }
+            unsafe {
+                slab.deallocate_mut(&mut token, ptr, layout);
+            }
         }
     });
 }

@@ -184,3 +184,7 @@ harness = false
 [[bench]]
 name = "compressed_graph_benchmark"
 harness = false
+
+[[bench]]
+name = "channel_benchmark"
+harness = false

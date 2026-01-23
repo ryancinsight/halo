@@ -23,21 +23,19 @@ fn bench_segment_tree(c: &mut Criterion) {
     // Expensive clone benchmark
     group.bench_function("build_expensive", |b| {
         b.iter_batched(
-            || {
-                (0..n).map(|i| vec![i; 64]).collect::<Vec<_>>()
-            },
+            || (0..n).map(|i| vec![i; 64]).collect::<Vec<_>>(),
             |data| {
                 GhostToken::new(|mut token| {
                     let mut st = BrandedSegmentTree::new(
                         n,
                         |a, b| {
-                             let mut res = Vec::with_capacity(a.len());
-                             for (x, y) in a.iter().zip(b.iter()) {
-                                 res.push(x + y);
-                             }
-                             res
+                            let mut res = Vec::with_capacity(a.len());
+                            for (x, y) in a.iter().zip(b.iter()) {
+                                res.push(x + y);
+                            }
+                            res
                         },
-                        vec![0; 64]
+                        vec![0; 64],
                     );
                     st.build(&mut token, &data);
                     black_box(st);
@@ -83,13 +81,13 @@ fn bench_segment_tree(c: &mut Criterion) {
                     let mut res = Vec::with_capacity(a.len());
                     res.extend_from_slice(a);
                     if !b.is_empty() {
-                         for i in 0..res.len() {
-                             res[i] = res[i].wrapping_add(b[i]);
-                         }
+                        for i in 0..res.len() {
+                            res[i] = res[i].wrapping_add(b[i]);
+                        }
                     }
                     res
                 },
-                default_val
+                default_val,
             );
             st.build(&mut token, &data);
 

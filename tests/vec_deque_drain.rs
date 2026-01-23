@@ -70,7 +70,6 @@ fn test_drain_partial() {
     });
 }
 
-
 #[test]
 fn test_splice_replace_same_len() {
     GhostToken::new(|token| {
@@ -112,7 +111,6 @@ fn test_splice_replace_larger() {
         assert_eq!(result, vec![0, 10, 11, 12, 2, 3, 4]);
     });
 }
-
 
 #[test]
 fn test_rotation() {

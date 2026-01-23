@@ -247,7 +247,7 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCsrGraph<'brand, EDGE_CHUNK> {
         let end = self.in_offsets[node + 1];
         let mut preds = Vec::with_capacity(end - start);
         for i in start..end {
-             // SAFETY: CSC construction ensures `i < edge_count()`.
+            // SAFETY: CSC construction ensures `i < edge_count()`.
             preds.push(unsafe { *self.in_edges.get_unchecked(i) });
         }
         preds

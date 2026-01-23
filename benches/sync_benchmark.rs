@@ -1,9 +1,9 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use halo::{GhostToken, concurrency::sync::GhostRingBuffer};
-use std::sync::{Arc, Mutex};
+use halo::{concurrency::sync::GhostRingBuffer, GhostToken};
 use std::collections::VecDeque;
-use std::thread;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 fn bench_mpmc(c: &mut Criterion) {
     let capacity = 512;
@@ -37,13 +37,13 @@ fn bench_mpmc(c: &mut Criterion) {
                         let q = queue.clone();
                         let c = consumed.clone();
                         s.spawn(move || {
-                             while c.load(Ordering::Relaxed) < total_items {
-                                 if let Some(_) = q.try_pop() {
-                                     c.fetch_add(1, Ordering::Relaxed);
-                                 } else {
-                                     thread::yield_now();
-                                 }
-                             }
+                            while c.load(Ordering::Relaxed) < total_items {
+                                if let Some(_) = q.try_pop() {
+                                    c.fetch_add(1, Ordering::Relaxed);
+                                } else {
+                                    thread::yield_now();
+                                }
+                            }
                         });
                     }
                 });
@@ -56,7 +56,7 @@ fn bench_mpmc(c: &mut Criterion) {
             let queue = Arc::new(Mutex::new(VecDeque::with_capacity(capacity)));
             let consumed = Arc::new(AtomicUsize::new(0));
 
-             thread::scope(|s| {
+            thread::scope(|s| {
                 // Producers
                 for _ in 0..producer_count {
                     let q = queue.clone();
@@ -80,17 +80,17 @@ fn bench_mpmc(c: &mut Criterion) {
                     let q = queue.clone();
                     let c = consumed.clone();
                     s.spawn(move || {
-                         while c.load(Ordering::Relaxed) < total_items {
-                             let val = {
-                                 let mut g = q.lock().unwrap();
-                                 g.pop_front()
-                             };
-                             if let Some(_) = val {
-                                 c.fetch_add(1, Ordering::Relaxed);
-                             } else {
-                                 thread::yield_now();
-                             }
-                         }
+                        while c.load(Ordering::Relaxed) < total_items {
+                            let val = {
+                                let mut g = q.lock().unwrap();
+                                g.pop_front()
+                            };
+                            if let Some(_) = val {
+                                c.fetch_add(1, Ordering::Relaxed);
+                            } else {
+                                thread::yield_now();
+                            }
+                        }
                     });
                 }
             });

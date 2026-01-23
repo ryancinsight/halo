@@ -136,7 +136,10 @@ pub struct ActiveDisjointSet<'a, 'brand> {
 
 impl<'a, 'brand> ActiveDisjointSet<'a, 'brand> {
     /// Creates a new active disjoint set.
-    pub fn new(inner: &'a mut BrandedDisjointSet<'brand>, token: &'a mut GhostToken<'brand>) -> Self {
+    pub fn new(
+        inner: &'a mut BrandedDisjointSet<'brand>,
+        token: &'a mut GhostToken<'brand>,
+    ) -> Self {
         Self { inner, token }
     }
 

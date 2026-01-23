@@ -19,9 +19,9 @@ fn bench_from_adjacency(c: &mut Criterion) {
 
     c.bench_function("compressed_graph_from_adjacency", |b| {
         b.iter(|| {
-             GhostToken::new(|_token| {
+            GhostToken::new(|_token| {
                 black_box(GhostCompressedGraph::<64>::from_adjacency(&adjacency));
-             });
+            });
         });
     });
 }

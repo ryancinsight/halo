@@ -152,7 +152,11 @@ impl<'brand> BrandedBitSet<'brand> {
     }
 
     /// Intersects with another bit set: `self &= other`.
-    pub fn intersect_with(&mut self, token: &mut GhostToken<'brand>, other: &BrandedBitSet<'brand>) {
+    pub fn intersect_with(
+        &mut self,
+        token: &mut GhostToken<'brand>,
+        other: &BrandedBitSet<'brand>,
+    ) {
         let self_len = self.words.len();
         let other_len = other.words.len();
 
@@ -184,7 +188,11 @@ impl<'brand> BrandedBitSet<'brand> {
     }
 
     /// Differences with another bit set: `self &= !other`.
-    pub fn difference_with(&mut self, token: &mut GhostToken<'brand>, other: &BrandedBitSet<'brand>) {
+    pub fn difference_with(
+        &mut self,
+        token: &mut GhostToken<'brand>,
+        other: &BrandedBitSet<'brand>,
+    ) {
         let self_len = self.words.len();
         let other_len = other.words.len();
 
@@ -206,7 +214,11 @@ impl<'brand> BrandedBitSet<'brand> {
     }
 
     /// Symmetric difference with another bit set: `self ^= other`.
-    pub fn symmetric_difference_with(&mut self, token: &mut GhostToken<'brand>, other: &BrandedBitSet<'brand>) {
+    pub fn symmetric_difference_with(
+        &mut self,
+        token: &mut GhostToken<'brand>,
+        other: &BrandedBitSet<'brand>,
+    ) {
         let self_len = self.words.len();
         let other_len = other.words.len();
 
