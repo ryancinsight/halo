@@ -58,7 +58,6 @@ pub struct Receiver<'brand, T> {
 }
 
 unsafe impl<'brand, T: Send> Send for Receiver<'brand, T> {}
-unsafe impl<'brand, T: Send> Sync for Receiver<'brand, T> {}
 
 /// Creates a new unbounded MPSC channel.
 pub fn channel<'brand, T>(token: &GhostToken<'brand>) -> (Sender<'brand, T>, Receiver<'brand, T>) {

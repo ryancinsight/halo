@@ -11,15 +11,27 @@ use core::alloc::Layout;
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use std::alloc::{alloc, dealloc};
+use std::cell::Cell;
+use std::hash::{Hash, Hasher};
+use std::collections::hash_map::DefaultHasher;
 
 // Constants
 const PAGE_SIZE: usize = 4096;
 const MAX_SMALL_SIZE: usize = 2048; // Anything larger goes to global allocator
 
+// Sharding constants
+const SHARD_COUNT: usize = 32;
+const SHARD_MASK: usize = SHARD_COUNT - 1;
+
 // Tag constants for ABA prevention in free list
 const TAG_SHIFT: usize = 32;
 const INDEX_MASK: usize = (1 << TAG_SHIFT) - 1;
 const NONE: usize = INDEX_MASK;
+
+thread_local! {
+    /// Caches the shard index for the current thread to avoid re-hashing.
+    static SLAB_SHARD_INDEX: Cell<Option<usize>> = const { Cell::new(None) };
+}
 
 /// A memory page containing blocks of a specific size.
 ///
@@ -229,18 +241,28 @@ impl Page {
     }
 }
 
+struct Shard {
+    // Array of page lists, one for each size class
+    heads: [CachePadded<AtomicUsize>; 9],
+}
+
+impl Shard {
+    fn new() -> Self {
+        Self {
+            heads: core::array::from_fn(|_| CachePadded::new(AtomicUsize::new(0))),
+        }
+    }
+}
+
 /// Internal state of the slab allocator.
 struct SlabState {
-    // Array of page lists, one for each size class (powers of 2, starting at 8)
-    // Stored as AtomicUsize (pointers to Page) to support shared access.
-    // CachePadded to prevent false sharing between heads of different size classes.
-    heads: [CachePadded<AtomicUsize>; 9],
+    shards: [CachePadded<Shard>; SHARD_COUNT],
 }
 
 impl SlabState {
     fn new() -> Self {
         Self {
-            heads: core::array::from_fn(|_| CachePadded::new(AtomicUsize::new(0))),
+            shards: core::array::from_fn(|_| CachePadded::new(Shard::new())),
         }
     }
 
@@ -264,22 +286,40 @@ impl SlabState {
     fn get_block_size(class_idx: usize) -> usize {
         8 << class_idx
     }
+
+    /// Helper to get the current thread's shard index, initializing it if necessary.
+    #[inline(always)]
+    fn current_shard_index() -> usize {
+        SLAB_SHARD_INDEX.with(|idx| {
+            if let Some(i) = idx.get() {
+                i
+            } else {
+                let mut hasher = DefaultHasher::new();
+                std::thread::current().id().hash(&mut hasher);
+                let i = (hasher.finish() as usize) & SHARD_MASK;
+                idx.set(Some(i));
+                i
+            }
+        })
+    }
 }
 
 impl Drop for SlabState {
     fn drop(&mut self) {
         unsafe {
             let layout = Layout::from_size_align_unchecked(PAGE_SIZE, PAGE_SIZE);
-            for head_atomic in &mut self.heads {
-                // We have exclusive access in Drop, so we can use load(Relaxed) or get_mut
-                let mut page_ptr_val = *head_atomic.get_mut();
-                while page_ptr_val != 0 {
-                    let page = &mut *(page_ptr_val as *mut Page);
-                    let next_val = *page.next.get_mut(); // AtomicUsize::get_mut is safe here
+            for shard in &mut self.shards {
+                for head_atomic in &mut shard.heads {
+                    // We have exclusive access in Drop, so we can use load(Relaxed) or get_mut
+                    let mut page_ptr_val = *head_atomic.get_mut();
+                    while page_ptr_val != 0 {
+                        let page = &mut *(page_ptr_val as *mut Page);
+                        let next_val = *page.next.get_mut(); // AtomicUsize::get_mut is safe here
 
-                    // Drop the page memory
-                    dealloc(page_ptr_val as *mut u8, layout);
-                    page_ptr_val = next_val;
+                        // Drop the page memory
+                        dealloc(page_ptr_val as *mut u8, layout);
+                        page_ptr_val = next_val;
+                    }
                 }
             }
         }
@@ -289,11 +329,6 @@ impl Drop for SlabState {
 /// A branded slab allocator.
 ///
 /// # TODOs and Future Optimizations
-///
-/// - **TODO(perf): Thread-Local Caching (TLH)**:
-///   Currently, `GhostAlloc` implementation suffers from contention on the `head` page of each size class.
-///   Implementing a thread-local cache (via `ThreadLocal` or `SharedGhostToken` sharding) would
-///   significantly improve throughput for high-concurrency workloads, similar to `mimalloc`'s free list sharding.
 ///
 /// - **TODO(perf): Restartable Sequences (RSEQ)**:
 ///   On Linux, using RSEQ could allow faster per-cpu operations without atomics for the fast path.
@@ -329,7 +364,11 @@ impl<'brand> BrandedSlab<'brand> {
 
         if let Some(class_idx) = SlabState::get_class_index(size) {
             let block_size = SlabState::get_block_size(class_idx);
-            let head_atomic = &mut state.heads[class_idx];
+
+            // Use current thread shard (or 0, doesn't matter much for exclusive)
+            let shard_idx = SlabState::current_shard_index();
+            let shard = &mut state.shards[shard_idx];
+            let head_atomic = &mut shard.heads[class_idx];
 
             // Try head page
             let mut page_ptr_val = *head_atomic.get_mut();
@@ -408,7 +447,9 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
         let state = self.state.borrow(token);
 
         if let Some(class_idx) = SlabState::get_class_index(size) {
-            let head_atomic = &state.heads[class_idx];
+            let shard_idx = SlabState::current_shard_index();
+            let shard = &state.shards[shard_idx];
+            let head_atomic = &shard.heads[class_idx];
 
             // 1. Try to allocate from existing pages
             let mut page_ptr_val = head_atomic.load(Ordering::Acquire);
