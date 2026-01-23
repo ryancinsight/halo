@@ -14,55 +14,96 @@ const PAGE_SIZE: usize = 4096;
 const MAX_SMALL_SIZE: usize = 2048; // Anything larger goes to global allocator
 
 /// A memory page containing blocks of a specific size.
+///
+/// This struct is embedded at the START of the allocated 4KB page.
+#[repr(C)]
 struct Page {
-    memory: NonNull<u8>,
-    capacity: usize, // Number of blocks
+    next: Option<NonNull<Page>>, // Linked list of pages
     block_size: usize,
-    free_head: Option<usize>, // Index of the first free block
+    free_head: Option<usize>, // Index of the first free block (relative to first block)
     free_count: usize,
-    next: Option<Box<Page>>, // Linked list of pages
+    capacity: usize,
+    // The actual blocks follow this struct in memory.
 }
 
 impl Page {
-    fn new(block_size: usize) -> Option<Box<Self>> {
+    /// Allocates a new 4KB page and initializes it as a Page with blocks of `block_size`.
+    fn new(block_size: usize) -> Option<NonNull<Page>> {
+        // Ensure alignment is 4KB so we can find the header via masking
         let layout = Layout::from_size_align(PAGE_SIZE, PAGE_SIZE).ok()?;
+
         unsafe {
             let ptr = alloc(layout);
             if ptr.is_null() {
                 return None;
             }
-            let non_null = NonNull::new_unchecked(ptr);
 
-            let capacity = PAGE_SIZE / block_size;
-            let mut page = Box::new(Page {
-                memory: non_null,
-                capacity,
+            let page_ptr = ptr as *mut Page;
+
+            // Calculate where blocks start
+            // We need to ensure the first block is aligned to block_size
+            let header_size = std::mem::size_of::<Page>();
+            let mut start_offset = header_size;
+
+            // Align start_offset to block_size (assuming block_size is power of 2)
+            let align_mask = block_size - 1;
+            if (start_offset & align_mask) != 0 {
+                start_offset = (start_offset + align_mask) & !align_mask;
+            }
+
+            if start_offset >= PAGE_SIZE {
+                // Header too big for this block size (shouldn't happen for reasonable sizes)
+                dealloc(ptr, layout);
+                return None;
+            }
+
+            let available_bytes = PAGE_SIZE - start_offset;
+            let capacity = available_bytes / block_size;
+
+            if capacity == 0 {
+                dealloc(ptr, layout);
+                return None;
+            }
+
+            // Write the header
+            ptr::write(page_ptr, Page {
+                next: None,
                 block_size,
                 free_head: Some(0),
                 free_count: capacity,
-                next: None,
+                capacity,
             });
 
-            // Initialize free list in the page
-            // We store the next free index in the first usize of each block.
-            // Requirement: block_size >= size_of::<usize>()
-            let mut p = ptr;
+            // Initialize free list
+            // Blocks are indexed 0..capacity.
+            // We write the index of the next free block into the block memory itself.
+            let base_ptr = ptr.add(start_offset);
             for i in 0..capacity - 1 {
-                *(p as *mut usize) = i + 1;
-                p = p.add(block_size);
+                let block_ptr = base_ptr.add(i * block_size);
+                *(block_ptr as *mut usize) = i + 1;
             }
-            *(p as *mut usize) = usize::MAX; // Sentinel
+            // Last block
+            let last_block_ptr = base_ptr.add((capacity - 1) * block_size);
+            *(last_block_ptr as *mut usize) = usize::MAX;
 
-            Some(page)
+            Some(NonNull::new_unchecked(page_ptr))
         }
     }
 
+    /// Allocates a block from this page.
     unsafe fn alloc(&mut self) -> Option<NonNull<u8>> {
         if let Some(idx) = self.free_head {
-            let offset = idx * self.block_size;
-            let ptr = self.memory.as_ptr().add(offset);
+            let page_addr = self as *mut Page as usize;
 
-            // Read next free index
+            // Re-calculate start offset
+            let header_size = std::mem::size_of::<Page>();
+            let align_mask = self.block_size - 1;
+            let start_offset = (header_size + align_mask) & !align_mask;
+
+            let block_offset = start_offset + idx * self.block_size;
+            let ptr = (page_addr + block_offset) as *mut u8;
+
+            // Read next free index from the block
             let next = *(ptr as *const usize);
             self.free_head = if next == usize::MAX { None } else { Some(next) };
             self.free_count -= 1;
@@ -73,8 +114,17 @@ impl Page {
         }
     }
 
+    /// Deallocates a block in this page.
     unsafe fn dealloc(&mut self, ptr: NonNull<u8>) {
-        let offset = ptr.as_ptr() as usize - self.memory.as_ptr() as usize;
+        let page_addr = self as *mut Page as usize;
+        let ptr_addr = ptr.as_ptr() as usize;
+
+        // Re-calculate start offset
+        let header_size = std::mem::size_of::<Page>();
+        let align_mask = self.block_size - 1;
+        let start_offset = (header_size + align_mask) & !align_mask;
+
+        let offset = ptr_addr - page_addr - start_offset;
         let idx = offset / self.block_size;
 
         // Add to free list
@@ -83,34 +133,26 @@ impl Page {
         self.free_count += 1;
     }
 
-    fn contains(&self, ptr: NonNull<u8>) -> bool {
-        let start = self.memory.as_ptr() as usize;
-        let end = start + PAGE_SIZE;
-        let p = ptr.as_ptr() as usize;
-        p >= start && p < end
+    // Helper to get page from any pointer inside it
+    unsafe fn from_ptr(ptr: NonNull<u8>) -> NonNull<Page> {
+        let addr = ptr.as_ptr() as usize;
+        let page_addr = addr & !(PAGE_SIZE - 1);
+        NonNull::new_unchecked(page_addr as *mut Page)
     }
 }
 
-impl Drop for Page {
-    fn drop(&mut self) {
-        unsafe {
-            let layout = Layout::from_size_align_unchecked(PAGE_SIZE, PAGE_SIZE);
-            dealloc(self.memory.as_ptr(), layout);
-        }
-    }
-}
+use core::ptr;
 
 /// Internal state of the slab allocator.
 struct SlabState {
     // Array of page lists, one for each size class (powers of 2, starting at 8)
-    // Indices: 0->8, 1->16, 2->32, ... 8->2048
-    pages: [Option<Box<Page>>; 9],
+    pages: [Option<NonNull<Page>>; 9],
 }
 
 impl SlabState {
     fn new() -> Self {
         Self {
-            pages: Default::default(),
+            pages: [None; 9],
         }
     }
 
@@ -129,6 +171,25 @@ impl SlabState {
 
     fn get_block_size(class_idx: usize) -> usize {
         8 << class_idx
+    }
+}
+
+impl Drop for SlabState {
+    fn drop(&mut self) {
+        unsafe {
+            let layout = Layout::from_size_align_unchecked(PAGE_SIZE, PAGE_SIZE);
+            for i in 0..9 {
+                let mut curr = self.pages[i];
+                while let Some(mut page_ptr) = curr {
+                    let page = page_ptr.as_mut();
+                    let next = page.next;
+                    // Drop the page memory
+                    // We don't drop Page contents because they are POD + raw pointers, nothing to drop.
+                    dealloc(page_ptr.as_ptr() as *mut u8, layout);
+                    curr = next;
+                }
+            }
+        }
     }
 }
 
@@ -165,13 +226,11 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
         if let Some(class_idx) = SlabState::get_class_index(size) {
             let block_size = SlabState::get_block_size(class_idx);
 
-            // Try to find a page with space
-            let mut curr = &mut state.pages[class_idx];
-
-            // First check if head has space
-            if let Some(page) = curr {
-                if page.free_count > 0 {
-                    unsafe {
+            // Try head page
+            if let Some(mut page_ptr) = state.pages[class_idx] {
+                unsafe {
+                    let page = page_ptr.as_mut();
+                    if page.free_count > 0 {
                         if let Some(ptr) = page.alloc() {
                             return Ok(ptr);
                         }
@@ -179,21 +238,22 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
                 }
             }
 
-            // Iterate to find a page (simplified: we just allocate a new page if head is full for now,
-            // but a real implementation would search or move full pages to back)
-            // For this implementation, let's just prepend a new page if the head is full.
-
-            if let Some(mut new_page) = Page::new(block_size) {
+            // Head full or empty, allocate new page
+            // Optimization: We could search the list, but for now we just push a new page to front
+            // if head is full.
+            if let Some(mut new_page_ptr) = Page::new(block_size) {
                 unsafe {
+                    let new_page = new_page_ptr.as_mut();
                     let ptr = new_page.alloc().ok_or(AllocError)?;
-                    new_page.next = state.pages[class_idx].take();
-                    state.pages[class_idx] = Some(new_page);
+
+                    new_page.next = state.pages[class_idx];
+                    state.pages[class_idx] = Some(new_page_ptr);
+
                     Ok(ptr)
                 }
             } else {
                 Err(AllocError)
             }
-
         } else {
             // Large allocation
             unsafe {
@@ -210,24 +270,21 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
         layout: Layout,
     ) {
         let size = layout.size().max(layout.align()).max(std::mem::size_of::<usize>());
-        let state = self.state.borrow_mut(token);
 
-        if let Some(class_idx) = SlabState::get_class_index(size) {
-            let mut curr = &mut state.pages[class_idx];
-            while let Some(page) = curr {
-                if page.contains(ptr) {
-                    page.dealloc(ptr);
-                    return;
-                }
-                curr = &mut page.next;
-            }
-            // If not found in pages, it might have been a large alloc or error?
-            // But wait, if we support large allocs via global, we need to know if it was large.
-            // Our get_class_index handles that logic.
-            // Ideally we would know if it belongs to us.
-            // Since we don't track large allocs in the state, if we fall through here, it implies logic error or mixed allocators?
-            // Actually, if size > MAX_SMALL_SIZE, get_class_index returns None, so we go to else.
-            // If size is small, we assume it's in our pages.
+        if SlabState::get_class_index(size).is_some() {
+            // It's a small allocation, so it belongs to a Page.
+            // O(1) retrieval of Page
+            let mut page_ptr = Page::from_ptr(ptr);
+            let page = page_ptr.as_mut();
+
+            // Safety check (debug only?): ensure block size matches
+            // debug_assert_eq!(page.block_size, SlabState::get_block_size(SlabState::get_class_index(size).unwrap()));
+
+            page.dealloc(ptr);
+
+            // Note: We don't eagerly return empty pages to OS in this simple implementation,
+            // nor do we maintain a "partial" list vs "full" list.
+            // This is a basic slab.
         } else {
             dealloc(ptr.as_ptr(), layout);
         }
@@ -292,5 +349,32 @@ mod tests {
                 slab.deallocate(&mut token, ptr, layout);
             }
          });
+    }
+
+    #[test]
+    fn test_page_alignment_and_access() {
+        GhostToken::new(|mut token| {
+            let slab = BrandedSlab::new();
+            let layout = Layout::new::<u32>(); // 4 bytes -> class 8 bytes
+
+            let ptr = slab.allocate(&mut token, layout).unwrap();
+
+            // Verify alignment
+            let addr = ptr.as_ptr() as usize;
+            let page_addr = addr & !(PAGE_SIZE - 1);
+
+            // Read header
+            unsafe {
+                let page_ptr = page_addr as *const Page;
+                let page = &*page_ptr;
+                assert_eq!(page.block_size, 8);
+                // Capacity should be ~ (4096 - sizeof(Page)) / 8
+                // sizeof(Page) is roughly 40-48 bytes?
+                // 4096 - 48 = 4048 / 8 = 506.
+                assert!(page.capacity > 400);
+            }
+
+            unsafe { slab.deallocate(&mut token, ptr, layout); }
+        });
     }
 }
