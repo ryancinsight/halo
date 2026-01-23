@@ -1,7 +1,6 @@
 pub mod allocator;
 pub mod arena;
 pub mod bump;
-pub mod concurrent_slab;
 pub mod pool;
 pub mod generational_pool;
 pub mod slab;
@@ -9,7 +8,6 @@ pub mod slab;
 pub use allocator::{AllocError, GhostAlloc, ConcurrentGhostAlloc};
 pub use arena::BrandedArena;
 pub use bump::BrandedBumpAllocator;
-pub use concurrent_slab::ConcurrentBrandedSlab;
 pub use pool::BrandedPool;
 pub use generational_pool::GenerationalPool;
 pub use slab::BrandedSlab;
