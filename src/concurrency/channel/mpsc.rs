@@ -58,6 +58,7 @@ pub struct Receiver<'brand, T> {
 }
 
 unsafe impl<'brand, T: Send> Send for Receiver<'brand, T> {}
+unsafe impl<'brand, T: Send> Sync for Receiver<'brand, T> {}
 
 /// Creates a new unbounded MPSC channel.
 pub fn channel<'brand, T>(token: &GhostToken<'brand>) -> (Sender<'brand, T>, Receiver<'brand, T>) {
@@ -132,30 +133,45 @@ impl<'brand, T> Receiver<'brand, T> {
     ///
     /// Note: This does not block.
     pub fn try_recv(&self, token: &GhostToken<'brand>) -> Option<T> {
-        let head = self.state.head.load(Ordering::Acquire);
+        let mut head = self.state.head.load(Ordering::Acquire);
 
-        unsafe {
-            let next = (*head).next.load(Ordering::Acquire);
+        loop {
+            unsafe {
+                let next = (*head).next.load(Ordering::Acquire);
 
-            if !next.is_null() {
-                // Consume the value from the next node
-                // The 'next' node becomes the new dummy node
-                let value = (*next).value.take();
+                if !next.is_null() {
+                    // Try to move head to next
+                    match self.state.head.compare_exchange(
+                        head,
+                        next,
+                        Ordering::AcqRel,
+                        Ordering::Acquire,
+                    ) {
+                        Ok(_) => {
+                            // Success. We own the old head and the value in next.
+                            let value = (*next).value.take();
 
-                // Move head to next
-                self.state.head.store(next, Ordering::Release);
+                            // Deallocate the old dummy node (head)
+                            let layout = Layout::new::<Node<T>>();
+                            self.state.slab.deallocate(
+                                token,
+                                NonNull::new_unchecked(head as *mut u8),
+                                layout,
+                            );
 
-                // Deallocate the old dummy node (head)
-                let layout = Layout::new::<Node<T>>();
-                self.state
-                    .slab
-                    .deallocate(token, NonNull::new_unchecked(head as *mut u8), layout);
-
-                return value;
+                            return value;
+                        }
+                        Err(h) => {
+                            // CAS failed, retry
+                            head = h;
+                        }
+                    }
+                } else {
+                    // Empty
+                    return None;
+                }
             }
         }
-
-        None
     }
 }
 
