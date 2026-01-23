@@ -80,12 +80,25 @@ impl<'brand, T> Sender<'brand, T> {
         }
 
         // Transition to READY
-        self.state.state.store(STATE_READY, Ordering::Release);
-
-        // Prevent Drop from setting Disconnected
-        std::mem::forget(self);
-
-        Ok(())
+        // We use compare_exchange to ensure we don't overwrite if the receiver has dropped (STATE_CONSUMED).
+        match self.state.state.compare_exchange(
+            STATE_EMPTY,
+            STATE_READY,
+            Ordering::Release,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => {
+                // Success. Prevent Drop from setting Disconnected.
+                std::mem::forget(self);
+                Ok(())
+            }
+            Err(_) => {
+                // Failed to send (Receiver likely dropped).
+                // We must retrieve the value to return it.
+                let value = unsafe { (*self.state.data.get()).assume_init_read() };
+                Err(value)
+            }
+        }
     }
 }
 
@@ -204,6 +217,18 @@ mod tests {
             let (tx, rx) = channel(&token);
             tx.send(&token, vec![1, 2, 3]).unwrap();
             drop(rx); // Should drop the vector without leaks
+        });
+    }
+
+    #[test]
+    fn test_send_fail_when_receiver_dropped() {
+        GhostToken::new(|token| {
+            let (tx, rx) = channel::<i32>(&token);
+            drop(rx);
+            match tx.send(&token, 100) {
+                Err(val) => assert_eq!(val, 100),
+                Ok(_) => panic!("Should have failed to send"),
+            }
         });
     }
 }
