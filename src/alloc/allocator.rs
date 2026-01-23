@@ -30,6 +30,34 @@ pub trait GhostAlloc<'brand> {
     );
 }
 
+/// A trait for branded concurrent memory allocators.
+///
+/// This trait allows allocation and deallocation with a shared `&GhostToken`,
+/// enabling concurrent access from multiple threads (e.g., via `SharedGhostToken`).
+pub trait ConcurrentGhostAlloc<'brand> {
+    /// Allocates memory according to the given layout.
+    ///
+    /// # Errors
+    /// Returns `AllocError` if allocation fails.
+    fn allocate(
+        &self,
+        token: &GhostToken<'brand>,
+        layout: Layout,
+    ) -> Result<NonNull<u8>, AllocError>;
+
+    /// Deallocates memory.
+    ///
+    /// # Safety
+    /// `ptr` must denote a block of memory currently allocated by this allocator.
+    /// `layout` must be the same layout that was used to allocate that block of memory.
+    unsafe fn deallocate(
+        &self,
+        token: &GhostToken<'brand>,
+        ptr: NonNull<u8>,
+        layout: Layout,
+    );
+}
+
 /// The error type for allocation failures.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AllocError;
