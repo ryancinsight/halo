@@ -123,10 +123,9 @@ impl<'brand> BrandedCowStrings<'brand> {
                         // Potential match, verify with token
                         // SAFETY: entry.index is a valid index into self.strings
                         // because we only insert valid indices and never remove strings (append-only).
-                        if let Some(stored_cow) = self.strings.get(token, entry.index) {
-                            if stored_cow == s {
-                                return Ok(entry.index);
-                            }
+                        let stored_cow = unsafe { self.strings.get_unchecked(token, entry.index) };
+                        if stored_cow == s {
+                            return Ok(entry.index);
                         }
                     }
                 }
