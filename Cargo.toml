@@ -184,3 +184,7 @@ harness = false
 [[bench]]
 name = "compressed_graph_benchmark"
 harness = false
+
+[[bench]]
+name = "cow_strings_benchmark"
+harness = false
