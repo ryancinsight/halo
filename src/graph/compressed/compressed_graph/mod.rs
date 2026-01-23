@@ -58,9 +58,10 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCompressedGraph<'brand, EDGE_CHUNK> {
             offsets.push(total_edges);
 
             // Sort neighbors for better compression
-            let mut sorted_neighbors = neighbors.clone();
-            sorted_neighbors.sort_unstable();
-            all_edges.extend(sorted_neighbors);
+            let start = all_edges.len();
+            all_edges.extend_from_slice(neighbors);
+            let end = all_edges.len();
+            all_edges[start..end].sort_unstable();
         }
 
         // Apply compression
