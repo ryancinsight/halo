@@ -30,7 +30,7 @@ impl<'brand> Default for BrandedAllocator<'brand> {
 impl<'brand> GhostAlloc<'brand> for BrandedAllocator<'brand> {
     fn allocate(
         &self,
-        token: &mut GhostToken<'brand>,
+        token: &GhostToken<'brand>,
         layout: Layout,
     ) -> Result<NonNull<u8>, AllocError> {
         let ptr = unsafe { self.heap.alloc(token, layout) };
@@ -39,7 +39,7 @@ impl<'brand> GhostAlloc<'brand> for BrandedAllocator<'brand> {
 
     unsafe fn deallocate(
         &self,
-        token: &mut GhostToken<'brand>,
+        token: &GhostToken<'brand>,
         ptr: NonNull<u8>,
         layout: Layout,
     ) {

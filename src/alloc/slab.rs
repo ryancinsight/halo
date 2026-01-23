@@ -2,10 +2,10 @@
 //!
 //! Implements a slab allocator where memory blocks are managed in pages.
 //! Access is protected by `GhostToken`, ensuring exclusive access without locks,
-//! or concurrent access via `ConcurrentGhostAlloc`.
+//! or concurrent access via `GhostAlloc`.
 
 use crate::{GhostToken, GhostCell};
-use crate::alloc::{GhostAlloc, ConcurrentGhostAlloc, AllocError};
+use crate::alloc::{GhostAlloc, AllocError};
 use crate::concurrency::CachePadded;
 use core::alloc::Layout;
 use core::ptr::NonNull;
@@ -284,7 +284,7 @@ impl Drop for SlabState {
 /// # TODOs and Future Optimizations
 ///
 /// - **TODO(perf): Thread-Local Caching (TLH)**:
-///   Currently, `ConcurrentGhostAlloc` suffers from contention on the `head` page of each size class.
+///   Currently, `GhostAlloc` implementation suffers from contention on the `head` page of each size class.
 ///   Implementing a thread-local cache (via `ThreadLocal` or `SharedGhostToken` sharding) would
 ///   significantly improve throughput for high-concurrency workloads, similar to `mimalloc`'s free list sharding.
 ///
@@ -305,17 +305,11 @@ impl<'brand> BrandedSlab<'brand> {
             state: GhostCell::new(SlabState::new()),
         }
     }
-}
 
-impl<'brand> Default for BrandedSlab<'brand> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-// --- Exclusive Access Implementation ---
-impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
-    fn allocate(
+    /// Allocates memory with exclusive access.
+    ///
+    /// This method is faster than `GhostAlloc::allocate` as it avoids atomic operations.
+    pub fn allocate_mut(
         &self,
         token: &mut GhostToken<'brand>,
         layout: Layout,
@@ -361,7 +355,8 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
         }
     }
 
-    unsafe fn deallocate(
+    /// Deallocates memory with exclusive access.
+    pub unsafe fn deallocate_mut(
         &self,
         _token: &mut GhostToken<'brand>,
         ptr: NonNull<u8>,
@@ -379,8 +374,15 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
     }
 }
 
+impl<'brand> Default for BrandedSlab<'brand> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // --- Concurrent Access Implementation ---
-impl<'brand> ConcurrentGhostAlloc<'brand> for BrandedSlab<'brand> {
+// This is now the default GhostAlloc implementation.
+impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
     fn allocate(
         &self,
         token: &GhostToken<'brand>,
@@ -473,8 +475,9 @@ mod tests {
             let slab = BrandedSlab::new();
             let layout = Layout::new::<u64>();
 
-            let ptr1 = slab.allocate(&mut token, layout).unwrap();
-            let ptr2 = slab.allocate(&mut token, layout).unwrap();
+            // Concurrent alloc with exclusive token reborrow
+            let ptr1 = slab.allocate(&token, layout).unwrap();
+            let ptr2 = slab.allocate(&token, layout).unwrap();
 
             unsafe {
                 *(ptr1.as_ptr() as *mut u64) = 123;
@@ -482,8 +485,15 @@ mod tests {
                 assert_eq!(*(ptr1.as_ptr() as *mut u64), 123);
                 assert_eq!(*(ptr2.as_ptr() as *mut u64), 456);
 
-                slab.deallocate(&mut token, ptr1, layout);
-                slab.deallocate(&mut token, ptr2, layout);
+                slab.deallocate(&token, ptr1, layout);
+                slab.deallocate(&token, ptr2, layout);
+            }
+
+            // Exclusive alloc (optimized)
+            let ptr3 = slab.allocate_mut(&mut token, layout).unwrap();
+            unsafe {
+                *(ptr3.as_ptr() as *mut u64) = 789;
+                slab.deallocate_mut(&mut token, ptr3, layout);
             }
         });
     }
