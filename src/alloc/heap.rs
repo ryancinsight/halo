@@ -37,11 +37,11 @@ impl<'brand> BrandedHeap<'brand> {
 
     /// Allocates memory with the given layout.
     ///
-    /// Requires exclusive access to the token (simulating locking the heap or validating permission).
+    /// Requires access to the token (validating permission).
     ///
     /// # Safety
     /// See `std::alloc::alloc`.
-    pub unsafe fn alloc(&self, _token: &mut GhostToken<'brand>, layout: Layout) -> *mut u8 {
+    pub unsafe fn alloc(&self, _token: &GhostToken<'brand>, layout: Layout) -> *mut u8 {
         let ptr = alloc(layout);
         if ptr.is_null() {
             handle_alloc_error(layout);
@@ -53,7 +53,7 @@ impl<'brand> BrandedHeap<'brand> {
     ///
     /// # Safety
     /// See `std::alloc::dealloc`.
-    pub unsafe fn dealloc(&self, _token: &mut GhostToken<'brand>, ptr: *mut u8, layout: Layout) {
+    pub unsafe fn dealloc(&self, _token: &GhostToken<'brand>, ptr: *mut u8, layout: Layout) {
         dealloc(ptr, layout);
     }
 
@@ -63,7 +63,7 @@ impl<'brand> BrandedHeap<'brand> {
     /// See `std::alloc::realloc`.
     pub unsafe fn realloc(
         &self,
-        _token: &mut GhostToken<'brand>,
+        _token: &GhostToken<'brand>,
         ptr: *mut u8,
         layout: Layout,
         new_size: usize,
@@ -79,7 +79,7 @@ impl<'brand> BrandedHeap<'brand> {
     }
 
     /// Allocates a value of type `T` and returns a `NonNull` pointer.
-    pub fn alloc_val<T>(&self, token: &mut GhostToken<'brand>, value: T) -> NonNull<T> {
+    pub fn alloc_val<T>(&self, token: &GhostToken<'brand>, value: T) -> NonNull<T> {
         unsafe {
             let layout = Layout::new::<T>();
             let ptr = self.alloc(token, layout) as *mut T;
@@ -107,10 +107,10 @@ mod tests {
             let layout = Layout::new::<u32>();
 
             unsafe {
-                let ptr = heap.alloc(&mut token, layout) as *mut u32;
+                let ptr = heap.alloc(&token, layout) as *mut u32;
                 ptr.write(42);
                 assert_eq!(*ptr, 42);
-                heap.dealloc(&mut token, ptr as *mut u8, layout);
+                heap.dealloc(&token, ptr as *mut u8, layout);
             }
         });
     }
@@ -119,10 +119,10 @@ mod tests {
     fn test_branded_heap_alloc_val() {
         GhostToken::new(|mut token| {
             let heap = BrandedHeap::new();
-            let ptr = heap.alloc_val(&mut token, 123u64);
+            let ptr = heap.alloc_val(&token, 123u64);
             unsafe {
                 assert_eq!(*ptr.as_ref(), 123);
-                heap.dealloc(&mut token, ptr.as_ptr() as *mut u8, Layout::new::<u64>());
+                heap.dealloc(&token, ptr.as_ptr() as *mut u8, Layout::new::<u64>());
             }
         });
     }

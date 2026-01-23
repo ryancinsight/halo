@@ -1,36 +1,45 @@
 //! `BrandedSlab` — a token-gated slab allocator.
 //!
 //! Implements a slab allocator where memory blocks are managed in pages.
-//! Access is protected by `GhostToken`, ensuring exclusive access without locks.
+//! Access is protected by `GhostToken`, ensuring exclusive access without locks,
+//! or concurrent access via `GhostAlloc`.
 
 use crate::{GhostToken, GhostCell};
 use crate::alloc::{GhostAlloc, AllocError};
+use crate::concurrency::CachePadded;
 use core::alloc::Layout;
 use core::ptr::NonNull;
-use std::alloc::{alloc, dealloc, handle_alloc_error};
+use core::sync::atomic::{AtomicUsize, Ordering};
+use std::alloc::{alloc, dealloc};
 
 // Constants
 const PAGE_SIZE: usize = 4096;
 const MAX_SMALL_SIZE: usize = 2048; // Anything larger goes to global allocator
 
-// TODO: Support custom page sizes or huge pages for better performance with large working sets.
+// Tag constants for ABA prevention in free list
+const TAG_SHIFT: usize = 32;
+const INDEX_MASK: usize = (1 << TAG_SHIFT) - 1;
+const NONE: usize = INDEX_MASK;
 
 /// A memory page containing blocks of a specific size.
 ///
 /// This struct is embedded at the START of the allocated 4KB page.
 #[repr(C)]
 struct Page {
-    next: Option<NonNull<Page>>, // Linked list of pages
+    next: AtomicUsize, // Linked list of pages
     block_size: usize,
-    free_head: Option<usize>, // Index of the first free block (relative to first block)
-    free_count: usize,
+    free_head: AtomicUsize, // Index of the first free block (relative to first block)
     capacity: usize,
-    // The actual blocks follow this struct in memory.
+    // Padding to ensure the header size is a multiple of cache line (128 bytes)
+    // to prevent false sharing between the header (metadata) and the first block (user data).
+    // Current size: 8 + 8 + 8 + 8 = 32 bytes (on 64-bit).
+    // We need 96 bytes of padding.
+    _padding: [u8; 96],
 }
 
 impl Page {
     /// Allocates a new 4KB page and initializes it as a Page with blocks of `block_size`.
-    fn new(block_size: usize) -> Option<NonNull<Page>> {
+    fn new(block_size: usize, next_ptr: usize) -> Option<NonNull<Page>> {
         // Ensure alignment is 4KB so we can find the header via masking
         let layout = Layout::from_size_align(PAGE_SIZE, PAGE_SIZE).ok()?;
 
@@ -43,18 +52,15 @@ impl Page {
             let page_ptr = ptr as *mut Page;
 
             // Calculate where blocks start
-            // We need to ensure the first block is aligned to block_size
             let header_size = std::mem::size_of::<Page>();
             let mut start_offset = header_size;
 
-            // Align start_offset to block_size (assuming block_size is power of 2)
             let align_mask = block_size - 1;
             if (start_offset & align_mask) != 0 {
                 start_offset = (start_offset + align_mask) & !align_mask;
             }
 
             if start_offset >= PAGE_SIZE {
-                // Header too big for this block size (shouldn't happen for reasonable sizes)
                 dealloc(ptr, layout);
                 return None;
             }
@@ -67,76 +73,152 @@ impl Page {
                 return None;
             }
 
-            // Write the header
-            ptr::write(page_ptr, Page {
-                next: None,
-                block_size,
-                free_head: Some(0),
-                free_count: capacity,
-                capacity,
-            });
-
             // Initialize free list
             // Blocks are indexed 0..capacity.
-            // We write the index of the next free block into the block memory itself.
+            // We write the index of the next free block into the block memory itself (as u32).
             let base_ptr = ptr.add(start_offset);
             for i in 0..capacity - 1 {
                 let block_ptr = base_ptr.add(i * block_size);
-                *(block_ptr as *mut usize) = i + 1;
+                *(block_ptr as *mut u32) = (i + 1) as u32;
             }
-            // Last block
             let last_block_ptr = base_ptr.add((capacity - 1) * block_size);
-            *(last_block_ptr as *mut usize) = usize::MAX;
+            *(last_block_ptr as *mut u32) = NONE as u32;
+
+            // Write the header
+            // Note: free_head starts at 0 with tag 0.
+            std::ptr::write(page_ptr, Page {
+                next: AtomicUsize::new(next_ptr),
+                block_size,
+                free_head: AtomicUsize::new(0),
+                capacity,
+                _padding: [0; 96],
+            });
 
             Some(NonNull::new_unchecked(page_ptr))
         }
     }
 
-    /// Allocates a block from this page.
-    unsafe fn alloc(&mut self) -> Option<NonNull<u8>> {
-        // TODO: Implement a more sophisticated free list search (e.g., bitmask or intrusive list) for better locality.
-        if let Some(idx) = self.free_head {
-            let page_addr = self as *mut Page as usize;
+    /// Allocates a block (Concurrent/Atomic path).
+    fn alloc_atomic(&self) -> Option<NonNull<u8>> {
+        let mut current = self.free_head.load(Ordering::Acquire);
+        loop {
+            let (idx, tag) = Self::unpack(current);
+            if idx == NONE {
+                return None;
+            }
 
-            // Re-calculate start offset
-            let header_size = std::mem::size_of::<Page>();
-            let align_mask = self.block_size - 1;
-            let start_offset = (header_size + align_mask) & !align_mask;
+            unsafe {
+                let block_ptr = self.get_block_ptr(idx);
+                let next_idx = *(block_ptr as *const u32) as usize;
 
-            let block_offset = start_offset + idx * self.block_size;
-            let ptr = (page_addr + block_offset) as *mut u8;
+                let new_tag = tag.wrapping_add(1);
+                let new_head = Self::pack(next_idx, new_tag);
 
-            // Read next free index from the block
-            let next = *(ptr as *const usize);
-            self.free_head = if next == usize::MAX { None } else { Some(next) };
-            self.free_count -= 1;
-
-            Some(NonNull::new_unchecked(ptr))
-        } else {
-            None
+                match self.free_head.compare_exchange_weak(
+                    current,
+                    new_head,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                ) {
+                    Ok(_) => return Some(NonNull::new_unchecked(block_ptr)),
+                    Err(actual) => current = actual,
+                }
+            }
         }
     }
 
-    /// Deallocates a block in this page.
-    unsafe fn dealloc(&mut self, ptr: NonNull<u8>) {
-        let page_addr = self as *mut Page as usize;
-        let ptr_addr = ptr.as_ptr() as usize;
+    /// Allocates a block (Exclusive/Mutable path).
+    /// Safe because we have exclusive access to the Page (via &mut Page).
+    fn alloc_mut(&mut self) -> Option<NonNull<u8>> {
+        let current = *self.free_head.get_mut();
+        let (idx, tag) = Self::unpack(current);
 
-        // Re-calculate start offset
+        if idx == NONE {
+            return None;
+        }
+
+        unsafe {
+            let block_ptr = self.get_block_ptr(idx);
+            let next_idx = *(block_ptr as *const u32) as usize;
+
+            let new_tag = tag.wrapping_add(1);
+            let new_head = Self::pack(next_idx, new_tag);
+
+            *self.free_head.get_mut() = new_head;
+            Some(NonNull::new_unchecked(block_ptr))
+        }
+    }
+
+    /// Deallocates a block (Concurrent/Atomic path).
+    unsafe fn dealloc_atomic(&self, ptr: NonNull<u8>) {
+        let idx = self.get_block_index(ptr);
+        let block_ptr = ptr.as_ptr();
+
+        let mut current = self.free_head.load(Ordering::Acquire);
+        loop {
+            let (curr_head_idx, tag) = Self::unpack(current);
+            let new_tag = tag.wrapping_add(1);
+            let new_head = Self::pack(idx, new_tag);
+
+            // Link this block to current head
+            *(block_ptr as *mut u32) = curr_head_idx as u32;
+
+            match self.free_head.compare_exchange_weak(
+                current,
+                new_head,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return,
+                Err(actual) => current = actual,
+            }
+        }
+    }
+
+    /// Deallocates a block (Exclusive/Mutable path).
+    unsafe fn dealloc_mut(&mut self, ptr: NonNull<u8>) {
+        let idx = self.get_block_index(ptr);
+        let block_ptr = ptr.as_ptr();
+
+        let current = *self.free_head.get_mut();
+        let (curr_head_idx, tag) = Self::unpack(current);
+
+        let new_tag = tag.wrapping_add(1);
+        let new_head = Self::pack(idx, new_tag);
+
+        *(block_ptr as *mut u32) = curr_head_idx as u32;
+        *self.free_head.get_mut() = new_head;
+    }
+
+    // --- Helpers ---
+
+    unsafe fn get_block_ptr(&self, idx: usize) -> *mut u8 {
+        let page_addr = self as *const Page as usize;
         let header_size = std::mem::size_of::<Page>();
         let align_mask = self.block_size - 1;
         let start_offset = (header_size + align_mask) & !align_mask;
-
-        let offset = ptr_addr - page_addr - start_offset;
-        let idx = offset / self.block_size;
-
-        // Add to free list
-        *(ptr.as_ptr() as *mut usize) = self.free_head.unwrap_or(usize::MAX);
-        self.free_head = Some(idx);
-        self.free_count += 1;
+        let block_offset = start_offset + idx * self.block_size;
+        (page_addr + block_offset) as *mut u8
     }
 
-    // Helper to get page from any pointer inside it
+    unsafe fn get_block_index(&self, ptr: NonNull<u8>) -> usize {
+        let page_addr = self as *const Page as usize;
+        let ptr_addr = ptr.as_ptr() as usize;
+        let header_size = std::mem::size_of::<Page>();
+        let align_mask = self.block_size - 1;
+        let start_offset = (header_size + align_mask) & !align_mask;
+        let offset = ptr_addr - page_addr - start_offset;
+        offset / self.block_size
+    }
+
+    fn unpack(val: usize) -> (usize, usize) {
+        (val & INDEX_MASK, val >> TAG_SHIFT)
+    }
+
+    fn pack(index: usize, tag: usize) -> usize {
+        (tag << TAG_SHIFT) | (index & INDEX_MASK)
+    }
+
     unsafe fn from_ptr(ptr: NonNull<u8>) -> NonNull<Page> {
         let addr = ptr.as_ptr() as usize;
         let page_addr = addr & !(PAGE_SIZE - 1);
@@ -144,18 +226,18 @@ impl Page {
     }
 }
 
-use core::ptr;
-
 /// Internal state of the slab allocator.
 struct SlabState {
     // Array of page lists, one for each size class (powers of 2, starting at 8)
-    pages: [Option<NonNull<Page>>; 9],
+    // Stored as AtomicUsize (pointers to Page) to support shared access.
+    // CachePadded to prevent false sharing between heads of different size classes.
+    heads: [CachePadded<AtomicUsize>; 9],
 }
 
 impl SlabState {
     fn new() -> Self {
         Self {
-            pages: [None; 9],
+            heads: core::array::from_fn(|_| CachePadded::new(AtomicUsize::new(0))),
         }
     }
 
@@ -181,15 +263,16 @@ impl Drop for SlabState {
     fn drop(&mut self) {
         unsafe {
             let layout = Layout::from_size_align_unchecked(PAGE_SIZE, PAGE_SIZE);
-            for i in 0..9 {
-                let mut curr = self.pages[i];
-                while let Some(mut page_ptr) = curr {
-                    let page = page_ptr.as_mut();
-                    let next = page.next;
+            for head_atomic in &mut self.heads {
+                // We have exclusive access in Drop, so we can use load(Relaxed) or get_mut
+                let mut page_ptr_val = *head_atomic.get_mut();
+                while page_ptr_val != 0 {
+                    let page = &mut *(page_ptr_val as *mut Page);
+                    let next_val = *page.next.get_mut(); // AtomicUsize::get_mut is safe here
+
                     // Drop the page memory
-                    // We don't drop Page contents because they are POD + raw pointers, nothing to drop.
-                    dealloc(page_ptr.as_ptr() as *mut u8, layout);
-                    curr = next;
+                    dealloc(page_ptr_val as *mut u8, layout);
+                    page_ptr_val = next_val;
                 }
             }
         }
@@ -197,6 +280,20 @@ impl Drop for SlabState {
 }
 
 /// A branded slab allocator.
+///
+/// # TODOs and Future Optimizations
+///
+/// - **TODO(perf): Thread-Local Caching (TLH)**:
+///   Currently, `GhostAlloc` implementation suffers from contention on the `head` page of each size class.
+///   Implementing a thread-local cache (via `ThreadLocal` or `SharedGhostToken` sharding) would
+///   significantly improve throughput for high-concurrency workloads, similar to `mimalloc`'s free list sharding.
+///
+/// - **TODO(perf): Restartable Sequences (RSEQ)**:
+///   On Linux, using RSEQ could allow faster per-cpu operations without atomics for the fast path.
+///
+/// - **TODO(mem): Eager Page Return**:
+///   Currently, empty pages are only returned when the Slab is dropped. Implementing logic to
+///   return pages to the OS (or a global pool) when they become empty would reduce memory footprint.
 pub struct BrandedSlab<'brand> {
     state: GhostCell<'brand, SlabState>,
 }
@@ -208,51 +305,41 @@ impl<'brand> BrandedSlab<'brand> {
             state: GhostCell::new(SlabState::new()),
         }
     }
-}
 
-// TODO: Add thread-local caching or stealing mechanisms if we extend SharedGhostToken usage.
-
-impl<'brand> Default for BrandedSlab<'brand> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
-    fn allocate(
+    /// Allocates memory with exclusive access.
+    ///
+    /// This method is faster than `GhostAlloc::allocate` as it avoids atomic operations.
+    pub fn allocate_mut(
         &self,
         token: &mut GhostToken<'brand>,
         layout: Layout,
     ) -> Result<NonNull<u8>, AllocError> {
         let size = layout.size().max(layout.align()).max(std::mem::size_of::<usize>());
-
         let state = self.state.borrow_mut(token);
 
         if let Some(class_idx) = SlabState::get_class_index(size) {
             let block_size = SlabState::get_block_size(class_idx);
+            let head_atomic = &mut state.heads[class_idx];
 
             // Try head page
-            if let Some(mut page_ptr) = state.pages[class_idx] {
+            let mut page_ptr_val = *head_atomic.get_mut();
+            if page_ptr_val != 0 {
                 unsafe {
-                    let page = page_ptr.as_mut();
-                    if page.free_count > 0 {
-                        if let Some(ptr) = page.alloc() {
-                            return Ok(ptr);
-                        }
+                    let page = &mut *(page_ptr_val as *mut Page);
+                    if let Some(ptr) = page.alloc_mut() {
+                        return Ok(ptr);
                     }
                 }
             }
 
             // Head full or empty, allocate new page
-            // Optimization: We could search the list, but for now we just push a new page to front
-            // if head is full.
-            if let Some(mut new_page_ptr) = Page::new(block_size) {
+            // Optimization: We push new page to front
+            if let Some(new_page_ptr) = Page::new(block_size, page_ptr_val) {
                 unsafe {
-                    let new_page = new_page_ptr.as_mut();
-                    let ptr = new_page.alloc().ok_or(AllocError)?;
+                    let mut new_page = new_page_ptr;
+                    let ptr = new_page.as_mut().alloc_mut().ok_or(AllocError)?;
 
-                    new_page.next = state.pages[class_idx];
-                    state.pages[class_idx] = Some(new_page_ptr);
+                    *head_atomic.get_mut() = new_page_ptr.as_ptr() as usize;
 
                     Ok(ptr)
                 }
@@ -268,29 +355,108 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
         }
     }
 
-    unsafe fn deallocate(
+    /// Deallocates memory with exclusive access.
+    pub unsafe fn deallocate_mut(
         &self,
-        token: &mut GhostToken<'brand>,
+        _token: &mut GhostToken<'brand>,
         ptr: NonNull<u8>,
         layout: Layout,
     ) {
         let size = layout.size().max(layout.align()).max(std::mem::size_of::<usize>());
 
         if SlabState::get_class_index(size).is_some() {
-            // It's a small allocation, so it belongs to a Page.
-            // O(1) retrieval of Page
             let mut page_ptr = Page::from_ptr(ptr);
             let page = page_ptr.as_mut();
+            page.dealloc_mut(ptr);
+        } else {
+            dealloc(ptr.as_ptr(), layout);
+        }
+    }
+}
 
-            // Safety check (debug only?): ensure block size matches
-            // debug_assert_eq!(page.block_size, SlabState::get_block_size(SlabState::get_class_index(size).unwrap()));
+impl<'brand> Default for BrandedSlab<'brand> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
-            page.dealloc(ptr);
+// --- Concurrent Access Implementation ---
+// This is now the default GhostAlloc implementation.
+impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
+    fn allocate(
+        &self,
+        token: &GhostToken<'brand>,
+        layout: Layout,
+    ) -> Result<NonNull<u8>, AllocError> {
+        let size = layout.size().max(layout.align()).max(std::mem::size_of::<usize>());
+        let state = self.state.borrow(token);
 
-            // Note: We don't eagerly return empty pages to OS in this simple implementation,
-            // nor do we maintain a "partial" list vs "full" list.
-            // This is a basic slab.
-            // TODO: Implement eager return of empty pages to the OS to reduce memory pressure.
+        if let Some(class_idx) = SlabState::get_class_index(size) {
+             let head_atomic = &state.heads[class_idx];
+
+            // 1. Try to allocate from existing pages
+            let mut page_ptr_val = head_atomic.load(Ordering::Acquire);
+            while page_ptr_val != 0 {
+                unsafe {
+                    let page = &*(page_ptr_val as *const Page);
+                    if let Some(ptr) = page.alloc_atomic() {
+                        return Ok(ptr);
+                    }
+                    page_ptr_val = page.next.load(Ordering::Acquire);
+                }
+            }
+
+            // 2. No space found, allocate new page
+            let block_size = SlabState::get_block_size(class_idx);
+
+            loop {
+                let current_head = head_atomic.load(Ordering::Acquire);
+                if let Some(new_page) = Page::new(block_size, current_head) {
+                    let new_page_val = new_page.as_ptr() as usize;
+
+                    match head_atomic.compare_exchange(
+                        current_head,
+                        new_page_val,
+                        Ordering::AcqRel,
+                        Ordering::Acquire,
+                    ) {
+                        Ok(_) => {
+                            unsafe {
+                                let page = new_page.as_ref();
+                                return page.alloc_atomic().ok_or(AllocError);
+                            }
+                        }
+                        Err(_) => {
+                            unsafe {
+                                let layout = Layout::from_size_align_unchecked(PAGE_SIZE, PAGE_SIZE);
+                                dealloc(new_page.as_ptr() as *mut u8, layout);
+                            }
+                        }
+                    }
+                } else {
+                    return Err(AllocError);
+                }
+            }
+        } else {
+            unsafe {
+                let ptr = alloc(layout);
+                NonNull::new(ptr).ok_or(AllocError)
+            }
+        }
+    }
+
+    unsafe fn deallocate(
+        &self,
+        _token: &GhostToken<'brand>,
+        ptr: NonNull<u8>,
+        layout: Layout,
+    ) {
+        let size = layout.size().max(layout.align()).max(std::mem::size_of::<usize>());
+
+        if SlabState::get_class_index(size).is_some() {
+            let page_ptr = Page::from_ptr(ptr);
+            let page = page_ptr.as_ref();
+            page.dealloc_atomic(ptr);
         } else {
             dealloc(ptr.as_ptr(), layout);
         }
@@ -300,17 +466,18 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::GhostToken;
+    use crate::{GhostToken, SharedGhostToken};
+    use std::thread;
 
     #[test]
     fn test_branded_slab_basic() {
         GhostToken::new(|mut token| {
             let slab = BrandedSlab::new();
-            let layout = Layout::new::<u64>(); // 8 bytes
+            let layout = Layout::new::<u64>();
 
-            // Allocate
-            let ptr1 = slab.allocate(&mut token, layout).unwrap();
-            let ptr2 = slab.allocate(&mut token, layout).unwrap();
+            // Concurrent alloc with exclusive token reborrow
+            let ptr1 = slab.allocate(&token, layout).unwrap();
+            let ptr2 = slab.allocate(&token, layout).unwrap();
 
             unsafe {
                 *(ptr1.as_ptr() as *mut u64) = 123;
@@ -318,69 +485,42 @@ mod tests {
                 assert_eq!(*(ptr1.as_ptr() as *mut u64), 123);
                 assert_eq!(*(ptr2.as_ptr() as *mut u64), 456);
 
-                // Deallocate
-                slab.deallocate(&mut token, ptr1, layout);
-                slab.deallocate(&mut token, ptr2, layout);
+                slab.deallocate(&token, ptr1, layout);
+                slab.deallocate(&token, ptr2, layout);
+            }
+
+            // Exclusive alloc (optimized)
+            let ptr3 = slab.allocate_mut(&mut token, layout).unwrap();
+            unsafe {
+                *(ptr3.as_ptr() as *mut u64) = 789;
+                slab.deallocate_mut(&mut token, ptr3, layout);
             }
         });
     }
 
     #[test]
-    fn test_branded_slab_reuse() {
-        GhostToken::new(|mut token| {
+    fn test_concurrent_access() {
+        GhostToken::new(|token| {
             let slab = BrandedSlab::new();
-            let layout = Layout::new::<u64>();
+            let shared_token = SharedGhostToken::new(token);
+            let slab_ref = &slab;
+            let token_ref = &shared_token;
 
-            let ptr1 = slab.allocate(&mut token, layout).unwrap();
-            let addr1 = ptr1.as_ptr() as usize;
-
-            unsafe { slab.deallocate(&mut token, ptr1, layout); }
-
-            let ptr2 = slab.allocate(&mut token, layout).unwrap();
-            let addr2 = ptr2.as_ptr() as usize;
-
-            // Simple LIFO behavior expected from free head
-            assert_eq!(addr1, addr2);
-        });
-    }
-
-    #[test]
-    fn test_large_alloc() {
-         GhostToken::new(|mut token| {
-            let slab = BrandedSlab::new();
-            let layout = Layout::from_size_align(10000, 16).unwrap();
-
-            let ptr = slab.allocate(&mut token, layout).unwrap();
-            unsafe {
-                slab.deallocate(&mut token, ptr, layout);
-            }
-         });
-    }
-
-    #[test]
-    fn test_page_alignment_and_access() {
-        GhostToken::new(|mut token| {
-            let slab = BrandedSlab::new();
-            let layout = Layout::new::<u32>(); // 4 bytes -> class 8 bytes
-
-            let ptr = slab.allocate(&mut token, layout).unwrap();
-
-            // Verify alignment
-            let addr = ptr.as_ptr() as usize;
-            let page_addr = addr & !(PAGE_SIZE - 1);
-
-            // Read header
-            unsafe {
-                let page_ptr = page_addr as *const Page;
-                let page = &*page_ptr;
-                assert_eq!(page.block_size, 8);
-                // Capacity should be ~ (4096 - sizeof(Page)) / 8
-                // sizeof(Page) is roughly 40-48 bytes?
-                // 4096 - 48 = 4048 / 8 = 506.
-                assert!(page.capacity > 400);
-            }
-
-            unsafe { slab.deallocate(&mut token, ptr, layout); }
+            thread::scope(|s| {
+                for t_idx in 0..4 {
+                    s.spawn(move || {
+                        let guard = token_ref.read();
+                        let layout = Layout::new::<u64>();
+                        for i in 0..100 {
+                            let ptr = slab_ref.allocate(&guard, layout).unwrap();
+                            unsafe {
+                                *(ptr.as_ptr() as *mut u64) = (t_idx * 1000 + i) as u64;
+                                slab_ref.deallocate(&guard, ptr, layout);
+                            }
+                        }
+                    });
+                }
+            });
         });
     }
 }

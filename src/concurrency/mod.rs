@@ -5,6 +5,9 @@
 //! threads with minimal overhead and without locking the data itself.
 
 pub mod atomic;
+pub mod cache_padded;
 pub mod scoped;
 pub mod sync;
 pub mod worklist;
+
+pub use cache_padded::CachePadded;

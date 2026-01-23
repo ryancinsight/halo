@@ -6,14 +6,17 @@ use core::ptr::NonNull;
 ///
 /// This trait is similar to `std::alloc::Allocator` but is designed to work with
 /// the `GhostCell` ecosystem. The allocated memory is tied to the `'brand` lifetime.
-pub trait GhostAlloc<'brand> {
+///
+/// This trait requires the allocator to be thread-safe (`Sync`) and support
+/// concurrent allocation via a shared `&GhostToken`.
+pub trait GhostAlloc<'brand>: Sync {
     /// Allocates memory according to the given layout.
     ///
     /// # Errors
     /// Returns `AllocError` if allocation fails.
     fn allocate(
         &self,
-        token: &mut GhostToken<'brand>,
+        token: &GhostToken<'brand>,
         layout: Layout,
     ) -> Result<NonNull<u8>, AllocError>;
 
@@ -24,7 +27,7 @@ pub trait GhostAlloc<'brand> {
     /// `layout` must be the same layout that was used to allocate that block of memory.
     unsafe fn deallocate(
         &self,
-        token: &mut GhostToken<'brand>,
+        token: &GhostToken<'brand>,
         ptr: NonNull<u8>,
         layout: Layout,
     );

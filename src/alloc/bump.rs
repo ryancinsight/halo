@@ -3,7 +3,7 @@ use core::marker::PhantomData;
 use core::ptr::{self, NonNull};
 use std::alloc::{alloc, dealloc, handle_alloc_error};
 
-use crate::alloc::allocator::{AllocError, GhostAlloc};
+use crate::alloc::allocator::AllocError;
 use crate::{GhostCell, GhostToken, GhostUnsafeCell};
 
 /// A chunk of memory in the bump allocator.
@@ -103,6 +103,7 @@ impl<'brand> BrandedBumpAllocator<'brand> {
         value: T,
         token: &mut GhostToken<'brand>,
     ) -> &'a GhostCell<'brand, T> {
+        // We reuse the inherent alloc method which works with &mut token
         let ptr = self.alloc(GhostCell::new(value), token);
         &*ptr
     }
@@ -195,22 +196,5 @@ impl<'brand> Default for BrandedBumpAllocator<'brand> {
 
 unsafe impl<'brand> Send for BrandedBumpAllocator<'brand> {}
 // Not Sync because it uses GhostUnsafeCell without synchronization.
-
-impl<'brand> GhostAlloc<'brand> for BrandedBumpAllocator<'brand> {
-    fn allocate(
-        &self,
-        token: &mut GhostToken<'brand>,
-        layout: Layout,
-    ) -> Result<NonNull<u8>, AllocError> {
-        Ok(self.alloc_layout(layout, token))
-    }
-
-    unsafe fn deallocate(
-        &self,
-        _token: &mut GhostToken<'brand>,
-        _ptr: NonNull<u8>,
-        _layout: Layout
-    ) {
-        // No-op: memory is freed when allocator is dropped
-    }
-}
+// Removed GhostAlloc implementation as it requires Sync and shared token access,
+// which BrandedBumpAllocator does not support.
