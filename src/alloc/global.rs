@@ -61,6 +61,14 @@ thread_local! {
 
 unsafe impl GlobalAlloc for DispatchGlobalAlloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        // Fast path: if no custom allocator is active, bypass TLS checks and guards
+        // to minimize overhead for the common case.
+        let alloc_ptr = if let Some(ptr) = CURRENT_ALLOCATOR.get() {
+            ptr
+        } else {
+            return System.alloc(layout);
+        };
+
         // Prevent recursion: if we are already in the allocator (e.g. BrandedSlab asking for a page),
         // fallback to System.
         if IN_ALLOCATOR.get() {
@@ -77,14 +85,18 @@ unsafe impl GlobalAlloc for DispatchGlobalAlloc {
         IN_ALLOCATOR.set(true);
         let _guard = Guard;
 
-        if let Some(alloc_ptr) = CURRENT_ALLOCATOR.get() {
-             alloc_ptr.as_ref().alloc(layout)
-        } else {
-             System.alloc(layout)
-        }
+        alloc_ptr.as_ref().alloc(layout)
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        // Fast path: check if custom allocator is active.
+        let alloc_ptr = if let Some(ptr) = CURRENT_ALLOCATOR.get() {
+            ptr
+        } else {
+            return System.dealloc(ptr, layout);
+        };
+
+        // Prevent recursion during deallocation
         if IN_ALLOCATOR.get() {
             return System.dealloc(ptr, layout);
         }
@@ -99,11 +111,7 @@ unsafe impl GlobalAlloc for DispatchGlobalAlloc {
         IN_ALLOCATOR.set(true);
         let _guard = Guard;
 
-        if let Some(alloc_ptr) = CURRENT_ALLOCATOR.get() {
-             alloc_ptr.as_ref().dealloc(ptr, layout);
-        } else {
-             System.dealloc(ptr, layout);
-        }
+        alloc_ptr.as_ref().dealloc(ptr, layout);
     }
 }
 
@@ -112,9 +120,12 @@ unsafe impl GlobalAlloc for DispatchGlobalAlloc {
 /// # Safety
 ///
 /// - The caller must ensure that no allocations made within `f` escape the scope,
-///   unless the allocator can handle out-of-scope deallocation (unlikely for branded allocators).
-/// - If `BrandedSlab` (or similar) is used, escaping pointers will eventually be deallocated
-///   by `System` (or the wrong allocator) when the object is dropped, causing Undefined Behavior.
+///   unless the allocator can handle out-of-scope deallocation.
+/// - The allocator provided must be able to handle "foreign" pointers if recursion occurs
+///   (i.e., if it allocates small internal structures using `std::alloc`, it must
+///   recognize and reject them during deallocation, or ensure they are never passed to it).
+///   Note that `BrandedSlab` is safe because its internal allocations (pages) are large enough
+///   to be passed through to `System` by its own logic.
 pub unsafe fn with_global_allocator<'brand, A, R, F>(
     allocator: &A,
     token: &GhostToken<'brand>,
