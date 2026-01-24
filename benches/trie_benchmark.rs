@@ -93,5 +93,29 @@ fn bench_trie_get(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_trie_insert, bench_trie_get);
+fn bench_trie_iter(c: &mut Criterion) {
+    let mut group = c.benchmark_group("trie_iter");
+
+    let keys: Vec<String> = (0..1000).map(|i| format!("key_{:04}", i)).collect();
+
+    GhostToken::new(|mut token| {
+        let mut map = BrandedRadixTrieMap::new();
+        for (i, key) in keys.iter().enumerate() {
+            map.insert(&mut token, key.as_bytes(), i);
+        }
+
+        group.bench_function("branded_trie_iter", |b| {
+            b.iter(|| {
+                let iter = halo::collections::trie::iter::Iter::new(&map, &token);
+                for item in iter {
+                    black_box(item);
+                }
+            });
+        });
+    });
+
+    group.finish();
+}
+
+criterion_group!(benches, bench_trie_insert, bench_trie_get, bench_trie_iter);
 criterion_main!(benches);

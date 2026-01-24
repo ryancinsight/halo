@@ -610,6 +610,8 @@ mod tests {
     #[test]
     fn test_branded_trie_iterator() {
         use crate::collections::trie::iter::Iter;
+        use std::rc::Rc;
+
         GhostToken::new(|mut token| {
             let mut map = BrandedRadixTrieMap::new();
             map.insert(&mut token, "apple", 1);
@@ -618,16 +620,16 @@ mod tests {
 
             // Test iteration
             let iter = Iter::new(&map, &token);
-            let mut items: Vec<(Vec<u8>, &i32)> = iter.collect();
+            let mut items: Vec<(Rc<Vec<u8>>, &i32)> = iter.collect();
             // Sort by key for deterministic check
             items.sort_by(|a, b| a.0.cmp(&b.0));
 
             assert_eq!(items.len(), 3);
-            assert_eq!(items[0].0, b"app");
+            assert_eq!(items[0].0.as_slice(), b"app");
             assert_eq!(*items[0].1, 2);
-            assert_eq!(items[1].0, b"apple");
+            assert_eq!(items[1].0.as_slice(), b"apple");
             assert_eq!(*items[1].1, 1);
-            assert_eq!(items[2].0, b"banana");
+            assert_eq!(items[2].0.as_slice(), b"banana");
             assert_eq!(*items[2].1, 3);
         });
     }
