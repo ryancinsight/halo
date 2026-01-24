@@ -11,10 +11,39 @@ use core::alloc::Layout;
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use std::alloc::{alloc, dealloc};
+use std::cell::Cell;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::thread;
 
 // Constants
 const PAGE_SIZE: usize = 4096;
 const MAX_SMALL_SIZE: usize = 2048; // Anything larger goes to global allocator
+
+// Sharding constants for Thread-Local Caching (TLH)
+const SHARD_COUNT: usize = 32;
+const SHARD_MASK: usize = SHARD_COUNT - 1;
+
+thread_local! {
+    /// Caches the shard index for the current thread to avoid re-hashing.
+    static THREAD_SHARD_INDEX: Cell<Option<usize>> = const { Cell::new(None) };
+}
+
+/// Helper to get the current thread's shard index.
+#[inline(always)]
+fn current_shard_index() -> usize {
+    THREAD_SHARD_INDEX.with(|idx| {
+        if let Some(i) = idx.get() {
+            i
+        } else {
+            let mut hasher = DefaultHasher::new();
+            thread::current().id().hash(&mut hasher);
+            let i = (hasher.finish() as usize) & SHARD_MASK;
+            idx.set(Some(i));
+            i
+        }
+    })
+}
 
 // Tag constants for ABA prevention in free list
 const TAG_SHIFT: usize = 32;
@@ -231,13 +260,14 @@ struct SlabState {
     // Array of page lists, one for each size class (powers of 2, starting at 8)
     // Stored as AtomicUsize (pointers to Page) to support shared access.
     // CachePadded to prevent false sharing between heads of different size classes.
-    heads: [CachePadded<AtomicUsize>; 9],
+    // Sharded by thread ID to reduce contention.
+    heads: [[CachePadded<AtomicUsize>; SHARD_COUNT]; 9],
 }
 
 impl SlabState {
     fn new() -> Self {
         Self {
-            heads: core::array::from_fn(|_| CachePadded::new(AtomicUsize::new(0))),
+            heads: core::array::from_fn(|_| core::array::from_fn(|_| CachePadded::new(AtomicUsize::new(0)))),
         }
     }
 
@@ -263,16 +293,18 @@ impl Drop for SlabState {
     fn drop(&mut self) {
         unsafe {
             let layout = Layout::from_size_align_unchecked(PAGE_SIZE, PAGE_SIZE);
-            for head_atomic in &mut self.heads {
-                // We have exclusive access in Drop, so we can use load(Relaxed) or get_mut
-                let mut page_ptr_val = *head_atomic.get_mut();
-                while page_ptr_val != 0 {
-                    let page = &mut *(page_ptr_val as *mut Page);
-                    let next_val = *page.next.get_mut(); // AtomicUsize::get_mut is safe here
+            for class_heads in &mut self.heads {
+                for head_atomic in class_heads {
+                    // We have exclusive access in Drop, so we can use load(Relaxed) or get_mut
+                    let mut page_ptr_val = *head_atomic.get_mut();
+                    while page_ptr_val != 0 {
+                        let page = &mut *(page_ptr_val as *mut Page);
+                        let next_val = *page.next.get_mut(); // AtomicUsize::get_mut is safe here
 
-                    // Drop the page memory
-                    dealloc(page_ptr_val as *mut u8, layout);
-                    page_ptr_val = next_val;
+                        // Drop the page memory
+                        dealloc(page_ptr_val as *mut u8, layout);
+                        page_ptr_val = next_val;
+                    }
                 }
             }
         }
@@ -319,7 +351,8 @@ impl<'brand> BrandedSlab<'brand> {
 
         if let Some(class_idx) = SlabState::get_class_index(size) {
             let block_size = SlabState::get_block_size(class_idx);
-            let head_atomic = &mut state.heads[class_idx];
+            let shard_idx = current_shard_index();
+            let head_atomic = &mut state.heads[class_idx][shard_idx];
 
             // Try head page
             let mut page_ptr_val = *head_atomic.get_mut();
@@ -392,7 +425,8 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
         let state = self.state.borrow(token);
 
         if let Some(class_idx) = SlabState::get_class_index(size) {
-             let head_atomic = &state.heads[class_idx];
+             let shard_idx = current_shard_index();
+             let head_atomic = &state.heads[class_idx][shard_idx];
 
             // 1. Try to allocate from existing pages
             let mut page_ptr_val = head_atomic.load(Ordering::Acquire);
