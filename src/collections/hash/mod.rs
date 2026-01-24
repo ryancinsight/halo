@@ -6,6 +6,7 @@
 pub mod active;
 pub mod active_set;
 pub mod hash_map;
+pub mod external_map;
 pub mod hash_set;
 pub mod index_map;
 pub mod linked_hash_map;
