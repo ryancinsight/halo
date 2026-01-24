@@ -107,8 +107,10 @@ fn bench_trie_iter(c: &mut Criterion) {
         group.bench_function("branded_trie_iter", |b| {
             b.iter(|| {
                 let iter = halo::collections::trie::iter::Iter::new(&map, &token);
-                for item in iter {
-                    black_box(item);
+                for (key, val) in iter {
+                    // Access key via token to ensure it works
+                    black_box(key.as_slice(&token));
+                    black_box(val);
                 }
             });
         });

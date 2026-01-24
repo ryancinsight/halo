@@ -122,6 +122,7 @@ pub use collections::{
     BrandedSegmentTreeViewMut, BrandedSlice, BrandedSliceMut, BrandedSlotMap, BrandedString,
     BrandedVec, BrandedVecDeque, InternId, SlotKey,
 };
+pub use alloc::{BrandedRc, StaticRc};
 pub use graph::{GhostAdjacencyGraph, GhostBipartiteGraph, GhostCscGraph, GhostCsrGraph, GhostDag};
 pub use token::{GhostToken, SharedGhostToken};
 

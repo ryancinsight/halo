@@ -411,6 +411,23 @@ impl<'brand, T> BrandedVec<'brand, T> {
     {
         self.inner.drain(range).map(GhostCell::into_inner)
     }
+
+    /// Clones the branded vector using the token to access elements.
+    ///
+    /// This enables deep copying of the vector's contents when T is Clone.
+    /// This is necessary because `BrandedVec` cannot implement `Clone` directly
+    /// as it requires a token to read the elements.
+    pub fn clone_with_token(&self, token: &GhostToken<'brand>) -> Self
+    where
+        T: Clone,
+    {
+        let new_inner = self
+            .inner
+            .iter()
+            .map(|cell| GhostCell::new(cell.borrow(token).clone()))
+            .collect();
+        BrandedVec { inner: new_inner }
+    }
 }
 
 impl<'brand, T> crate::collections::BrandedCollection<'brand> for BrandedVec<'brand, T> {
@@ -981,6 +998,27 @@ mod tests {
             assert!(popped.is_some());
             assert_eq!(popped.unwrap().val, 1);
             assert_eq!(arr.len(), 0);
+        });
+    }
+
+    #[test]
+    fn branded_vec_clone_with_token() {
+        GhostToken::new(|mut token| {
+            let mut v1: BrandedVec<'_, i32> = BrandedVec::new();
+            v1.push(1);
+            v1.push(2);
+
+            let v2 = v1.clone_with_token(&token);
+
+            assert_eq!(v1.len(), 2);
+            assert_eq!(v2.len(), 2);
+            assert_eq!(*v2.borrow(&token, 0), 1);
+            assert_eq!(*v2.borrow(&token, 1), 2);
+
+            // Mutation of v1 shouldn't affect v2
+            *v1.borrow_mut(&mut token, 0) = 10;
+            assert_eq!(*v1.borrow(&token, 0), 10);
+            assert_eq!(*v2.borrow(&token, 0), 1);
         });
     }
 }
