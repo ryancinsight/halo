@@ -18,6 +18,7 @@ use crate::{GhostCell, GhostToken};
 use core::hash::{BuildHasher, Hash, Hasher};
 use core::mem::MaybeUninit;
 use std::alloc::{self, Layout};
+use std::borrow::Borrow;
 use std::collections::hash_map::RandomState;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
@@ -157,7 +158,7 @@ where
     }
 
     #[inline]
-    fn hash(&self, key: &K) -> (usize, u8) {
+    fn hash<Q: ?Sized + Hash>(&self, key: &Q) -> (usize, u8) {
         let mut hasher = self.hash_builder.build_hasher();
         key.hash(&mut hasher);
         let hash = hasher.finish();
@@ -173,7 +174,10 @@ where
     /// Finds the slot for a key. Returns (index, true) if found, (index, false) if not found.
     /// If not found, index is the insertion slot (first Empty or Deleted).
     #[inline]
-    fn find_slot(&self, key: &K, h1: usize, h2: u8) -> (usize, bool) {
+    fn find_slot<Q: ?Sized + Eq>(&self, key: &Q, h1: usize, h2: u8) -> (usize, bool)
+    where
+        K: Borrow<Q>,
+    {
         if self.capacity == 0 {
             return (0, false);
         }
@@ -214,7 +218,7 @@ where
 
                     unsafe {
                         let k = self.keys.get_unchecked(slot_idx).assume_init_ref();
-                        if *k == *key {
+                        if k.borrow() == key {
                             return (slot_idx, true);
                         }
                     }
@@ -265,7 +269,14 @@ where
     }
 
     #[inline]
-    pub fn get<'a>(&'a self, token: &'a GhostToken<'brand>, key: &K) -> Option<&'a V> {
+    pub fn get<'a, Q: ?Sized + Hash + Eq>(
+        &'a self,
+        token: &'a GhostToken<'brand>,
+        key: &Q,
+    ) -> Option<&'a V>
+    where
+        K: Borrow<Q>,
+    {
         if self.capacity == 0 {
             return None;
         }
@@ -286,7 +297,14 @@ where
     }
 
     #[inline]
-    pub fn get_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>, key: &K) -> Option<&'a mut V> {
+    pub fn get_mut<'a, Q: ?Sized + Hash + Eq>(
+        &'a self,
+        token: &'a mut GhostToken<'brand>,
+        key: &Q,
+    ) -> Option<&'a mut V>
+    where
+        K: Borrow<Q>,
+    {
         if self.capacity == 0 {
             return None;
         }
@@ -307,7 +325,10 @@ where
     }
 
     #[inline]
-    pub fn contains_key(&self, key: &K) -> bool {
+    pub fn contains_key<Q: ?Sized + Hash + Eq>(&self, key: &Q) -> bool
+    where
+        K: Borrow<Q>,
+    {
         if self.capacity == 0 {
             return false;
         }
@@ -359,7 +380,10 @@ where
         }
     }
 
-    pub fn remove(&mut self, key: &K) -> Option<V> {
+    pub fn remove<Q: ?Sized + Hash + Eq>(&mut self, key: &Q) -> Option<V>
+    where
+        K: Borrow<Q>,
+    {
         if self.capacity == 0 {
             return None;
         }
@@ -967,6 +991,23 @@ mod tests {
             }
 
             assert_eq!(*map.get(&token, &"a").unwrap(), 101);
+        });
+    }
+
+    #[test]
+    fn branded_hash_map_borrow_lookup() {
+        GhostToken::new(|mut token| {
+            let mut map = BrandedHashMap::new();
+            map.insert("a".to_string(), 1);
+
+            // Lookup with &str
+            assert_eq!(*map.get(&token, "a").unwrap(), 1);
+            assert!(map.contains_key("a"));
+
+            // Remove with &str
+            let removed = map.remove("a");
+            assert_eq!(removed, Some(1));
+            assert!(map.is_empty());
         });
     }
 }

@@ -66,6 +66,40 @@ fn bench_lru_cache(c: &mut Criterion) {
         });
     });
 
+    // String benchmarks
+    group.bench_function("branded_lru_cache_put_string_large", |b| {
+        // Pre-generate 1000 keys of length ~1000
+        let keys: Vec<String> = (0..1000).map(|i| format!("{}-{}", "x".repeat(1000), i)).collect();
+        b.iter(|| {
+            // Clone keys to simulate fresh input
+            let my_keys = keys.clone();
+            GhostToken::new(|mut token| {
+                let mut cache = BrandedLruCache::new(1000);
+                for (i, s) in my_keys.into_iter().enumerate() {
+                    cache.put(&mut token, s, i);
+                }
+            });
+        });
+    });
+
+    group.bench_function("branded_lru_cache_get_string_large", |b| {
+        let keys: Vec<String> = (0..1000).map(|i| format!("{}-{}", "x".repeat(1000), i)).collect();
+        b.iter(|| {
+             GhostToken::new(|mut token| {
+                let mut cache = BrandedLruCache::new(1000);
+                for (i, s) in keys.iter().enumerate() {
+                    cache.put(&mut token, s.clone(), i);
+                }
+
+                for _ in 0..10 {
+                    for k in &keys {
+                        black_box(cache.get(&mut token, k));
+                    }
+                }
+            });
+        });
+    });
+
     group.finish();
 }
 

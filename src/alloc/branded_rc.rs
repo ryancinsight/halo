@@ -4,6 +4,8 @@
 //! allowing for token-gated Copy-On-Write (COW) semantics.
 
 use crate::token::InvariantLifetime;
+use std::borrow::Borrow;
+use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::rc::Rc;
 
@@ -70,5 +72,25 @@ impl<'brand, T> Deref for BrandedRc<'brand, T> {
 impl<'brand, T: Default> Default for BrandedRc<'brand, T> {
     fn default() -> Self {
         Self::new(T::default())
+    }
+}
+
+impl<'brand, T: PartialEq> PartialEq for BrandedRc<'brand, T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.inner == other.inner
+    }
+}
+
+impl<'brand, T: Eq> Eq for BrandedRc<'brand, T> {}
+
+impl<'brand, T: Hash> Hash for BrandedRc<'brand, T> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.inner.hash(state);
+    }
+}
+
+impl<'brand, T> Borrow<T> for BrandedRc<'brand, T> {
+    fn borrow(&self) -> &T {
+        &self.inner
     }
 }

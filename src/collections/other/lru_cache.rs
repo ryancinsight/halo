@@ -3,6 +3,7 @@
 //! This implementation uses a `BrandedHashMap` for O(1) lookups and a
 //! `BrandedDoublyLinkedList` for O(1) maintenance of the LRU order.
 
+use crate::alloc::BrandedRc;
 use crate::collections::hash::BrandedHashMap;
 use crate::collections::other::BrandedDoublyLinkedList;
 use crate::GhostToken;
@@ -11,11 +12,10 @@ use core::hash::Hash;
 
 /// A Least Recently Used (LRU) cache.
 ///
-/// Keys are stored in both the hash map (for lookup) and the linked list (for ordering).
-/// Therefore, keys must implement `Clone`.
+/// Keys are wrapped in `BrandedRc` to avoid duplication between the hash map and the linked list.
 pub struct BrandedLruCache<'brand, K, V> {
-    map: BrandedHashMap<'brand, K, usize>,
-    list: BrandedDoublyLinkedList<'brand, (K, V)>,
+    map: BrandedHashMap<'brand, BrandedRc<'brand, K>, usize>,
+    list: BrandedDoublyLinkedList<'brand, (BrandedRc<'brand, K>, V)>,
     capacity: usize,
 }
 
@@ -103,9 +103,10 @@ where
             if self.len() == self.capacity {
                 // Evict LRU
                 if let Some((k, _)) = self.list.pop_back(token) {
-                    self.map.remove(&k);
+                    self.map.remove(&*k);
                 }
             }
+            let key = BrandedRc::new(key);
             let index = self.list.push_front(token, (key.clone(), value));
             self.map.insert(key, index);
             None
