@@ -1,10 +1,10 @@
 //! `BrandedLruCache` — a least-recently-used cache.
 //!
-//! This implementation uses a `BrandedHashMap` for O(1) lookups and a
+//! This implementation uses a `BrandedExternalHashMap` for O(1) lookups and a
 //! `BrandedDoublyLinkedList` for O(1) maintenance of the LRU order.
+//! Keys are stored ONLY in the linked list. The map stores indices into the list.
 
-use crate::alloc::BrandedRc;
-use crate::collections::hash::BrandedHashMap;
+use crate::collections::hash::external_map::BrandedExternalHashMap;
 use crate::collections::other::BrandedDoublyLinkedList;
 use crate::GhostToken;
 use core::fmt;
@@ -12,10 +12,11 @@ use core::hash::Hash;
 
 /// A Least Recently Used (LRU) cache.
 ///
-/// Keys are wrapped in `BrandedRc` to avoid duplication between the hash map and the linked list.
+/// Keys are stored in the linked list (for ordering).
+/// The hash map stores indices into the linked list to avoid key duplication.
 pub struct BrandedLruCache<'brand, K, V> {
-    map: BrandedHashMap<'brand, BrandedRc<'brand, K>, usize>,
-    list: BrandedDoublyLinkedList<'brand, (BrandedRc<'brand, K>, V)>,
+    map: BrandedExternalHashMap,
+    list: BrandedDoublyLinkedList<'brand, (K, V)>,
     capacity: usize,
 }
 
@@ -44,25 +45,22 @@ where
     pub fn new(capacity: usize) -> Self {
         assert!(capacity > 0, "capacity must be non-zero");
         Self {
-            map: BrandedHashMap::with_capacity(capacity),
+            map: BrandedExternalHashMap::with_capacity(capacity),
             list: BrandedDoublyLinkedList::new(),
             capacity,
         }
     }
 
     /// Gets a reference to the value associated with `key`.
-    ///
-    /// This operation updates the LRU order, moving the accessed element to the front.
-    /// Because it modifies the list structure, it requires `&mut self`.
     pub fn get<'a>(&'a mut self, token: &'a mut GhostToken<'brand>, key: &K) -> Option<&'a V> {
-        if let Some(&index) = self.map.get(token, key) {
-            self.list.move_to_front(token, index);
-            // safe unwrap because map index comes from list
-            let (_, v) = self.list.get(token, index).unwrap();
-            Some(v)
-        } else {
-            None
-        }
+        let index = self.map.get(key, |idx| {
+            self.list.get(token, idx).map(|(k, _)| k)
+        })?;
+
+        self.list.move_to_front(token, index);
+        // safe unwrap because map index comes from list
+        let (_, v) = self.list.get(token, index).unwrap();
+        Some(v)
     }
 
     /// A version of `get` that allows mutating the value.
@@ -71,28 +69,31 @@ where
         token: &'a mut GhostToken<'brand>,
         key: &K,
     ) -> Option<&'a mut V> {
-        if let Some(&index) = self.map.get(token, key) {
-            self.list.move_to_front(token, index);
-            let (_, v) = self.list.get_mut(token, index).unwrap();
-            Some(v)
-        } else {
-            None
-        }
+        let index = self.map.get(key, |idx| {
+            self.list.get(token, idx).map(|(k, _)| k)
+        })?;
+
+        self.list.move_to_front(token, index);
+        let (_, v) = self.list.get_mut(token, index).unwrap();
+        Some(v)
     }
 
     /// Returns a reference to the value without updating the LRU order.
     pub fn peek<'a>(&'a self, token: &'a GhostToken<'brand>, key: &K) -> Option<&'a V> {
-        if let Some(&index) = self.map.get(token, key) {
-            let (_, v) = self.list.get(token, index).unwrap();
-            Some(v)
-        } else {
-            None
-        }
+        let index = self.map.get(key, |idx| {
+            self.list.get(token, idx).map(|(k, _)| k)
+        })?;
+        let (_, v) = self.list.get(token, index).unwrap();
+        Some(v)
     }
 
     /// Puts a key-value pair into the cache.
     pub fn put(&mut self, token: &mut GhostToken<'brand>, key: K, value: V) -> Option<V> {
-        if let Some(&index) = self.map.get(token, &key) {
+        let index_opt = self.map.get(&key, |idx| {
+            self.list.get(token, idx).map(|(k, _)| k)
+        });
+
+        if let Some(index) = index_opt {
             // Update existing
             self.list.move_to_front(token, index);
             let (_, v_ref) = self.list.get_mut(token, index).expect("Corrupted cache");
@@ -102,13 +103,17 @@ where
             // Insert new
             if self.len() == self.capacity {
                 // Evict LRU
-                if let Some((k, _)) = self.list.pop_back(token) {
-                    self.map.remove(&*k);
+                if let Some((k, _)) = self.list.back(token) {
+                    self.map.remove(k, |idx| {
+                        self.list.get(token, idx).map(|(k, _)| k)
+                    });
                 }
+                self.list.pop_back(token);
             }
-            let key = BrandedRc::new(key);
             let index = self.list.push_front(token, (key.clone(), value));
-            self.map.insert(key, index);
+            self.map.insert(&key, index, |idx| {
+                self.list.get(token, idx).map(|(k, _)| k)
+            });
             None
         }
     }
