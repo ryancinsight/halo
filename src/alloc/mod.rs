@@ -14,10 +14,12 @@ pub use slab::BrandedSlab;
 
 pub mod branded;
 pub mod branded_box;
+pub mod branded_rc;
 pub mod heap;
 pub mod static_rc;
 
 pub use branded_box::BrandedBox;
+pub use branded_rc::BrandedRc;
 pub use static_rc::StaticRc;
 
 // TODO: Investigate integrating with the `GlobalAlloc` trait.

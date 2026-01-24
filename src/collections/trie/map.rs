@@ -610,6 +610,9 @@ mod tests {
     #[test]
     fn test_branded_trie_iterator() {
         use crate::collections::trie::iter::Iter;
+        use crate::alloc::BrandedRc;
+        use crate::collections::BrandedVec;
+
         GhostToken::new(|mut token| {
             let mut map = BrandedRadixTrieMap::new();
             map.insert(&mut token, "apple", 1);
@@ -618,16 +621,17 @@ mod tests {
 
             // Test iteration
             let iter = Iter::new(&map, &token);
-            let mut items: Vec<(Vec<u8>, &i32)> = iter.collect();
-            // Sort by key for deterministic check
-            items.sort_by(|a, b| a.0.cmp(&b.0));
+            let mut items: Vec<(BrandedRc<BrandedVec<u8>>, &i32)> = iter.collect();
+            // Sort by key for deterministic check (BrandedVec doesn't impl Ord directly without token)
+            // But we can compare slices
+            items.sort_by(|a, b| a.0.as_slice(&token).cmp(b.0.as_slice(&token)));
 
             assert_eq!(items.len(), 3);
-            assert_eq!(items[0].0, b"app");
+            assert_eq!(items[0].0.as_slice(&token), b"app");
             assert_eq!(*items[0].1, 2);
-            assert_eq!(items[1].0, b"apple");
+            assert_eq!(items[1].0.as_slice(&token), b"apple");
             assert_eq!(*items[1].1, 1);
-            assert_eq!(items[2].0, b"banana");
+            assert_eq!(items[2].0.as_slice(&token), b"banana");
             assert_eq!(*items[2].1, 3);
         });
     }
