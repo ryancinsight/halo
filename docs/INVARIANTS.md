@@ -121,6 +121,17 @@ This crate contains two lock-free worklists for parallel traversals:
   - **Ordering note**: the implementation uses fences and Acquire/Release operations to ensure stealers never observe an
     uninitialized slot value “as a real item”.
 
+## Global Static Token
+
+To support global singletons and bootstrapping, the library provides a **Global Static Token** (`'static` brand).
+
+- **Uniqueness**: Only one static token exists for the global brand. It is created lazily and leaked.
+- **Immutable Access**: `static_token()` and `with_static_token` provide concurrent, lock-free access to `&'static GhostToken<'static>`. This is safe because `GhostToken` is `Sync` and immutable access only permits reading `GhostCell`s.
+- **Mutable Access**: `with_static_token_mut` provides `&mut GhostToken<'static>`.
+  - **Safety Rationale**: This function is `unsafe` because it creates a mutable reference that could alias with the leaked static reference.
+  - **Usage**: It must **only** be used during single-threaded initialization (bootstrapping).
+  - **Serialization**: It uses a global `Mutex` to prevent concurrent mutable accesses, but it does **not** protect against concurrent readers.
+
 ## Related designs: qcell and frankencell (what we adopt, what we reject)
 
 This crate’s core safety story is **lifetime branding + linear capability** (GhostToken). Two related families are worth

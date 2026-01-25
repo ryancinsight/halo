@@ -198,3 +198,7 @@ harness = false
 [[bench]]
 name = "alloc_snmalloc"
 harness = false
+
+[[bench]]
+name = "static_token_benchmark"
+harness = false
