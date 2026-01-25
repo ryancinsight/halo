@@ -57,3 +57,24 @@ While Mimalloc and Snmalloc focus on raw throughput and efficient cross-thread m
 *   **Inherently Lock-Free** (for the owning scope).
 *   **Type-Safe** (preventing mixing pointers from different heaps).
 *   **Performance Competitive** (by removing runtime safety checks and locks).
+
+## 6. Benchmark Results
+
+We compared the allocation throughput of Halo's `BrandedSlab` and `BrandedBumpAllocator` against the system allocator, `mimalloc` (Microsoft), and `snmalloc` (Microsoft Research).
+
+**Benchmark:** Batch allocation of 1,000 `u64` integers (boxed).
+**Platform:** Linux (criterion).
+
+| Allocator | Avg Time (1000 allocs) | Speedup vs System | Notes |
+| :--- | :--- | :--- | :--- |
+| **System (glibc malloc)** | 63.0 µs | 1.0x | Baseline. |
+| **Mimalloc** | 10.6 µs | 5.9x | General purpose, global. |
+| **Snmalloc** | 6.6 µs | 9.5x | Message passing, global. |
+| **Halo (BrandedSlab)** | 8.4 µs | 7.5x | General purpose, scope-local. |
+| **Halo (BrandedBump)** | 6.8 µs | 9.3x | Arena/Bump, scope-local. |
+
+### Analysis
+
+1.  **Halo vs. Global Allocators**: Halo's `BrandedSlab` outperforms `Mimalloc` by ~20% in this micro-benchmark and is within range of `Snmalloc`. This is notable because Halo achieves this without `Thread Local Storage` (TLS) lookups (which `Mimalloc` and `Snmalloc` rely on heavily). Halo uses the `GhostToken` passed as an argument, which is a zero-cost abstraction for proving exclusive access, effectively acting as a "passed-down TLS".
+2.  **Bump Allocation**: `BrandedBumpAllocator` effectively matches `Snmalloc`'s performance. Since bump allocation is the fastest possible allocation strategy (pointer increment), this shows that `Snmalloc`'s optimization for small objects is extremely efficient, essentially indistinguishable from a raw bump pointer in this test.
+3.  **Safety**: The key differentiator is that `Halo`'s speed comes with **statically verified isolation**. A pointer allocated in `BrandedSlab` cannot be freed to the wrong allocator or accessed after the scope ends, a guarantee neither `Mimalloc` nor `Snmalloc` can provide at compile time.

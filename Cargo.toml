@@ -26,6 +26,8 @@ criterion = "0.5"
 proptest = "1.4"
 loom = "0.7"
 petgraph = "0.6"
+mimalloc = "0.1"
+snmalloc-rs = "0.3"
 
 [[bench]]
 name = "halo_benchmark"
@@ -187,4 +189,12 @@ harness = false
 
 [[bench]]
 name = "cow_strings_benchmark"
+harness = false
+
+[[bench]]
+name = "alloc_mimalloc"
+harness = false
+
+[[bench]]
+name = "alloc_snmalloc"
 harness = false
