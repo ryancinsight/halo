@@ -374,12 +374,38 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
             self.head = (self.head + k) % self.cap;
         } else {
             // Physical movement required for non-full deque
-            // We can move k elements from front to back
-            for _ in 0..k {
-                if let Some(val) = self.pop_front() {
-                    self.push_back(val.into_inner());
+            // We can move k elements from front to back using ptr::copy
+            // effectively moving self[0..k] to self[len..len+k]
+
+            let old_head = self.head;
+            let old_tail = self.tail();
+            let cap = self.cap;
+            let ptr = self.ptr.as_ptr();
+
+            unsafe {
+                // We need to copy k elements from old_head to old_tail.
+                // Since len < cap, the destination (tail) is strictly ahead of source (head)
+                // in the ring buffer logic, so forward copy is safe.
+                // We handle wrapping by breaking into chunks.
+
+                let mut remaining = k;
+                let mut s_idx = old_head;
+                let mut d_idx = old_tail;
+
+                while remaining > 0 {
+                    let s_contig = std::cmp::min(remaining, cap - s_idx);
+                    let d_contig = std::cmp::min(remaining, cap - d_idx);
+                    let chunk_len = std::cmp::min(s_contig, d_contig);
+
+                    ptr::copy(ptr.add(s_idx), ptr.add(d_idx), chunk_len);
+
+                    remaining -= chunk_len;
+                    s_idx = (s_idx + chunk_len) % cap;
+                    d_idx = (d_idx + chunk_len) % cap;
                 }
             }
+
+            self.head = (self.head + k) % self.cap;
         }
     }
 
@@ -397,11 +423,47 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
             self.head = (self.head + self.cap - k) % self.cap;
         } else {
             // Physical movement required
-            for _ in 0..k {
-                if let Some(val) = self.pop_back() {
-                    self.push_front(val.into_inner());
+            // Move k elements from back to front
+            // effectively moving self[len-k..len] to self[0..k] (logically -k)
+
+            let cap = self.cap;
+            // tail() points to next *empty* slot, so last element is tail-1
+            let old_tail = self.tail();
+            let old_head = self.head;
+            let ptr = self.ptr.as_ptr();
+
+            unsafe {
+                // We copy backwards to handle potential overlap correctly
+                // Source end: old_tail
+                // Dest end: old_head
+                // Length: k
+
+                let mut remaining = k;
+                let mut s_end = old_tail;
+                let mut d_end = old_head;
+
+                while remaining > 0 {
+                    // Determine max backward contiguous chunk for source and dest
+                    // If end index is 0, it wraps to cap.
+                    // The available backward space is the index itself if > 0, else cap.
+                    let s_back = if s_end == 0 { cap } else { s_end };
+                    let d_back = if d_end == 0 { cap } else { d_end };
+
+                    let chunk_len = std::cmp::min(remaining, std::cmp::min(s_back, d_back));
+
+                    // Calculate start indices for the chunk
+                    let s_start = (s_end + cap - chunk_len) % cap;
+                    let d_start = (d_end + cap - chunk_len) % cap;
+
+                    ptr::copy(ptr.add(s_start), ptr.add(d_start), chunk_len);
+
+                    remaining -= chunk_len;
+                    s_end = s_start;
+                    d_end = d_start;
                 }
             }
+
+            self.head = (self.head + self.cap - k) % self.cap;
         }
     }
 
