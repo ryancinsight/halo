@@ -26,11 +26,13 @@ const MIN_BLOCK_SIZE: usize = 16;
 // 32 levels: 16 * 2^31 = 32GB (approx). Enough for most use cases.
 const LEVELS: usize = 32;
 
-const NONE: usize = usize::MAX;
-
 // Tag constants for ABA prevention in free list
 const TAG_SHIFT: usize = 32;
 const INDEX_MASK: usize = (1 << TAG_SHIFT) - 1;
+
+const NONE: usize = INDEX_MASK;
+
+const IS_FREE: u8 = 0x80;
 
 #[inline(always)]
 fn unpack(val: usize) -> (usize, usize) {
@@ -87,6 +89,11 @@ impl<'brand> BrandedHeap<'brand> {
             }
 
             let num_blocks = capacity / MIN_BLOCK_SIZE;
+
+            if num_blocks > INDEX_MASK {
+                panic!("Heap capacity too large for BrandedHeap (max {} blocks)", INDEX_MASK);
+            }
+
             let mut orders = Vec::with_capacity(num_blocks);
             orders.resize_with(num_blocks, || UnsafeCell::new(0));
 
@@ -277,16 +284,15 @@ impl<'brand> BrandedHeap<'brand> {
         let state = self.state.borrow_mut(token);
 
         let num_blocks = state.num_blocks;
-        let mut is_free = vec![false; num_blocks];
 
-        // Drain lists
+        // Drain lists and mark free blocks in orders array
         for k in 0..LEVELS {
             let head_atomic = &mut state.free_heads[k];
             let mut curr = unpack(*head_atomic.get_mut()).0;
             *head_atomic.get_mut() = pack(NONE, 0);
 
             while curr != NONE {
-                is_free[curr] = true;
+                unsafe { *state.orders[curr].get() |= IS_FREE; }
                 let node_ptr = unsafe { self.memory.as_ptr().add(curr * MIN_BLOCK_SIZE) as *const AtomicUsize };
                 let next_packed = unsafe { (*node_ptr).load(Ordering::Relaxed) };
                 curr = unpack(next_packed).0;
@@ -298,18 +304,23 @@ impl<'brand> BrandedHeap<'brand> {
              let size_k = 1 << k;
              let mut i = 0;
              while i < num_blocks {
-                 if is_free[i] {
-                      let order = unsafe { *state.orders[i].get() };
-                      if order as usize == k {
+                 let order_val = unsafe { *state.orders[i].get() };
+                 if (order_val & IS_FREE) != 0 {
+                      let order = (order_val & !IS_FREE) as usize;
+                      if order == k {
                           let buddy = i ^ size_k;
-                          if buddy < num_blocks && is_free[buddy] {
-                               let buddy_order = unsafe { *state.orders[buddy].get() };
-                               if buddy_order as usize == k {
-                                   is_free[i] = false;
-                                   is_free[buddy] = false;
-                                   let merged = i & buddy;
-                                   is_free[merged] = true;
-                                   unsafe { *state.orders[merged].get() = (k + 1) as u8; }
+                          if buddy < num_blocks {
+                               let buddy_val = unsafe { *state.orders[buddy].get() };
+                               if (buddy_val & IS_FREE) != 0 {
+                                   let buddy_order = (buddy_val & !IS_FREE) as usize;
+                                   if buddy_order == k {
+                                       // Merge
+                                       unsafe {
+                                           *state.orders[buddy].get() &= !IS_FREE; // Clear buddy free flag
+                                           let merged = i & buddy;
+                                           *state.orders[merged].get() = ((k + 1) as u8) | IS_FREE;
+                                       }
+                                   }
                                }
                           }
                       }
@@ -318,10 +329,14 @@ impl<'brand> BrandedHeap<'brand> {
              }
         }
 
-        // Re-populate
+        // Re-populate and clear flags
         for i in 0..num_blocks {
-            if is_free[i] {
-                let order = unsafe { *state.orders[i].get() as usize };
+            let val = unsafe { *state.orders[i].get() };
+            if (val & IS_FREE) != 0 {
+                let order = (val & !IS_FREE) as usize;
+                // Clear the flag to leave orders in clean state
+                unsafe { *state.orders[i].get() = order as u8; }
+
                 if i % (1 << order) == 0 {
                      unsafe { self.push_free(state, order, i); }
                 }
@@ -411,6 +426,45 @@ mod tests {
             let ptr = unsafe { heap.alloc(&token, layout) };
             assert!(!ptr.is_null());
             unsafe { heap.dealloc(&token, ptr, layout); }
+        });
+    }
+
+    #[test]
+    fn test_compact_clears_flags() {
+        GhostToken::new(|mut token| {
+            let heap = BrandedHeap::with_capacity(16 * 1024);
+
+            // Alloc some blocks
+            let layout = Layout::from_size_align(16, 16).unwrap();
+            let p1 = unsafe { heap.alloc(&token, layout) };
+            let p2 = unsafe { heap.alloc(&token, layout) };
+
+            assert!(!p1.is_null());
+            assert!(!p2.is_null());
+
+            // Dealloc to create free blocks
+            unsafe { heap.dealloc(&token, p1, layout); }
+            unsafe { heap.dealloc(&token, p2, layout); }
+
+            let off1 = (p1 as usize - heap.memory.as_ptr() as usize) / MIN_BLOCK_SIZE;
+            let off2 = (p2 as usize - heap.memory.as_ptr() as usize) / MIN_BLOCK_SIZE;
+
+            // Before compact, IS_FREE should not be set
+            {
+                let state = heap.state.borrow(&token);
+                assert_eq!(unsafe { *state.orders[off1].get() } & IS_FREE, 0);
+                assert_eq!(unsafe { *state.orders[off2].get() } & IS_FREE, 0);
+            }
+
+            // Run compact
+            heap.compact(&mut token);
+
+            // Check flags are cleared
+            {
+                let state = heap.state.borrow(&token);
+                assert_eq!(unsafe { *state.orders[off1].get() } & IS_FREE, 0, "IS_FREE flag not cleared for off1");
+                assert_eq!(unsafe { *state.orders[off2].get() } & IS_FREE, 0, "IS_FREE flag not cleared for off2");
+            }
         });
     }
 }
