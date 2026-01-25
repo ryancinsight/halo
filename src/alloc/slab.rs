@@ -9,12 +9,25 @@ use crate::alloc::{GhostAlloc, AllocError};
 use crate::concurrency::CachePadded;
 use core::alloc::Layout;
 use core::ptr::NonNull;
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::alloc::{alloc, dealloc};
 use std::cell::{Cell, UnsafeCell};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::thread;
+
+// Unique Thread ID generator for Page Ownership
+static NEXT_THREAD_ID: AtomicU64 = AtomicU64::new(1);
+
+thread_local! {
+    /// Caches a unique 64-bit ID for the current thread.
+    static LOCAL_THREAD_ID: u64 = NEXT_THREAD_ID.fetch_add(1, Ordering::Relaxed);
+}
+
+#[inline(always)]
+fn current_thread_id() -> u64 {
+    LOCAL_THREAD_ID.with(|id| *id)
+}
 
 // Constants
 const PAGE_SIZE: usize = 4096;
@@ -69,12 +82,13 @@ struct Page {
     capacity: usize,
     allocated_count: AtomicUsize,
     shard_index: usize,
-    in_stack: AtomicUsize, // 1 if in `heads`, 0 if detached
+    in_stack: AtomicUsize, // STATE_DETACHED, etc.
+    owner_thread: AtomicU64, // Unique ID of the thread that owns `local_free_head`
     // Padding to ensure the header size is a multiple of cache line (128 bytes)
     // to prevent false sharing between the header (metadata) and the first block (user data).
-    // Current size: 9*8 = 72 bytes (on 64-bit).
-    // We need 56 bytes of padding.
-    _padding: [u8; 56],
+    // Current size: 10*8 = 80 bytes (on 64-bit).
+    // We need 48 bytes of padding.
+    _padding: [u8; 48],
 }
 
 // Safety: `local_free_head` is only accessed by the thread that owns the Page (removed from `heads`).
@@ -140,8 +154,9 @@ impl Page {
                 capacity,
                 allocated_count: AtomicUsize::new(0),
                 shard_index,
-                in_stack: AtomicUsize::new(0), // Initially detached
-                _padding: [0; 56],
+                in_stack: AtomicUsize::new(STATE_DETACHED), // Initially detached
+                owner_thread: AtomicU64::new(current_thread_id()),
+                _padding: [0; 48],
             });
 
             Some(NonNull::new_unchecked(page_ptr))
@@ -631,6 +646,8 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
             };
             let head_atomic = &state.heads[class_idx][shard_idx];
 
+            let my_id = current_thread_id();
+
             // 1. Iterate and try to allocate
             let mut page_ptr_val = head_atomic.load(Ordering::Acquire);
 
@@ -638,39 +655,41 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
                 unsafe {
                     let page = &*(page_ptr_val as *const Page);
 
-                    // Try to lock: STATE_IN_LIST -> STATE_LOCKED
-                    if page.in_stack.compare_exchange(
-                        STATE_IN_LIST,
-                        STATE_LOCKED,
-                        Ordering::Acquire,
-                        Ordering::Relaxed
-                    ).is_ok() {
+                    // Check ownership
+                    if page.owner_thread.load(Ordering::Relaxed) == my_id {
+                        // Fast path: I own the page. No one else touches `local_free_head`.
                         if let Some(ptr) = page.alloc_local() {
                             let prev_allocated = page.allocated_count.fetch_add(1, Ordering::Relaxed);
 
                             if prev_allocated + 1 == page.capacity {
                                 // Became Full. Try to Pop if at head.
+                                // We don't need a lock, but we need to update in_stack logic?
+                                // If we remove it, we mark it DETACHED (or effectively so).
+                                // If dealloc sees DETACHED, it will add it back.
+
                                 let current_head = head_atomic.load(Ordering::Relaxed);
                                 if current_head == page_ptr_val {
                                      let next = page.next.load(Ordering::Relaxed);
                                      if head_atomic.compare_exchange(
                                          current_head, next, Ordering::Release, Ordering::Relaxed
                                      ).is_ok() {
+                                         // Successfully removed.
                                          page.in_stack.store(STATE_DETACHED, Ordering::Release);
                                      } else {
-                                         page.in_stack.store(STATE_FULL, Ordering::Release);
+                                         // Failed to remove. Full but in list.
+                                         // We leave it as STATE_IN_LIST (implied).
                                      }
                                 } else {
-                                     page.in_stack.store(STATE_FULL, Ordering::Release);
+                                     // Not at head. Full but in list.
                                 }
-                            } else {
-                                // Still available.
-                                page.in_stack.store(STATE_IN_LIST, Ordering::Release);
                             }
                             return Ok(ptr);
                         } else {
-                            // Alloc failed. Mark FULL.
-                            page.in_stack.store(STATE_FULL, Ordering::Release);
+                            // Alloc failed (Full).
+                            // Mark as FULL if we can?
+                            // Only if we pop it. But alloc_local failed, so it IS full.
+                            // We should probably skip it next time.
+                            // But we leave it in the list.
                         }
                     }
 
@@ -739,20 +758,12 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
                                 break;
                             }
                         },
-                        STATE_FULL => {
-                            if page.in_stack.compare_exchange(
-                                STATE_FULL,
-                                STATE_IN_LIST,
-                                Ordering::AcqRel,
-                                Ordering::Acquire,
-                            ).is_ok() {
-                                break;
-                            }
-                        },
-                        STATE_LOCKED | STATE_IN_LIST => {
+                        // We removed STATE_FULL usage in allocate_in, but if we add it back or if logic implies it.
+                        // STATE_IN_LIST means it's in the list, so we don't need to push.
+                        // STATE_LOCKED is not used in new allocate_in.
+                        _ => {
                             break;
                         }
-                        _ => {}
                     }
                 }
             }
