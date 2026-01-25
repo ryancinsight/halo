@@ -22,7 +22,9 @@ pub fn static_token() -> &'static GhostToken<'static> {
     // Note: This relies on `GhostToken` having a constructor accessible here.
     // We will ensure `GhostToken` exposes a `pub(crate)` way to construct it
     // or we update visibility in `mod.rs`.
-    TOKEN.get_or_init(|| GhostToken::from_invariant(InvariantLifetime::default()))
+    // SAFETY: We are creating the singleton static token. This is safe because
+    // it is only done once (via OnceLock) and the brand is 'static.
+    TOKEN.get_or_init(|| unsafe { GhostToken::from_invariant(InvariantLifetime::default()) })
 }
 
 /// A global mutex to enforce exclusive access for the mutable variant.
@@ -77,6 +79,7 @@ where
     // Create a temporary mutable token.
     // SAFETY: The caller guarantees no other references are in use.
     // We are the only thread in this function due to the mutex.
-    let mut token = GhostToken::from_invariant(InvariantLifetime::default());
+    // We treat `from_invariant` as unsafe to acknowledge we are forging a token.
+    let mut token = unsafe { GhostToken::from_invariant(InvariantLifetime::default()) };
     f(&mut token)
 }

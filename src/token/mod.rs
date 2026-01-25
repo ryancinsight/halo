@@ -66,7 +66,7 @@ impl<'brand> GhostToken<'brand> {
     /// This is an internal API. The caller must ensure that the lifetime `'brand`
     /// is used correctly to enforce linearity and uniqueness where required.
     #[inline(always)]
-    pub(crate) const fn from_invariant(invariant: InvariantLifetime<'brand>) -> Self {
+    pub(crate) const unsafe fn from_invariant(invariant: InvariantLifetime<'brand>) -> Self {
         GhostToken(invariant)
     }
 }
