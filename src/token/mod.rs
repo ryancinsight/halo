@@ -13,10 +13,12 @@
 
 use core::marker::PhantomData;
 
+pub mod global;
 pub mod invariant;
 pub mod macros;
 pub mod shared;
 
+pub use global::{static_token, with_static_token, with_static_token_mut, StaticBrand};
 pub use invariant::InvariantLifetime;
 pub use shared::SharedGhostToken;
 
@@ -56,6 +58,17 @@ impl<'brand> GhostToken<'brand> {
     // NOTE: we intentionally keep the public surface small. If you need a
     // `&mut GhostToken<'brand>` for iterator pipelines, just take a mutable
     // borrow of the token inside the `new` closure.
+
+    /// Creates a GhostToken from a raw invariant lifetime.
+    ///
+    /// # Safety
+    ///
+    /// This is an internal API. The caller must ensure that the lifetime `'brand`
+    /// is used correctly to enforce linearity and uniqueness where required.
+    #[inline(always)]
+    pub(crate) const fn from_invariant(invariant: InvariantLifetime<'brand>) -> Self {
+        GhostToken(invariant)
+    }
 }
 
 impl<'brand> GhostToken<'brand> {
