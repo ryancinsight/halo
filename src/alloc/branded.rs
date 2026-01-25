@@ -14,7 +14,7 @@ pub struct BrandedAllocator<'brand> {
 
 impl<'brand> BrandedAllocator<'brand> {
     /// Creates a new branded allocator.
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             heap: BrandedHeap::new(),
         }
