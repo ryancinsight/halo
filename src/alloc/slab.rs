@@ -513,11 +513,24 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
         token: &GhostToken<'brand>,
         layout: Layout,
     ) -> Result<NonNull<u8>, AllocError> {
+        self.allocate_in(token, layout, None)
+    }
+
+    fn allocate_in(
+        &self,
+        token: &GhostToken<'brand>,
+        layout: Layout,
+        shard_hint: Option<usize>,
+    ) -> Result<NonNull<u8>, AllocError> {
         let size = layout.size().max(layout.align()).max(std::mem::size_of::<usize>());
         let state = self.state.borrow(token);
 
         if let Some(class_idx) = SlabState::get_class_index(size) {
-             let shard_idx = current_shard_index();
+             let shard_idx = if let Some(hint) = shard_hint {
+                 hint & SHARD_MASK
+             } else {
+                 current_shard_index()
+             };
              let head_atomic = &state.heads[class_idx][shard_idx];
 
             // 1. Try to allocate from existing pages

@@ -46,7 +46,7 @@ where
         assert!(capacity > 0, "capacity must be non-zero");
         Self {
             map: BrandedExternalHashMap::with_capacity(capacity),
-            list: BrandedDoublyLinkedList::new(),
+            list: BrandedDoublyLinkedList::<(K, V)>::new(),
             capacity,
         }
     }
@@ -54,7 +54,7 @@ where
     /// Gets a reference to the value associated with `key`.
     pub fn get<'a>(&'a mut self, token: &'a mut GhostToken<'brand>, key: &K) -> Option<&'a V> {
         let index = self.map.get(key, |idx| {
-            self.list.get(token, idx).map(|(k, _)| k)
+            self.list.get(token, idx).map(|(k, _): &(_, _)| k)
         })?;
 
         self.list.move_to_front(token, index);
@@ -70,7 +70,7 @@ where
         key: &K,
     ) -> Option<&'a mut V> {
         let index = self.map.get(key, |idx| {
-            self.list.get(token, idx).map(|(k, _)| k)
+            self.list.get(token, idx).map(|(k, _): &(_, _)| k)
         })?;
 
         self.list.move_to_front(token, index);
@@ -81,7 +81,7 @@ where
     /// Returns a reference to the value without updating the LRU order.
     pub fn peek<'a>(&'a self, token: &'a GhostToken<'brand>, key: &K) -> Option<&'a V> {
         let index = self.map.get(key, |idx| {
-            self.list.get(token, idx).map(|(k, _)| k)
+            self.list.get(token, idx).map(|(k, _): &(_, _)| k)
         })?;
         let (_, v) = self.list.get(token, index).unwrap();
         Some(v)
@@ -90,7 +90,7 @@ where
     /// Puts a key-value pair into the cache.
     pub fn put(&mut self, token: &mut GhostToken<'brand>, key: K, value: V) -> Option<V> {
         let index_opt = self.map.get(&key, |idx| {
-            self.list.get(token, idx).map(|(k, _)| k)
+            self.list.get(token, idx).map(|(k, _): &(_, _)| k)
         });
 
         if let Some(index) = index_opt {
@@ -105,14 +105,14 @@ where
                 // Evict LRU
                 if let Some((k, _)) = self.list.back(token) {
                     self.map.remove(k, |idx| {
-                        self.list.get(token, idx).map(|(k, _)| k)
+                        self.list.get(token, idx).map(|(k, _): &(_, _)| k)
                     });
                 }
                 self.list.pop_back(token);
             }
             let index = self.list.push_front(token, (key.clone(), value));
             self.map.insert(&key, index, |idx| {
-                self.list.get(token, idx).map(|(k, _)| k)
+                self.list.get(token, idx).map(|(k, _): &(_, _)| k)
             });
             None
         }

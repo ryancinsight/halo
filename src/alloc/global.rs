@@ -17,6 +17,9 @@ use core::alloc::{GlobalAlloc, Layout};
 use core::cell::Cell;
 use core::ptr::NonNull;
 use std::alloc::System;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::thread;
 
 /// A wrapper that dispatches `GlobalAlloc` calls to a thread-local `GhostAlloc`.
 ///
@@ -32,11 +35,13 @@ pub struct DispatchGlobalAlloc;
 struct ScopedAdapter<'a, 'brand, A: GhostAlloc<'brand>> {
     allocator: &'a A,
     token: &'a GhostToken<'brand>,
+    shard_hint: usize,
 }
 
 unsafe impl<'a, 'brand, A: GhostAlloc<'brand>> GlobalAlloc for ScopedAdapter<'a, 'brand, A> {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        match self.allocator.allocate(self.token, layout) {
+        // Use allocate_in with the cached shard hint to avoid internal TLS lookups
+        match self.allocator.allocate_in(self.token, layout, Some(self.shard_hint)) {
             Ok(ptr) => ptr.as_ptr(),
             Err(_) => core::ptr::null_mut(),
         }
@@ -135,9 +140,16 @@ where
     A: GhostAlloc<'brand>,
     F: FnOnce() -> R,
 {
+    // Compute the shard hint once for this scope.
+    // This allows the allocator to skip internal TLS/hashing operations.
+    let mut hasher = DefaultHasher::new();
+    thread::current().id().hash(&mut hasher);
+    let shard_hint = hasher.finish() as usize;
+
     let adapter = ScopedAdapter {
         allocator,
         token,
+        shard_hint,
     };
 
     // Construct fat pointer to dyn GlobalAlloc

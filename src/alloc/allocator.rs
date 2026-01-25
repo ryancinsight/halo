@@ -20,6 +20,22 @@ pub trait GhostAlloc<'brand>: Sync {
         layout: Layout,
     ) -> Result<NonNull<u8>, AllocError>;
 
+    /// Allocates memory with a shard hint.
+    ///
+    /// This allows the caller to provide a hint (e.g., a thread-specific hash or index)
+    /// to help the allocator select a specific shard or resource pool without needing
+    /// to perform expensive thread-local storage lookups or hashing internally.
+    ///
+    /// The hint is advisory; the allocator may ignore it or normalize it.
+    fn allocate_in(
+        &self,
+        token: &GhostToken<'brand>,
+        layout: Layout,
+        _shard_hint: Option<usize>,
+    ) -> Result<NonNull<u8>, AllocError> {
+        self.allocate(token, layout)
+    }
+
     /// Deallocates memory.
     ///
     /// # Safety
