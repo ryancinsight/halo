@@ -17,6 +17,7 @@ pub use slab::BrandedSlab;
 pub mod branded;
 pub mod branded_box;
 pub mod branded_rc;
+pub mod buddy;
 pub mod heap;
 pub mod static_rc;
 
