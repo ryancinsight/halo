@@ -7,6 +7,7 @@
 use crate::{GhostToken, GhostCell};
 use crate::alloc::{GhostAlloc, AllocError};
 use crate::concurrency::CachePadded;
+use crate::alloc::rseq::{self, MAX_CPUS};
 use core::alloc::Layout;
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicUsize, Ordering};
@@ -266,12 +267,23 @@ struct SlabState {
     // CachePadded to prevent false sharing between heads of different size classes.
     // Sharded by thread ID to reduce contention.
     heads: [[CachePadded<AtomicUsize>; SHARD_COUNT]; 9],
+
+    // Per-CPU caches for RSEQ optimization.
+    cpu_caches: Box<[[CachePadded<rseq::RseqCache>; MAX_CPUS]; 9]>,
 }
 
 impl SlabState {
     fn new() -> Self {
+        // Use Vec to allocate on heap to avoid stack overflow, then convert to Box
+        let cpu_caches_vec: Vec<[CachePadded<rseq::RseqCache>; MAX_CPUS]> = (0..9).map(|_| {
+            core::array::from_fn(|_| CachePadded::new(rseq::RseqCache::new()))
+        }).collect();
+
+        let cpu_caches = cpu_caches_vec.into_boxed_slice().try_into().ok().unwrap();
+
         Self {
             heads: core::array::from_fn(|_| core::array::from_fn(|_| CachePadded::new(AtomicUsize::new(0)))),
+            cpu_caches,
         }
     }
 
@@ -311,6 +323,9 @@ impl Drop for SlabState {
                     }
                 }
             }
+            // Note: blocks in cpu_caches are from pages.
+            // Since we freed all pages above, we don't need to free individual blocks in cpu_caches.
+            // (The pointers in cpu_caches are now dangling, but the memory is freed via pages).
         }
     }
 }
@@ -324,8 +339,8 @@ impl Drop for SlabState {
 ///   Implementing a thread-local cache (via `ThreadLocal` or `SharedGhostToken` sharding) would
 ///   significantly improve throughput for high-concurrency workloads, similar to `mimalloc`'s free list sharding.
 ///
-/// - **TODO(perf): Restartable Sequences (RSEQ)**:
-///   On Linux, using RSEQ could allow faster per-cpu operations without atomics for the fast path.
+/// - **DONE(perf): Restartable Sequences (RSEQ)**:
+///   On Linux, using RSEQ allows faster per-cpu operations without atomics for the fast path.
 ///
 /// - **TODO(mem): Eager Page Return**:
 ///   Currently, empty pages are only returned when the Slab is dropped. Implementing logic to
@@ -393,6 +408,12 @@ impl<'brand> BrandedSlab<'brand> {
         let state = self.state.borrow_mut(token);
 
         if let Some(class_idx) = SlabState::get_class_index(size) {
+            // NOTE: Even with exclusive access, we could use RSEQ cache?
+            // But allocate_mut implies we have exclusive access to the token.
+            // RSEQ cache is for concurrent access without token exclusivity (shared token).
+            // However, RSEQ cache is per-CPU.
+            // If we are exclusive, we can just use the head page without atomics (as implemented below).
+
             let block_size = SlabState::get_block_size(class_idx);
             let shard_idx = current_shard_index();
             let head_atomic = &mut state.heads[class_idx][shard_idx];
@@ -517,6 +538,17 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
         let state = self.state.borrow(token);
 
         if let Some(class_idx) = SlabState::get_class_index(size) {
+             // 0. Try RSEQ per-cpu cache
+             unsafe {
+                 let caches = &state.cpu_caches[class_idx];
+                 let base = caches.as_ptr() as *mut CachePadded<rseq::RseqCache>;
+                 let stride = std::mem::size_of::<CachePadded<rseq::RseqCache>>();
+
+                 if let Some(ptr) = rseq::rseq_pop_safe(base, stride) {
+                     return Ok(ptr);
+                 }
+             }
+
              let shard_idx = current_shard_index();
              let head_atomic = &state.heads[class_idx][shard_idx];
 
@@ -576,13 +608,24 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
 
     unsafe fn deallocate(
         &self,
-        _token: &GhostToken<'brand>,
+        token: &GhostToken<'brand>,
         ptr: NonNull<u8>,
         layout: Layout,
     ) {
         let size = layout.size().max(layout.align()).max(std::mem::size_of::<usize>());
 
-        if SlabState::get_class_index(size).is_some() {
+        if let Some(class_idx) = SlabState::get_class_index(size) {
+            // 0. Try RSEQ per-cpu cache
+            let state = self.state.borrow(token);
+            let caches = &state.cpu_caches[class_idx];
+            let base = caches.as_ptr() as *mut CachePadded<rseq::RseqCache>;
+            let stride = std::mem::size_of::<CachePadded<rseq::RseqCache>>();
+
+            if rseq::rseq_push_safe(base, stride, ptr) {
+                return;
+            }
+
+            // Fallback
             let page_ptr = Page::from_ptr(ptr);
             let page = page_ptr.as_ref();
             page.dealloc_atomic(ptr);

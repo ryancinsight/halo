@@ -5,6 +5,7 @@ pub mod pool;
 pub mod generational_pool;
 pub mod global;
 pub mod slab;
+pub mod rseq;
 
 pub use allocator::{AllocError, GhostAlloc};
 pub use arena::BrandedArena;
