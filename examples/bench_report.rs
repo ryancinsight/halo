@@ -42,7 +42,8 @@ fn main() {
                 .arg(&baseline_name);
 
         if quick {
-            cmd.arg("--measurement-time").arg("1").arg("--sample-size").arg("10");
+            cmd.arg("--measurement-time").arg("1")
+               .arg("--sample-size").arg("10");
         }
 
         let status = cmd.status()

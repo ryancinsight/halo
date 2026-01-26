@@ -9,6 +9,9 @@ pub fn run(c: &mut Criterion) {
 
 fn bench_alloc_small(c: &mut Criterion) {
     let mut group = c.benchmark_group("micro_small");
+    group.warm_up_time(std::time::Duration::from_millis(500));
+    group.measurement_time(std::time::Duration::from_secs(1));
+    group.sample_size(10);
 
     group.bench_function("alloc_free_16b", |b| {
         b.iter(|| {
