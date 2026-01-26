@@ -1,5 +1,5 @@
 use crate::token::{GhostToken, ImmutableChild, InvariantLifetime};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, Once};
 
 /// A zero-sized marker type representing the global brand.
 ///
@@ -18,11 +18,14 @@ pub struct StaticBrand;
 /// Accessing the static token is extremely cheap (checking a `OnceLock`),
 /// and subsequent accesses are essentially free references.
 pub fn static_token() -> &'static GhostToken<'static> {
-    static TOKEN: OnceLock<GhostToken<'static>> = OnceLock::new();
-    // Note: This relies on `GhostToken` having a constructor accessible here.
-    // We will ensure `GhostToken` exposes a `pub(crate)` way to construct it
-    // or we update visibility in `mod.rs`.
-    TOKEN.get_or_init(|| GhostToken::from_invariant(InvariantLifetime::default()))
+    static mut TOKEN: Option<GhostToken<'static>> = None;
+    static INIT: Once = Once::new();
+    unsafe {
+        INIT.call_once(|| {
+            TOKEN = Some(GhostToken::from_invariant(InvariantLifetime::default()));
+        });
+        TOKEN.as_ref().unwrap_unchecked()
+    }
 }
 
 /// A global mutex to enforce exclusive access for the mutable variant.
