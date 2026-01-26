@@ -206,3 +206,7 @@ harness = false
 [[bench]]
 name = "hierarchy_benchmark"
 harness = false
+
+[[bench]]
+name = "segregated_alloc_bench"
+harness = false

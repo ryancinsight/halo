@@ -19,6 +19,7 @@ pub mod branded_box;
 pub mod branded_rc;
 pub mod heap;
 pub mod static_rc;
+pub mod segregated;
 
 pub use branded_box::BrandedBox;
 pub use branded_rc::BrandedRc;
