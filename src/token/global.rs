@@ -1,4 +1,4 @@
-use crate::token::{GhostToken, InvariantLifetime};
+use crate::token::{GhostToken, ImmutableChild, InvariantLifetime};
 use std::sync::{Mutex, OnceLock};
 
 /// A zero-sized marker type representing the global brand.
@@ -27,6 +27,15 @@ pub fn static_token() -> &'static GhostToken<'static> {
 
 /// A global mutex to enforce exclusive access for the mutable variant.
 static MUTABLE_GUARD: Mutex<()> = Mutex::new(());
+
+/// Returns a new immutable child token derived from the global static token.
+///
+/// This token allows read-only access to globally branded data and can be
+/// freely copied and shared across threads. It cannot be used to gain mutable
+/// access or be upgraded.
+pub fn static_child_token() -> ImmutableChild<'static, 'static> {
+    static_token().split_immutable().0
+}
 
 /// Executes a closure with access to the global static token.
 ///

@@ -14,13 +14,17 @@
 use core::marker::PhantomData;
 
 pub mod global;
+pub mod hierarchy;
 pub mod invariant;
 pub mod macros;
 pub mod shared;
+pub mod traits;
 
 pub use global::{static_token, with_static_token, with_static_token_mut, StaticBrand};
+pub use hierarchy::{HierarchicalGhostToken, ImmutableChild};
 pub use invariant::InvariantLifetime;
 pub use shared::SharedGhostToken;
+pub use traits::{GhostBorrow, GhostBorrowMut};
 
 /// A zero-sized token that controls access to GhostCells
 ///

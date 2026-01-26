@@ -1,30 +1,30 @@
 use core::ptr;
 
 use super::super::GhostCell;
-use crate::GhostToken;
+use crate::{GhostBorrow, GhostBorrowMut};
 
 impl<'brand, T> GhostCell<'brand, T> {
     /// Borrows the cell immutably.
     #[inline(always)]
-    pub fn borrow<'a>(&'a self, token: &'a GhostToken<'brand>) -> &'a T {
+    pub fn borrow<'a>(&'a self, token: &'a impl GhostBorrow<'brand>) -> &'a T {
         self.inner.get(token)
     }
 
     /// Borrows the cell mutably.
     #[inline(always)]
-    pub fn borrow_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>) -> &'a mut T {
+    pub fn borrow_mut<'a>(&'a self, token: &'a mut impl GhostBorrowMut<'brand>) -> &'a mut T {
         self.inner.get_mut(token)
     }
 
     /// Replaces the contained value, returning the old value.
     #[inline]
-    pub fn replace(&self, token: &mut GhostToken<'brand>, value: T) -> T {
+    pub fn replace(&self, token: &mut impl GhostBorrowMut<'brand>, value: T) -> T {
         self.inner.replace(value, token)
     }
 
     /// Swaps the values of two `GhostCell`s.
     #[inline]
-    pub fn swap(&self, token: &mut GhostToken<'brand>, other: &Self) {
+    pub fn swap(&self, token: &mut impl GhostBorrowMut<'brand>, other: &Self) {
         let a = self.inner.as_mut_ptr(token);
         let b = other.inner.as_mut_ptr(token);
 

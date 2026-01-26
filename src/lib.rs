@@ -124,7 +124,10 @@ pub use collections::{
 };
 pub use alloc::{BrandedRc, StaticRc};
 pub use graph::{GhostAdjacencyGraph, GhostBipartiteGraph, GhostCscGraph, GhostCsrGraph, GhostDag};
-pub use token::{GhostToken, SharedGhostToken};
+pub use token::{
+    GhostBorrow, GhostBorrowMut, GhostToken, HierarchicalGhostToken, ImmutableChild,
+    SharedGhostToken,
+};
 
 // Note: std::cell::Cell is not re-exported to maintain naming consistency
 // Use GhostCell for the halo ecosystem, or import std::cell::Cell directly

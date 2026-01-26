@@ -18,7 +18,7 @@
 
 use core::{cell::UnsafeCell, marker::PhantomData, mem, ptr};
 
-use crate::GhostToken;
+use crate::{GhostBorrow, GhostBorrowMut, GhostToken};
 
 /// A token-branded wrapper around `core::cell::UnsafeCell<T>`.
 #[repr(transparent)]
@@ -40,14 +40,14 @@ impl<'brand, T: ?Sized> GhostUnsafeCell<'brand, T> {
 
     /// Returns a shared reference to the contained value.
     #[inline(always)]
-    pub fn get<'a>(&'a self, _token: &'a GhostToken<'brand>) -> &'a T {
+    pub fn get<'a>(&'a self, _token: &'a impl GhostBorrow<'brand>) -> &'a T {
         // SAFETY: safe code cannot obtain `&mut T` without `&mut GhostToken<'brand>`.
         unsafe { &*self.raw().get() }
     }
 
     /// Returns an exclusive reference to the contained value.
     #[inline(always)]
-    pub fn get_mut<'a>(&'a self, _token: &'a mut GhostToken<'brand>) -> &'a mut T {
+    pub fn get_mut<'a>(&'a self, _token: &'a mut impl GhostBorrowMut<'brand>) -> &'a mut T {
         // SAFETY: caller proves exclusivity via `&mut GhostToken<'brand>`.
         unsafe { &mut *self.raw().get() }
     }
@@ -64,13 +64,13 @@ impl<'brand, T: ?Sized> GhostUnsafeCell<'brand, T> {
 
     /// Returns a raw const pointer to the contained value.
     #[inline(always)]
-    pub fn as_ptr(&self, _token: &GhostToken<'brand>) -> *const T {
+    pub fn as_ptr(&self, _token: &impl GhostBorrow<'brand>) -> *const T {
         self.raw().get().cast_const()
     }
 
     /// Returns a raw mut pointer to the contained value.
     #[inline(always)]
-    pub fn as_mut_ptr(&self, _token: &mut GhostToken<'brand>) -> *mut T {
+    pub fn as_mut_ptr(&self, _token: &mut impl GhostBorrowMut<'brand>) -> *mut T {
         self.raw().get()
     }
 
@@ -90,7 +90,7 @@ impl<'brand, T: ?Sized> GhostUnsafeCell<'brand, T> {
 impl<'brand, T> GhostUnsafeCell<'brand, T> {
     /// Replaces the contained value, returning the old one.
     #[inline(always)]
-    pub fn replace(&self, value: T, token: &mut GhostToken<'brand>) -> T {
+    pub fn replace(&self, value: T, token: &mut impl GhostBorrowMut<'brand>) -> T {
         mem::replace(self.get_mut(token), value)
     }
 
@@ -107,7 +107,7 @@ impl<'brand, T> GhostUnsafeCell<'brand, T> {
     /// a bitwise copy; it is only valid if the caller upholds the usual `read`
     /// contract (no double-drop, etc.).
     #[inline(always)]
-    pub unsafe fn read(&self, token: &GhostToken<'brand>) -> T {
+    pub unsafe fn read(&self, token: &impl GhostBorrow<'brand>) -> T {
         // SAFETY: caller upholds `ptr::read` contract.
         unsafe { ptr::read(self.as_ptr(token)) }
     }
