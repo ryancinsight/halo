@@ -68,6 +68,21 @@ const TAG_SHIFT: usize = 32;
 const INDEX_MASK: usize = (1 << TAG_SHIFT) - 1;
 const NONE: usize = INDEX_MASK;
 
+// Pointer Tagging Constants (for GLOBAL_PAGE_POOL)
+// Assumes 48-bit virtual address space (x86_64, aarch64)
+const PTR_MASK: usize = 0x0000_FFFF_FFFF_FFFF;
+const PTR_TAG_SHIFT: usize = 48;
+
+#[inline(always)]
+fn unpack_ptr(val: usize) -> (usize, usize) {
+    (val & PTR_MASK, val >> PTR_TAG_SHIFT)
+}
+
+#[inline(always)]
+fn pack_ptr(ptr: usize, tag: usize) -> usize {
+    (ptr & PTR_MASK) | (tag << PTR_TAG_SHIFT)
+}
+
 // Page State Constants
 const STATE_DETACHED: usize = 0;
 const STATE_LOCKED: usize = 1;
@@ -340,37 +355,59 @@ impl Drop for SlabState {
     }
 }
 
+// --- Stack / List Helpers ---
+
+unsafe fn push_page(head_atomic: &AtomicUsize, page_ptr: NonNull<Page>) {
+    let page = page_ptr.as_ref();
+    let mut current = head_atomic.load(Ordering::Acquire);
+    loop {
+        page.next.store(current, Ordering::Relaxed);
+        match head_atomic.compare_exchange_weak(
+            current,
+            page_ptr.as_ptr() as usize,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => return,
+            Err(actual) => current = actual,
+        }
+    }
+}
+
 unsafe fn pop_global_page() -> Option<NonNull<Page>> {
     let mut current = GLOBAL_PAGE_POOL.load(Ordering::Acquire);
     loop {
-        let (ptr_val, tag) = Page::unpack(current);
+        let (ptr_val, tag) = unpack_ptr(current);
         if ptr_val == 0 {
             return None;
         }
         let page = &*(ptr_val as *const Page);
+        // The next pointer in the global pool is also a tagged pointer (or at least stored as one?)
+        // Wait, `page.next` is AtomicUsize. When in `heads`, it stores pointer (untagged? No, `heads` is `AtomicUsize`).
+        // In `heads`, we store `page_ptr.as_ptr() as usize`. It is UNTAGGED?
+        // `allocate` uses `page_ptr_val` directly.
+        // `Page::next` links pages.
+        // In `push_page`: `page.next.store(current, Relaxed)`. `current` is from `head_atomic`.
+        // If `head_atomic` is `AtomicUsize` (raw pointer), then `page.next` is raw pointer.
+        // BUT `GLOBAL_PAGE_POOL` is Tagged.
+        // So when in Global Pool, `page.next` must store the NEXT TAGGED POINTER?
+        // No, standard Treiber stack:
+        // Node.next -> NextNode.
+        // Head -> Tagged(FirstNode).
+        // So `page.next` should store `NextNode` (raw pointer).
+        // `pop`: Read Head (Tagged). Extract Ptr. Read Ptr->next (Raw). NewHead = Tagged(Ptr->next, Tag+1).
+
+        // Let's check `deallocate` pushing logic:
+        // `page.next.store(curr_ptr, Ordering::Relaxed);` where `curr_ptr` is the RAW pointer of current head.
+        // Correct.
+        // So `next_val` below is RAW pointer.
         let next_val = page.next.load(Ordering::Relaxed);
         let new_tag = tag.wrapping_add(1);
-        let new_head = Page::pack(next_val, new_tag); // Note: next_val in pool is just index? No, it's pointer.
-
-        // Wait, GLOBAL_PAGE_POOL stores pointers? Or indices?
-        // Let's assume pointers for simplicity, but we need to pack tags.
-        // Page::unpack expects index. Page::from_ptr expects pointer.
-        // Let's store raw pointers + tag.
-        // But Page::pack packs index.
-        // We should treat GLOBAL_PAGE_POOL contents as (ptr as usize) | tag?
-        // But ptr must be aligned. PAGE_SIZE is 4096. Low 12 bits are 0.
-        // TAG_SHIFT is 32.
-        // This fits if ptr < 4GB? No.
-        // Page::pack uses INDEX_MASK which is (1<<32)-1.
-        // This implies 32-bit indices.
-        // If we use tagged pointers, we must use the pointer directly or an index.
-        // Let's stick to the convention: head stores POINTER.
-        // But `unpack` extracts index.
-        // Let's fix pop/push for global pool to be standard Treiber.
+        let new_head = pack_ptr(next_val, new_tag);
 
         match GLOBAL_PAGE_POOL.compare_exchange_weak(
             current,
-            new_head, // Use packed value
+            new_head,
             Ordering::AcqRel,
             Ordering::Acquire
         ) {
@@ -419,7 +456,7 @@ impl<'brand> BrandedSlab<'brand> {
 
         if let Some(class_idx) = SlabState::get_class_index(size) {
             let shard_idx = page.shard_index;
-            let head_mutex = &mut state.heads[class_idx][shard_idx];
+            let head_atomic = &mut state.heads[class_idx][shard_idx];
             let all_head_mutex = &mut state.all_heads[class_idx][shard_idx];
 
             // Link into all_heads
@@ -429,9 +466,9 @@ impl<'brand> BrandedSlab<'brand> {
             *all_head_mutex.get_mut().unwrap() = page_ptr.as_ptr() as usize;
 
             // Link into heads (Available)
-            let current_head = *head_mutex.get_mut().unwrap();
+            let current_head = *head_atomic.get_mut();
             *page.next.get_mut() = current_head;
-            *head_mutex.get_mut().unwrap() = page_ptr.as_ptr() as usize;
+            *head_atomic.get_mut() = page_ptr.as_ptr() as usize;
             *page.in_stack.get_mut() = STATE_IN_LIST;
         }
     }
@@ -444,8 +481,8 @@ impl<'brand> BrandedSlab<'brand> {
             let layout = Layout::from_size_align_unchecked(PAGE_SIZE, PAGE_SIZE);
             for class_idx in 0..9 {
                 for shard_idx in 0..SHARD_COUNT {
-                    let head_mutex = &mut state.heads[class_idx][shard_idx];
-                    let mut current_ptr_val = *head_mutex.get_mut().unwrap();
+                    let head_atomic = &mut state.heads[class_idx][shard_idx];
+                    let mut current_ptr_val = *head_atomic.get_mut();
                     let mut prev_ptr_val = 0;
 
                     while current_ptr_val != 0 {
@@ -455,7 +492,7 @@ impl<'brand> BrandedSlab<'brand> {
                         if *page.allocated_count.get_mut() == 0 {
                             // Unlink from heads
                             if prev_ptr_val == 0 {
-                                *head_mutex.get_mut().unwrap() = next_val;
+                                *head_atomic.get_mut() = next_val;
                             } else {
                                 let prev_page = &mut *(prev_ptr_val as *mut Page);
                                 *prev_page.next.get_mut() = next_val;
@@ -513,12 +550,12 @@ impl<'brand> BrandedSlab<'brand> {
         if let Some(class_idx) = SlabState::get_class_index(size) {
             let block_size = SlabState::get_block_size(class_idx);
             let shard_idx = current_shard_index();
-            let head_mutex = &mut state.heads[class_idx][shard_idx];
+            let head_atomic = &mut state.heads[class_idx][shard_idx];
             let all_heads_mutex = &mut state.all_heads[class_idx][shard_idx];
 
             // Iterate and drain full pages from the stack head
             loop {
-                let page_ptr_val = *head_mutex.get_mut().unwrap();
+                let page_ptr_val = *head_atomic.get_mut();
                 if page_ptr_val != 0 {
                     unsafe {
                         let page = &mut *(page_ptr_val as *mut Page);
@@ -529,7 +566,7 @@ impl<'brand> BrandedSlab<'brand> {
                             if *page.allocated_count.get_mut() == page.capacity {
                                 // Full. Remove from available stack.
                                 let next_val = *page.next.get_mut();
-                                *head_mutex.get_mut().unwrap() = next_val;
+                                *head_atomic.get_mut() = next_val;
                                 *page.in_stack.get_mut() = STATE_DETACHED;
                             } else {
                                 *page.in_stack.get_mut() = STATE_IN_LIST;
@@ -538,7 +575,7 @@ impl<'brand> BrandedSlab<'brand> {
                         } else {
                             // Page was full. Remove and continue.
                             let next_val = *page.next.get_mut();
-                            *head_mutex.get_mut().unwrap() = next_val;
+                            *head_atomic.get_mut() = next_val;
                             *page.in_stack.get_mut() = STATE_DETACHED;
                         }
                     }
@@ -559,9 +596,9 @@ impl<'brand> BrandedSlab<'brand> {
                     *page.allocated_count.get_mut() += 1;
 
                     // Push to heads (Available)
-                    let current_head = *head_mutex.get_mut().unwrap();
+                    let current_head = *head_atomic.get_mut();
                     *page.next.get_mut() = current_head;
-                    *head_mutex.get_mut().unwrap() = new_page.as_ptr() as usize;
+                    *head_atomic.get_mut() = new_page.as_ptr() as usize;
                     *page.in_stack.get_mut() = STATE_IN_LIST;
 
                     Ok(ptr)
@@ -598,11 +635,11 @@ impl<'brand> BrandedSlab<'brand> {
             } else if *page.allocated_count.get_mut() == page.capacity - 1 {
                 // Transition Full -> Available. Push to heads.
                 let state = self.state.borrow_mut(token);
-                let head_mutex = &mut state.heads[class_idx][page.shard_index];
+                let head_atomic = &mut state.heads[class_idx][page.shard_index];
 
-                let current_head = *head_mutex.get_mut().unwrap();
+                let current_head = *head_atomic.get_mut();
                 *page.next.get_mut() = current_head;
-                *head_mutex.get_mut().unwrap() = page_ptr.as_ptr() as usize;
+                *head_atomic.get_mut() = page_ptr.as_ptr() as usize;
                 *page.in_stack.get_mut() = STATE_IN_LIST;
             }
         } else {
@@ -623,12 +660,12 @@ impl<'brand> BrandedSlab<'brand> {
         // Unlink from heads (Available)
         // If it was empty, it should be in `heads` (Available).
         {
-            let head_mutex = &mut state.heads[class_idx][shard_idx];
-            let mut current_ptr_val = *head_mutex.get_mut().unwrap();
+            let head_atomic = &mut state.heads[class_idx][shard_idx];
+            let mut current_ptr_val = *head_atomic.get_mut();
 
             if current_ptr_val == target_ptr_val {
                  let page = &mut *(current_ptr_val as *mut Page);
-                 *head_mutex.get_mut().unwrap() = *page.next.get_mut();
+                 *head_atomic.get_mut() = *page.next.get_mut();
             } else {
                 while current_ptr_val != 0 {
                     let page = &mut *(current_ptr_val as *mut Page);
@@ -703,15 +740,12 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
             } else {
                 current_shard_index()
             };
-            let head_mutex = &state.heads[class_idx][shard_idx];
+            let head_atomic = &state.heads[class_idx][shard_idx];
 
             let my_id = current_thread_id();
 
-            // 1. Iterate and try to allocate
-            // Acquire lock to prevent UAF and allow safe removal
-            let mut head_guard = head_mutex.lock().unwrap();
-            let mut page_ptr_val = *head_guard;
-            let mut prev_ptr_val = 0;
+            // 1. Iterate and try to allocate (Lock-Free)
+            let mut page_ptr_val = head_atomic.load(Ordering::Acquire);
 
             while page_ptr_val != 0 {
                 unsafe {
@@ -724,28 +758,24 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
                             let prev_allocated = page.allocated_count.fetch_add(1, Ordering::Relaxed);
 
                             if prev_allocated + 1 == page.capacity {
-                                // Became Full. Remove from available stack.
-                                let next_val = page.next.load(Ordering::Relaxed);
-                                if prev_ptr_val == 0 {
-                                    *head_guard = next_val;
-                                } else {
-                                    let prev_page = &*(prev_ptr_val as *const Page);
-                                    prev_page.next.store(next_val, Ordering::Relaxed);
+                                // Became Full. Try to Pop if at head.
+                                let current_head = head_atomic.load(Ordering::Relaxed);
+                                if current_head == page_ptr_val {
+                                     let next = page.next.load(Ordering::Relaxed);
+                                     if head_atomic.compare_exchange(
+                                         current_head, next, Ordering::Release, Ordering::Relaxed
+                                     ).is_ok() {
+                                         page.in_stack.store(STATE_DETACHED, Ordering::Release);
+                                     }
                                 }
-                                page.in_stack.store(STATE_DETACHED, Ordering::Release);
                             }
                             return Ok(ptr);
-                        } else {
-                            // Alloc failed (Full). Should not happen if in_stack logic is correct.
                         }
                     }
 
-                    prev_ptr_val = page_ptr_val;
-                    page_ptr_val = page.next.load(Ordering::Relaxed);
+                    page_ptr_val = page.next.load(Ordering::Acquire);
                 }
             }
-
-            drop(head_guard); // Release lock before new page creation
 
             // 2. Create new page (or reuse from global pool)
             let block_size = SlabState::get_block_size(class_idx);
@@ -881,50 +911,12 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
                              // Push to Global Pool for reuse instead of free (prevents UAF on concurrent read)
                              let mut current_pool = GLOBAL_PAGE_POOL.load(Ordering::Acquire);
                              loop {
-                                 let (_, tag) = Page::unpack(current_pool);
-                                 let new_tag = tag.wrapping_add(1);
-                                 // Link page to current pool head
-                                 let (ptr_val, _) = Page::unpack(current_pool);
-                                 page.next.store(ptr_val, Ordering::Relaxed);
-
-                                 // We use the pointer directly for the pool head value
-                                 // But Page::pack needs index.
-                                 // Let's rely on standard Treiber:
-                                 // Store (ptr_val | tag)
-                                 let new_head = Page::pack(page_ptr.as_ptr() as usize, new_tag); // Assumes pack/unpack handles ptr safely?
-                                 // Page::pack uses INDEX_MASK which is (1<<32)-1.
-                                 // Pointer > 4GB?
-                                 // NOTE: Page::pack/unpack are designed for indices?
-                                 // Let's check impl.
-                                 // fn unpack(val: usize) -> (usize, usize) { (val & INDEX_MASK, val >> TAG_SHIFT) }
-                                 // INDEX_MASK = (1 << 32) - 1.
-                                 // On 64-bit, pointers > 4GB will be truncated!
-                                 // We cannot use Page::pack/unpack for 64-bit pointers if TAG is 32 bits.
-                                 // We need full 64-bit pointers.
-                                 // But wait, GLOBAL_PAGE_POOL needs ABA protection (tags).
-                                 // If we can't pack ptr+tag, we can't do standard Treiber without DCAS.
-                                 // OR we use the "index" capability of the allocator if pages are aligned/indexed?
-                                 // No, pages are syscall allocated.
-                                 // Solution: Just rely on memory safety?
-                                 // ABA in Global Pool?
-                                 // Yes, if we pop P, re-push P.
-                                 // If we don't have tagged pointers for 64-bit, we are stuck.
-                                 // BUT: x86_64 uses 48-bit pointers.
-                                 // We can use 16 bits for tags.
-                                 // `BrandedFreelist` uses this trick.
-                                 // Let's use `BrandedFreelist` logic here manually.
-
-                                 // Refactor: Just define a helper or reuse?
-                                 // Re-use `BrandedFreelist` logic inline.
-                                 let ptr_mask = 0x0000_FFFF_FFFF_FFFF;
-                                 let tag_shift = 48;
-
-                                 let (curr_ptr, curr_tag) = ((current_pool & ptr_mask), current_pool >> tag_shift);
+                                 let (curr_ptr, curr_tag) = unpack_ptr(current_pool);
 
                                  page.next.store(curr_ptr, Ordering::Relaxed);
 
                                  let new_tag = curr_tag.wrapping_add(1);
-                                 let new_val = (page_ptr.as_ptr() as usize & ptr_mask) | (new_tag << tag_shift);
+                                 let new_val = pack_ptr(page_ptr.as_ptr() as usize, new_tag);
 
                                  match GLOBAL_PAGE_POOL.compare_exchange_weak(
                                      current_pool, new_val, Ordering::AcqRel, Ordering::Acquire
@@ -951,11 +943,8 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
                                 Ordering::Acquire,
                             ).is_ok() {
                                 let state = self.state.borrow(token);
-                                let head_mutex = &state.heads[class_idx][page.shard_index];
-                                let mut guard = head_mutex.lock().unwrap();
-                                let curr = *guard;
-                                page.next.store(curr, Ordering::Relaxed);
-                                *guard = page_ptr.as_ptr() as usize;
+                                let head_atomic = &state.heads[class_idx][page.shard_index];
+                                push_page(head_atomic, page_ptr);
                                 break;
                             }
                         },
