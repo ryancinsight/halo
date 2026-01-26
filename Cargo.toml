@@ -202,3 +202,7 @@ harness = false
 [[bench]]
 name = "static_token_benchmark"
 harness = false
+
+[[bench]]
+name = "hierarchy_benchmark"
+harness = false

@@ -132,6 +132,24 @@ To support global singletons and bootstrapping, the library provides a **Global 
   - **Usage**: It must **only** be used during single-threaded initialization (bootstrapping).
   - **Serialization**: It uses a global `Mutex` to prevent concurrent mutable accesses, but it does **not** protect against concurrent readers.
 
+## Hierarchical Tokens
+
+To enable flexible permission management without runtime overhead, `GhostToken` supports **hierarchical splitting**.
+
+- **Splitting**: A parent token (even if borrowed immutably) can derive multiple **Immutable Children**.
+  - `split_immutable(&self)`: Returns `(ImmutableChild, ImmutableChild)`.
+  - `split_into<N>(&self)`: Returns `[ImmutableChild; N]`.
+- **Permissions**:
+  - `GhostToken`: Full Read/Write capability (impls `GhostBorrowMut`).
+  - `ImmutableChild`: Read-Only capability (impls `GhostBorrow`).
+- **Invariants**:
+  - Children are strictly less capable than parents (ReadOnly subset of FullAccess).
+  - Children are bound to the lifetime of the parent borrow or ownership.
+  - Linearity is preserved for mutable access: you cannot derive a mutable child from a shared parent.
+- **Global Hierarchy**:
+  - `static_child_token()` derives an `ImmutableChild<'static, 'static>` from the global token.
+  - This allows creating globally distributed, read-only views of static data that cannot be upgraded to write access, ideal for metrics or configuration.
+
 ## Related designs: qcell and frankencell (what we adopt, what we reject)
 
 This crate’s core safety story is **lifetime branding + linear capability** (GhostToken). Two related families are worth
@@ -169,5 +187,3 @@ To validate “minimal overhead”, benchmarks must:
  - [`qcell` crate docs](https://docs.rs/qcell/latest/qcell/)
  - [`frankencell` crate docs](https://docs.rs/frankencell/latest/frankencell/)
  - [`qcell` soundness advisory (historical)](https://rustsec.org/advisories/RUSTSEC-2022-0007.html)
-
-
