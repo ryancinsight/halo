@@ -224,3 +224,7 @@ harness = false
 [[bench]]
 name = "alloc_system"
 harness = false
+
+[[bench]]
+name = "lel_graph_benchmark"
+harness = false
