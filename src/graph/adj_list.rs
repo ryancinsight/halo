@@ -639,7 +639,7 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
         let topology = self.node_topology.borrow(token);
         let mut visited = vec![false; topology.len()];
         let mut queue = std::collections::VecDeque::new();
-        let mut result = Vec::new();
+        let mut result = Vec::with_capacity(topology.len());
 
         if start_node < visited.len() {
             visited[start_node] = true;
@@ -671,7 +671,7 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
         let topology = self.node_topology.borrow(token);
         let mut visited = vec![false; topology.len()];
         let mut stack = Vec::new();
-        let mut result = Vec::new();
+        let mut result = Vec::with_capacity(topology.len());
 
         if start_node < visited.len() {
             visited[start_node] = true;
@@ -797,7 +797,7 @@ impl<'a, 'brand, E> FastAdjListGraph<'a, 'brand, E> {
         let len = self.topology.len();
         let mut visited = vec![false; len];
         let mut queue = std::collections::VecDeque::new();
-        let mut result = Vec::new();
+        let mut result = Vec::with_capacity(len);
 
         if start_node < len {
             visited[start_node] = true;
@@ -821,7 +821,7 @@ impl<'a, 'brand, E> FastAdjListGraph<'a, 'brand, E> {
         let len = self.topology.len();
         let mut visited = vec![false; len];
         let mut stack = Vec::new();
-        let mut result = Vec::new();
+        let mut result = Vec::with_capacity(len);
 
         if start_node < len {
             visited[start_node] = true;
