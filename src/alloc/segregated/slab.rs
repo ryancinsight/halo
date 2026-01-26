@@ -1,10 +1,10 @@
 use core::sync::atomic::{AtomicUsize, Ordering};
 use core::ptr::NonNull;
 use core::alloc::Layout;
-use std::alloc::{alloc, dealloc};
 use crate::GhostToken;
 use crate::token::traits::GhostBorrow;
 use crate::alloc::segregated::freelist::BrandedFreelist;
+use crate::alloc::page::{PageAlloc, GlobalPageAlloc};
 
 /// A slab allocator managing a single fixed-size page.
 ///
@@ -45,8 +45,13 @@ impl<'brand, const OBJECT_SIZE: usize, const OBJECTS_PER_SLAB: usize> BrandedSla
     // Constants
     const PAGE_SIZE: usize = 4096;
 
-    /// Creates a new slab.
+    /// Creates a new slab using the default global page allocator.
     pub fn new() -> Option<NonNull<Self>> {
+        Self::new_in(&GlobalPageAlloc)
+    }
+
+    /// Creates a new slab using the provided page allocator.
+    pub fn new_in<PA: PageAlloc>(allocator: &PA) -> Option<NonNull<Self>> {
         if OBJECT_SIZE < core::mem::size_of::<usize>() {
             return None;
         }
@@ -62,7 +67,7 @@ impl<'brand, const OBJECT_SIZE: usize, const OBJECTS_PER_SLAB: usize> BrandedSla
 
         unsafe {
             let layout = Layout::from_size_align_unchecked(Self::PAGE_SIZE, Self::PAGE_SIZE);
-            let ptr = alloc(layout);
+            let ptr = allocator.alloc_page(layout);
             if ptr.is_null() {
                 return None;
             }
@@ -91,15 +96,12 @@ impl<'brand, const OBJECT_SIZE: usize, const OBJECTS_PER_SLAB: usize> BrandedSla
     fn object_area_start(&self) -> usize {
         let self_addr = self as *const _ as usize;
         let header_size = core::mem::size_of::<Self>();
-        // Align to OBJECT_SIZE? Or just header size?
-        // Usually we want objects aligned to OBJECT_SIZE or at least word aligned.
-        // Let's align to 16 bytes or OBJECT_SIZE.
-        // For simplicity, just after header.
+
         let mut start = self_addr + header_size;
 
-        // Align start to OBJECT_SIZE if power of 2?
-        // Let's align to 16 bytes for now.
-        let align = 16;
+        // Align start to OBJECT_SIZE to ensure all objects satisfy alignment equal to their size.
+        // We assume OBJECT_SIZE is a power of 2.
+        let align = OBJECT_SIZE;
         if start % align != 0 {
             start = (start + align) & !(align - 1);
         }

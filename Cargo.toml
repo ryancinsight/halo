@@ -216,3 +216,11 @@ harness = false
 [[bench]]
 name = "bootstrap_bench"
 harness = false
+
+[[bench]]
+name = "alloc_halo"
+harness = false
+
+[[bench]]
+name = "alloc_system"
+harness = false
