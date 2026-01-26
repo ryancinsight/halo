@@ -1,10 +1,12 @@
 use crate::GhostToken;
 use crate::token::traits::GhostBorrow;
-use crate::alloc::stage3::size_class::SizeClass;
-use crate::alloc::stage3::slab::BrandedSlab;
-use crate::alloc::stage3::freelist::BrandedFreelist;
+use crate::alloc::segregated::size_class::SizeClass;
+use crate::alloc::segregated::slab::BrandedSlab;
+use crate::alloc::segregated::freelist::BrandedFreelist;
 use core::sync::atomic::{AtomicPtr, Ordering};
 use core::ptr::{self};
+use core::alloc::Layout;
+use std::alloc::dealloc;
 use core::marker::PhantomData;
 
 /// Manages slabs for a specific size class.
@@ -104,12 +106,11 @@ impl<'brand, SC: SizeClass, const SIZE: usize, const N: usize> SizeClassManager<
         let slab_ptr = BrandedSlab::<'brand, SIZE, N>::from_ptr(ptr);
         let slab = slab_ptr.as_ref();
 
-        slab.free(token, ptr);
+        let prev_count = slab.free(token, ptr);
 
-        let count = slab.allocated_count();
-        if count == N - 1 {
-            // Was full (N), now N-1. Push to available.
-            // Even if it is currently active, pushing it is safe (just redundant availability).
+        if prev_count == N {
+            // Transitioned from Full (N) to Available (N-1).
+            // We are the thread that broke the fullness.
             self.available.push(token, slab_ptr.as_ptr() as *mut u8);
         }
     }
@@ -148,6 +149,8 @@ impl<'brand, SC: SizeClass, const SIZE: usize, const N: usize> Drop for SizeClas
     fn drop(&mut self) {
         // We only need to iterate all_slabs and free them.
         let mut current = self.all_slabs.load(Ordering::Relaxed);
+        let layout = unsafe { Layout::from_size_align_unchecked(4096, 4096) };
+
         while !current.is_null() {
             unsafe {
                 let slab = &*current;
@@ -155,6 +158,7 @@ impl<'brand, SC: SizeClass, const SIZE: usize, const N: usize> Drop for SizeClas
 
                 // Drop slab
                 ptr::drop_in_place(current);
+                dealloc(current as *mut u8, layout);
 
                 current = next_val as *mut BrandedSlab<'brand, SIZE, N>;
             }

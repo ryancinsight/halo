@@ -1,6 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use halo::alloc::stage3::manager::{SizeClassManager, ThreadLocalCache};
-use halo::alloc::stage3::size_class::SC;
+use halo::alloc::segregated::manager::{SizeClassManager, ThreadLocalCache};
+use halo::alloc::segregated::size_class::SC;
 use halo::GhostToken;
 use halo::token::shared::SharedGhostToken;
 use std::sync::{Arc, Mutex};
@@ -8,7 +8,7 @@ use std::thread;
 use std::time::Instant;
 
 fn bench_single_thread(c: &mut Criterion) {
-    let mut group = c.benchmark_group("Stage 3 Single Thread");
+    let mut group = c.benchmark_group("Segregated Alloc Single Thread");
     group.sample_size(10);
     const BATCH: usize = 100;
 
@@ -52,7 +52,7 @@ fn bench_single_thread(c: &mut Criterion) {
 }
 
 fn bench_multi_thread(c: &mut Criterion) {
-    let mut group = c.benchmark_group("Stage 3 Multi Thread Contention");
+    let mut group = c.benchmark_group("Segregated Alloc Multi Thread Contention");
     group.sample_size(10);
     const THREADS: usize = 2;
     const OPS: usize = 100;

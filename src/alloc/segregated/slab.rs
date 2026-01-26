@@ -4,7 +4,7 @@ use core::alloc::Layout;
 use std::alloc::{alloc, dealloc};
 use crate::GhostToken;
 use crate::token::traits::GhostBorrow;
-use crate::alloc::stage3::freelist::BrandedFreelist;
+use crate::alloc::segregated::freelist::BrandedFreelist;
 
 /// A slab allocator managing a single fixed-size page.
 ///
@@ -169,10 +169,10 @@ impl<'brand, const OBJECT_SIZE: usize, const OBJECTS_PER_SLAB: usize> BrandedSla
         }
     }
 
-    /// Frees an object.
-    pub unsafe fn free(&self, token: &impl GhostBorrow<'brand>, ptr: *mut u8) {
+    /// Frees an object. Returns the previous allocated count.
+    pub unsafe fn free(&self, token: &impl GhostBorrow<'brand>, ptr: *mut u8) -> usize {
         self.freelist.push(token, ptr);
-        self.alloc_cnt.fetch_sub(1, Ordering::Relaxed);
+        self.alloc_cnt.fetch_sub(1, Ordering::Relaxed)
     }
 
     /// Frees a batch of objects.

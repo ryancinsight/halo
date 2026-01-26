@@ -1,8 +1,8 @@
 use crate::GhostToken;
-use crate::alloc::stage3::size_class::{SC, get_size_class_index, get_block_size};
-use crate::alloc::stage3::freelist::BrandedFreelist;
-use crate::alloc::stage3::slab::BrandedSlab;
-use crate::alloc::stage3::manager::{SizeClassManager, ThreadLocalCache};
+use crate::alloc::segregated::size_class::{SC, get_size_class_index, get_block_size};
+use crate::alloc::segregated::freelist::BrandedFreelist;
+use crate::alloc::segregated::slab::BrandedSlab;
+use crate::alloc::segregated::manager::{SizeClassManager, ThreadLocalCache};
 use core::ptr;
 
 #[test]

@@ -208,5 +208,5 @@ name = "hierarchy_benchmark"
 harness = false
 
 [[bench]]
-name = "stage3_bench"
+name = "segregated_alloc_bench"
 harness = false
