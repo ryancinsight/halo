@@ -87,6 +87,30 @@ fn bench_graph_sparse_remove(c: &mut Criterion) {
     });
 }
 
+fn bench_graph_dfs(c: &mut Criterion) {
+    let size = 1000;
+
+    c.bench_function("adj_list_graph_dfs", |b| {
+        b.iter(|| {
+            GhostToken::new(|mut token| {
+                let graph = halo::graph::AdjListGraph::new();
+                let mut nodes = Vec::with_capacity(size);
+                for i in 0..size {
+                    nodes.push(graph.add_node(&mut token, i));
+                }
+                // Tree-like
+                for i in 1..size {
+                    graph.add_edge(&mut token, &nodes[i / 2], &nodes[i], ());
+                }
+
+                let start_id = graph.node_id_from_cell(&token, &*nodes[0]);
+                let visited = graph.dfs(&token, start_id);
+                black_box(visited.len());
+            })
+        });
+    });
+}
+
 fn bench_graph_bfs(c: &mut Criterion) {
     let size = 1000;
 
@@ -338,6 +362,7 @@ criterion_group!(
     benches,
     bench_graph_sparse_remove,
     bench_graph_bfs,
+    bench_graph_dfs,
     bench_graph_snapshot,
     bench_connected_components,
     bench_clique_remove
