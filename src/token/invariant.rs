@@ -7,3 +7,10 @@ use core::marker::PhantomData;
 /// when they shouldn't be.
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct InvariantLifetime<'id>(PhantomData<fn(&'id ()) -> &'id ()>);
+
+impl<'id> InvariantLifetime<'id> {
+    /// Creates a new invariant lifetime marker.
+    pub const fn new() -> Self {
+        Self(PhantomData)
+    }
+}

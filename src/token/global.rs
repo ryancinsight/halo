@@ -15,16 +15,14 @@ pub struct StaticBrand;
 ///
 /// # Performance
 ///
-/// Accessing the static token is extremely cheap (checking a `OnceLock`),
-/// and subsequent accesses are essentially free references.
+/// Accessing the static token is zero-cost as it is a ZST.
 pub fn static_token() -> &'static GhostToken<'static> {
-    static mut TOKEN: Option<GhostToken<'static>> = None;
-    static INIT: Once = Once::new();
+    // Since GhostToken is a ZST, we can safely fabricate a reference to it.
+    // The strict provenance and safety rules allow this for ZSTs if aligned (align 1).
     unsafe {
-        INIT.call_once(|| {
-            TOKEN = Some(GhostToken::from_invariant(InvariantLifetime::default()));
-        });
-        TOKEN.as_ref().unwrap_unchecked()
+        // Use a static to ensure valid address if ever inspected, though for ZST it shouldn't matter.
+        static TOKEN: GhostToken<'static> = GhostToken::from_invariant(InvariantLifetime::new());
+        &TOKEN
     }
 }
 

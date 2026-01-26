@@ -234,3 +234,6 @@ harness = false
 [[bench]]
 name = "alloc_system"
 harness = false
+
+[workspace]
+members = ["xtask"]
