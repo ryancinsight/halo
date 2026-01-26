@@ -16,27 +16,27 @@ struct ReentrancyGuard;
 
 impl ReentrancyGuard {
     fn enter() -> Option<Self> {
-        // We use try_with to avoid panicking if TLS is being destroyed or not yet ready.
-        // However, standard thread_local! usually panics if initialization fails.
-        // If we are in initialization of CACHES, IN_ALLOCATOR should be independent?
-        // Actually, they are independent TLS variables.
-        // Accessing IN_ALLOCATOR is safe.
-
-        // Note: Using `try_with` is better but `thread_local` macro output method `with` is standard.
-        // We will assume `with` is safe.
-        let in_alloc = IN_ALLOCATOR.with(|f| f.get());
-        if in_alloc {
-            None
+        // Use try_with to allow fallback if TLS is not accessible (e.g., during destruction).
+        // If try_with fails, we assume we should use the fallback (direct/syscall) path.
+        if let Ok(flag_ref) = IN_ALLOCATOR.try_with(|f| f.get()) {
+            if flag_ref {
+                return None;
+            }
         } else {
-            IN_ALLOCATOR.with(|f| f.set(true));
-            Some(Self)
+            // Cannot access TLS (e.g. recursion during init or destruction).
+            // Fall back to direct manager/syscall.
+            return None;
         }
+
+        // Mark as entered.
+        let _ = IN_ALLOCATOR.try_with(|f| f.set(true));
+        Some(Self)
     }
 }
 
 impl Drop for ReentrancyGuard {
     fn drop(&mut self) {
-        IN_ALLOCATOR.with(|f| f.set(false));
+        let _ = IN_ALLOCATOR.try_with(|f| f.set(false));
     }
 }
 
