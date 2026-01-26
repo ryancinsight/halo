@@ -33,7 +33,18 @@ impl<'brand> GhostLelGraph<'brand> {
     pub fn from_adjacency(adjacency: &[Vec<usize>]) -> Self {
         let n = adjacency.len();
         let mut degrees = vec![0usize; n];
-        let mut all_edges = Vec::new();
+
+        // For large graphs, pre-calculating total edges prevents expensive reallocations.
+        // Benchmarks show a regression for small graphs (N < 20k) due to the extra pass overhead.
+        let mut all_edges = if n > 20_000 {
+            let mut total_edges = 0;
+            for neighbors in adjacency {
+                total_edges += neighbors.len();
+            }
+            Vec::with_capacity(total_edges)
+        } else {
+            Vec::new()
+        };
 
         for (u, neighbors) in adjacency.iter().enumerate() {
             degrees[u] = neighbors.len();
@@ -43,7 +54,8 @@ impl<'brand> GhostLelGraph<'brand> {
             }
         }
 
-        let edges = DeltaEncodedEdges::from_edges(n, &all_edges);
+        let edges = DeltaEncodedEdges::from_edges(n, all_edges);
+        let edge_count = edges.len();
         let visited = VisitedSet::new(n);
 
         Self {
@@ -51,7 +63,7 @@ impl<'brand> GhostLelGraph<'brand> {
             degrees,
             visited,
             node_count: n,
-            edge_count: all_edges.len(),
+            edge_count,
         }
     }
 
