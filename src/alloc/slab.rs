@@ -73,7 +73,7 @@ const STATE_FULL: usize = 3;
 ///
 /// This struct is embedded at the START of the allocated 4KB page.
 #[repr(C)]
-struct Page {
+pub(crate) struct Page {
     next: AtomicUsize, // Linked list of available pages (Stack link)
     all_next: AtomicUsize, // Linked list of all pages (for Drop/Compact)
     block_size: usize,
@@ -108,59 +108,76 @@ impl Page {
                 return None;
             }
 
-            let page_ptr = ptr as *mut Page;
-
-            // Calculate where blocks start
-            let header_size = std::mem::size_of::<Page>();
-            let mut start_offset = header_size;
-
-            let align_mask = block_size - 1;
-            if (start_offset & align_mask) != 0 {
-                start_offset = (start_offset + align_mask) & !align_mask;
+            match Self::init_from_ptr(ptr, block_size, next_all_ptr, shard_index) {
+                Some(p) => Some(p),
+                None => {
+                    dealloc(ptr, layout);
+                    None
+                }
             }
-
-            if start_offset >= PAGE_SIZE {
-                dealloc(ptr, layout);
-                return None;
-            }
-
-            let available_bytes = PAGE_SIZE - start_offset;
-            let capacity = available_bytes / block_size;
-
-            if capacity == 0 {
-                dealloc(ptr, layout);
-                return None;
-            }
-
-            // Initialize free list
-            // Blocks are indexed 0..capacity.
-            // We write the index of the next free block into the block memory itself (as u32).
-            let base_ptr = ptr.add(start_offset);
-            for i in 0..capacity - 1 {
-                let block_ptr = base_ptr.add(i * block_size);
-                *(block_ptr as *mut u32) = (i + 1) as u32;
-            }
-            let last_block_ptr = base_ptr.add((capacity - 1) * block_size);
-            *(last_block_ptr as *mut u32) = NONE as u32;
-
-            // Write the header
-            // Note: local_free_head starts at 0. remote_free_head at NONE.
-            std::ptr::write(page_ptr, Page {
-                next: AtomicUsize::new(0), // Initially detached from available stack
-                all_next: AtomicUsize::new(next_all_ptr),
-                block_size,
-                remote_free_head: AtomicUsize::new(NONE),
-                local_free_head: UnsafeCell::new(0),
-                capacity,
-                allocated_count: AtomicUsize::new(0),
-                shard_index,
-                in_stack: AtomicUsize::new(STATE_DETACHED), // Initially detached
-                owner_thread: AtomicU64::new(current_thread_id()),
-                _padding: [0; 48],
-            });
-
-            Some(NonNull::new_unchecked(page_ptr))
         }
+    }
+
+    /// Initializes a page at the given pointer.
+    ///
+    /// # Safety
+    /// `ptr` must be valid, at least PAGE_SIZE bytes, and aligned to PAGE_SIZE.
+    pub(crate) unsafe fn init_from_ptr(
+        ptr: *mut u8,
+        block_size: usize,
+        next_all_ptr: usize,
+        shard_index: usize
+    ) -> Option<NonNull<Page>> {
+        let page_ptr = ptr as *mut Page;
+
+        // Calculate where blocks start
+        let header_size = std::mem::size_of::<Page>();
+        let mut start_offset = header_size;
+
+        let align_mask = block_size - 1;
+        if (start_offset & align_mask) != 0 {
+            start_offset = (start_offset + align_mask) & !align_mask;
+        }
+
+        if start_offset >= PAGE_SIZE {
+            return None;
+        }
+
+        let available_bytes = PAGE_SIZE - start_offset;
+        let capacity = available_bytes / block_size;
+
+        if capacity == 0 {
+            return None;
+        }
+
+        // Initialize free list
+        // Blocks are indexed 0..capacity.
+        // We write the index of the next free block into the block memory itself (as u32).
+        let base_ptr = ptr.add(start_offset);
+        for i in 0..capacity - 1 {
+            let block_ptr = base_ptr.add(i * block_size);
+            *(block_ptr as *mut u32) = (i + 1) as u32;
+        }
+        let last_block_ptr = base_ptr.add((capacity - 1) * block_size);
+        *(last_block_ptr as *mut u32) = NONE as u32;
+
+        // Write the header
+        // Note: local_free_head starts at 0. remote_free_head at NONE.
+        std::ptr::write(page_ptr, Page {
+            next: AtomicUsize::new(0), // Initially detached from available stack
+            all_next: AtomicUsize::new(next_all_ptr),
+            block_size,
+            remote_free_head: AtomicUsize::new(NONE),
+            local_free_head: UnsafeCell::new(0),
+            capacity,
+            allocated_count: AtomicUsize::new(0),
+            shard_index,
+            in_stack: AtomicUsize::new(STATE_DETACHED), // Initially detached
+            owner_thread: AtomicU64::new(current_thread_id()),
+            _padding: [0; 48],
+        });
+
+        Some(NonNull::new_unchecked(page_ptr))
     }
 
     /// Allocates a block from the local free list.
@@ -377,6 +394,32 @@ impl<'brand> BrandedSlab<'brand> {
     pub fn new() -> Self {
         Self {
             state: GhostCell::new(SlabState::new()),
+        }
+    }
+
+    /// Injects a pre-initialized page into the slab allocator.
+    ///
+    /// # Safety
+    /// The page must be valid, initialized via `Page::init_from_ptr`, and not currently in any list.
+    pub unsafe fn inject_page(&self, token: &mut GhostToken<'brand>, page_ptr: NonNull<u8>) {
+        let page = (page_ptr.as_ptr() as *mut Page).as_mut().unwrap();
+        let size = page.block_size;
+
+        let state = self.state.borrow_mut(token);
+
+        if let Some(class_idx) = SlabState::get_class_index(size) {
+            let shard_idx = page.shard_index;
+            let head_atomic = &mut state.heads[class_idx][shard_idx];
+            let all_head_atomic = &mut state.all_heads[class_idx][shard_idx];
+
+            // Link into all_heads
+            *page.all_next.get_mut() = *all_head_atomic.get_mut();
+            *all_head_atomic.get_mut() = page_ptr.as_ptr() as usize;
+
+            // Link into heads (Available)
+            *page.next.get_mut() = *head_atomic.get_mut();
+            *head_atomic.get_mut() = page_ptr.as_ptr() as usize;
+            *page.in_stack.get_mut() = STATE_IN_LIST;
         }
     }
 
@@ -902,4 +945,16 @@ mod tests {
             unsafe { slab.deallocate_mut(token, ptr, layout); }
         });
     }
+}
+
+/// Initializes a raw memory region as a slab page.
+///
+/// # Safety
+/// `ptr` must be valid for PAGE_SIZE and aligned.
+pub unsafe fn init_slab_page(
+    ptr: NonNull<u8>,
+    block_size: usize,
+    shard_index: usize
+) -> bool {
+    Page::init_from_ptr(ptr.as_ptr(), block_size, 0, shard_index).is_some()
 }

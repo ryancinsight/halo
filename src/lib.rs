@@ -169,3 +169,4 @@ const _: () = {
     assert!(mem::size_of::<GhostLazyCell<'static, u64>>() <= mem::size_of::<usize>() * 6);
     assert!(mem::size_of::<GhostLazyLock<'static, u64>>() <= mem::size_of::<usize>() * 6);
 };
+pub mod allocator;

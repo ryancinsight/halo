@@ -12,7 +12,7 @@ pub use bump::BrandedBumpAllocator;
 pub use pool::BrandedPool;
 pub use generational_pool::GenerationalPool;
 pub use global::{DispatchGlobalAlloc, with_global_allocator};
-pub use slab::BrandedSlab;
+pub use slab::{BrandedSlab, init_slab_page};
 
 pub mod branded;
 pub mod branded_box;
