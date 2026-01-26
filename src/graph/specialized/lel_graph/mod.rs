@@ -54,7 +54,8 @@ impl<'brand> GhostLelGraph<'brand> {
             }
         }
 
-        let edges = DeltaEncodedEdges::from_edges(n, &all_edges);
+        let edges = DeltaEncodedEdges::from_edges(n, all_edges);
+        let edge_count = edges.len();
         let visited = VisitedSet::new(n);
 
         Self {
@@ -62,7 +63,7 @@ impl<'brand> GhostLelGraph<'brand> {
             degrees,
             visited,
             node_count: n,
-            edge_count: all_edges.len(),
+            edge_count,
         }
     }
 

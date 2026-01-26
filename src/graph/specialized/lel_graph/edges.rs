@@ -9,8 +9,7 @@ pub struct DeltaEncodedEdges {
 
 impl DeltaEncodedEdges {
     /// Create sorted edge list from edges, building `source_indices` for `node_count`.
-    pub fn from_edges(node_count: usize, edges: &[EccEdge]) -> Self {
-        let mut sorted_edges = edges.to_vec();
+    pub fn from_edges(node_count: usize, mut sorted_edges: Vec<EccEdge>) -> Self {
         // Sort by (source, target) so per-source neighbor lists are sorted.
         sorted_edges.sort_unstable_by_key(|e| (e.source, e.target));
 

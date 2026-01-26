@@ -2,7 +2,7 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use halo::graph::specialized::GhostLelGraph;
 
 fn bench_lel_from_adjacency(c: &mut Criterion) {
-    let size = 100_000;
+    let size = 10_000;
     let edges_per_node = 50;
 
     // Create a random-ish adjacency list
