@@ -3,6 +3,7 @@ use crate::alloc::segregated::size_class::{SC, get_size_class_index, get_block_s
 use crate::alloc::segregated::freelist::BrandedFreelist;
 use crate::alloc::segregated::slab::BrandedSlab;
 use crate::alloc::segregated::manager::{SizeClassManager, ThreadLocalCache};
+use crate::alloc::page::GlobalPageAlloc;
 use core::ptr;
 
 #[test]
@@ -89,7 +90,7 @@ fn test_slab_basic() {
 fn test_manager_integration() {
     GhostToken::new(|token| {
         const N: usize = 64;
-        let manager = SizeClassManager::<'_, SC<32>, 32, N>::new();
+        let manager = SizeClassManager::<'_, SC<32>, GlobalPageAlloc, 32, N>::new();
 
         let mut ptrs = Vec::new();
         // Alloc more than one slab
@@ -117,7 +118,7 @@ fn test_manager_integration() {
 fn test_thread_local_cache() {
     GhostToken::new(|token| {
         const N: usize = 64;
-        let manager = SizeClassManager::<'_, SC<32>, 32, N>::new();
+        let manager = SizeClassManager::<'_, SC<32>, GlobalPageAlloc, 32, N>::new();
         let mut cache = ThreadLocalCache::<'_, SC<32>>::new(10);
 
         // Fill

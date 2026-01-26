@@ -14,6 +14,9 @@ pub use generational_pool::GenerationalPool;
 pub use global::{DispatchGlobalAlloc, with_global_allocator};
 pub use slab::{BrandedSlab, init_slab_page};
 
+pub mod page;
+pub use page::{PageAlloc, GlobalPageAlloc};
+
 pub mod branded;
 pub mod branded_box;
 pub mod branded_rc;

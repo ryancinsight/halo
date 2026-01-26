@@ -3,28 +3,28 @@ use crate::token::traits::GhostBorrow;
 use crate::alloc::segregated::size_class::SizeClass;
 use crate::alloc::segregated::slab::BrandedSlab;
 use crate::alloc::segregated::freelist::BrandedFreelist;
+use crate::alloc::page::{PageAlloc, GlobalPageAlloc};
 use core::sync::atomic::{AtomicPtr, Ordering};
 use core::ptr::{self};
 use core::alloc::Layout;
-use std::alloc::dealloc;
 use core::marker::PhantomData;
 
 /// Manages slabs for a specific size class.
 /// `SIZE` must be equal to `SC::SIZE`.
-pub struct SizeClassManager<'brand, SC: SizeClass, const SIZE: usize, const N: usize> {
+pub struct SizeClassManager<'brand, SC: SizeClass, PA: PageAlloc + Default, const SIZE: usize, const N: usize> {
     // Active slab (allocating)
     active: AtomicPtr<BrandedSlab<'brand, SIZE, N>>,
     // Available slabs (Partial + Empty)
     available: BrandedFreelist<'brand>,
     // Track all allocated slabs to free them on drop
     all_slabs: AtomicPtr<BrandedSlab<'brand, SIZE, N>>,
-    _marker: PhantomData<SC>,
+    _marker: PhantomData<(SC, PA)>,
 }
 
-unsafe impl<'brand, SC: SizeClass, const SIZE: usize, const N: usize> Send for SizeClassManager<'brand, SC, SIZE, N> {}
-unsafe impl<'brand, SC: SizeClass, const SIZE: usize, const N: usize> Sync for SizeClassManager<'brand, SC, SIZE, N> {}
+unsafe impl<'brand, SC: SizeClass, PA: PageAlloc + Default, const SIZE: usize, const N: usize> Send for SizeClassManager<'brand, SC, PA, SIZE, N> {}
+unsafe impl<'brand, SC: SizeClass, PA: PageAlloc + Default, const SIZE: usize, const N: usize> Sync for SizeClassManager<'brand, SC, PA, SIZE, N> {}
 
-impl<'brand, SC: SizeClass, const SIZE: usize, const N: usize> SizeClassManager<'brand, SC, SIZE, N> {
+impl<'brand, SC: SizeClass, PA: PageAlloc + Default, const SIZE: usize, const N: usize> SizeClassManager<'brand, SC, PA, SIZE, N> {
     pub const fn new() -> Self {
         Self {
             active: AtomicPtr::new(ptr::null_mut()),
@@ -50,7 +50,7 @@ impl<'brand, SC: SizeClass, const SIZE: usize, const N: usize> SizeClassManager<
                 slab_ptr as *mut BrandedSlab<'brand, SIZE, N>
             } else {
                 // Alloc new
-                let slab = match BrandedSlab::new() {
+                let slab = match BrandedSlab::new_in(&PA::default()) {
                     Some(non_null) => non_null.as_ptr(),
                     None => return None,
                 };
@@ -145,7 +145,7 @@ impl<'brand, SC: SizeClass, const SIZE: usize, const N: usize> SizeClassManager<
     }
 }
 
-impl<'brand, SC: SizeClass, const SIZE: usize, const N: usize> Drop for SizeClassManager<'brand, SC, SIZE, N> {
+impl<'brand, SC: SizeClass, PA: PageAlloc + Default, const SIZE: usize, const N: usize> Drop for SizeClassManager<'brand, SC, PA, SIZE, N> {
     fn drop(&mut self) {
         // We only need to iterate all_slabs and free them.
         let mut current = self.all_slabs.load(Ordering::Relaxed);
@@ -158,7 +158,7 @@ impl<'brand, SC: SizeClass, const SIZE: usize, const N: usize> Drop for SizeClas
 
                 // Drop slab
                 ptr::drop_in_place(current);
-                dealloc(current as *mut u8, layout);
+                PA::default().dealloc_page(current as *mut u8, layout);
 
                 current = next_val as *mut BrandedSlab<'brand, SIZE, N>;
             }
@@ -194,12 +194,20 @@ impl<'brand, SC: SizeClass> ThreadLocalCache<'brand, SC> {
         self.buffer.is_empty()
     }
 
-    pub fn flush<const SIZE: usize, const N: usize>(&mut self, manager: &SizeClassManager<'brand, SC, SIZE, N>, token: &impl GhostBorrow<'brand>) {
+    pub fn len(&self) -> usize {
+        self.buffer.len()
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.buffer.capacity()
+    }
+
+    pub fn flush<PA: PageAlloc + Default, const SIZE: usize, const N: usize>(&mut self, manager: &SizeClassManager<'brand, SC, PA, SIZE, N>, token: &impl GhostBorrow<'brand>) {
          if self.buffer.is_empty() { return; }
          manager.free_batch(token, self.buffer.drain(..));
     }
 
-    pub fn fill<const SIZE: usize, const N: usize>(&mut self, manager: &SizeClassManager<'brand, SC, SIZE, N>, token: &impl GhostBorrow<'brand>, count: usize) {
+    pub fn fill<PA: PageAlloc + Default, const SIZE: usize, const N: usize>(&mut self, manager: &SizeClassManager<'brand, SC, PA, SIZE, N>, token: &impl GhostBorrow<'brand>, count: usize) {
         manager.alloc_batch_into(token, count, &mut self.buffer);
     }
 }
