@@ -15,7 +15,7 @@ use core::sync::atomic::Ordering;
 
 use crate::{
     collections::ChunkedVec, concurrency::worklist::GhostChaseLevDeque,
-    graph::access::visited::VisitedSet,
+    graph::access::visited::VisitedSet, GhostToken,
 };
 
 /// A bipartite graph whose visited bitmaps are branded.
@@ -300,7 +300,12 @@ impl<'brand, const EDGE_CHUNK: usize> GhostBipartiteGraph<'brand, EDGE_CHUNK> {
     /// Concurrent BFS traversal starting from a left vertex.
     ///
     /// Uses work-stealing for load balancing. Returns reachable vertex count.
-    pub fn bfs_from_left(&self, start_left: usize, deque: &GhostChaseLevDeque<'brand>) -> usize {
+    pub fn bfs_from_left(
+        &self,
+        token: &GhostToken<'brand>,
+        start_left: usize,
+        deque: &GhostChaseLevDeque<'brand>,
+    ) -> usize {
         assert!(
             start_left < self.left_count,
             "left vertex {start_left} out of bounds"
@@ -308,17 +313,21 @@ impl<'brand, const EDGE_CHUNK: usize> GhostBipartiteGraph<'brand, EDGE_CHUNK> {
 
         self.reset_visited();
         debug_assert!(self.visited_left.try_visit(start_left, Ordering::Relaxed));
-        assert!(deque.push_bottom(start_left), "deque capacity too small");
+        assert!(
+            deque.push_bottom(token, start_left),
+            "deque capacity too small"
+        );
 
+        let steal_token = token.split_immutable().0;
         let mut count = 1;
 
-        while let Some(vertex) = deque.steal() {
+        while let Some(vertex) = deque.steal(&steal_token) {
             if vertex < self.left_count {
                 // Left vertex - visit right neighbors
                 for right in self.left_neighbors(vertex) {
                     if self.visited_right.try_visit(right, Ordering::Relaxed) {
                         assert!(
-                            deque.push_bottom(self.left_count + right),
+                            deque.push_bottom(token, self.left_count + right),
                             "deque capacity too small"
                         );
                         count += 1;
@@ -329,7 +338,7 @@ impl<'brand, const EDGE_CHUNK: usize> GhostBipartiteGraph<'brand, EDGE_CHUNK> {
                 let right = vertex - self.left_count;
                 for left in self.right_neighbors(right) {
                     if self.visited_left.try_visit(left, Ordering::Relaxed) {
-                        assert!(deque.push_bottom(left), "deque capacity too small");
+                        assert!(deque.push_bottom(token, left), "deque capacity too small");
                         count += 1;
                     }
                 }
@@ -340,7 +349,12 @@ impl<'brand, const EDGE_CHUNK: usize> GhostBipartiteGraph<'brand, EDGE_CHUNK> {
     }
 
     /// Concurrent BFS traversal starting from a right vertex.
-    pub fn bfs_from_right(&self, start_right: usize, deque: &GhostChaseLevDeque<'brand>) -> usize {
+    pub fn bfs_from_right(
+        &self,
+        token: &GhostToken<'brand>,
+        start_right: usize,
+        deque: &GhostChaseLevDeque<'brand>,
+    ) -> usize {
         assert!(
             start_right < self.right_count,
             "right vertex {start_right} out of bounds"
@@ -349,19 +363,20 @@ impl<'brand, const EDGE_CHUNK: usize> GhostBipartiteGraph<'brand, EDGE_CHUNK> {
         self.reset_visited();
         debug_assert!(self.visited_right.try_visit(start_right, Ordering::Relaxed));
         assert!(
-            deque.push_bottom(self.left_count + start_right),
+            deque.push_bottom(token, self.left_count + start_right),
             "deque capacity too small"
         );
 
+        let steal_token = token.split_immutable().0;
         let mut count = 1;
 
-        while let Some(vertex) = deque.steal() {
+        while let Some(vertex) = deque.steal(&steal_token) {
             if vertex < self.left_count {
                 // Left vertex - visit right neighbors
                 for right in self.left_neighbors(vertex) {
                     if self.visited_right.try_visit(right, Ordering::Relaxed) {
                         assert!(
-                            deque.push_bottom(self.left_count + right),
+                            deque.push_bottom(token, self.left_count + right),
                             "deque capacity too small"
                         );
                         count += 1;
@@ -372,7 +387,7 @@ impl<'brand, const EDGE_CHUNK: usize> GhostBipartiteGraph<'brand, EDGE_CHUNK> {
                 let right = vertex - self.left_count;
                 for left in self.right_neighbors(right) {
                     if self.visited_left.try_visit(left, Ordering::Relaxed) {
-                        assert!(deque.push_bottom(left), "deque capacity too small");
+                        assert!(deque.push_bottom(token, left), "deque capacity too small");
                         count += 1;
                     }
                 }
@@ -509,18 +524,18 @@ mod tests {
 
     #[test]
     fn bipartite_graph_bfs_traversal() {
-        GhostToken::new(|_token| {
+        GhostToken::new(|token| {
             let left_adjacency = vec![vec![0, 1], vec![0], vec![1]];
 
             let graph = GhostBipartiteGraph::<1024>::from_left_adjacency(&left_adjacency, 2);
             let deque = GhostChaseLevDeque::new(32);
 
             // BFS from left vertex 0
-            let reachable = graph.bfs_from_left(0, &deque);
+            let reachable = graph.bfs_from_left(&token, 0, &deque);
             assert_eq!(reachable, 5); // All vertices reachable
 
             // BFS from right vertex 1
-            let reachable = graph.bfs_from_right(1, &deque);
+            let reachable = graph.bfs_from_right(&token, 1, &deque);
             assert_eq!(reachable, 5); // All vertices reachable
         });
     }

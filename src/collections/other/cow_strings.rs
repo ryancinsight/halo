@@ -51,7 +51,7 @@
 //! ```
 
 use crate::collections::BrandedVec;
-use crate::GhostToken;
+use crate::token::traits::GhostBorrow;
 use std::borrow::Cow;
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hash, Hasher};
@@ -110,7 +110,10 @@ impl<'brand> BrandedCowStrings<'brand> {
 
     /// Helper to find a slot for a given key.
     /// Returns `Ok(index)` if found, `Err(slot_index)` if not found (where to insert).
-    fn find_slot(&self, token: &GhostToken<'brand>, s: &str, hash: u64) -> Result<usize, usize> {
+    fn find_slot<Token>(&self, token: &Token, s: &str, hash: u64) -> Result<usize, usize>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         let mask = self.buckets.len() - 1;
         let mut idx = (hash as usize) & mask;
         let mut dist = 0;
@@ -161,7 +164,10 @@ impl<'brand> BrandedCowStrings<'brand> {
     /// Returns the index of the inserted string.
     ///
     /// Requires `&GhostToken` to verify uniqueness against stored strings.
-    pub fn insert(&mut self, token: &GhostToken<'brand>, s: Cow<'brand, str>) -> usize {
+    pub fn insert<Token>(&mut self, token: &Token, s: Cow<'brand, str>) -> usize
+    where
+        Token: GhostBorrow<'brand>,
+    {
         let hash = self.hash_str(&s);
 
         // Check load factor (75%)
@@ -182,32 +188,44 @@ impl<'brand> BrandedCowStrings<'brand> {
     }
 
     /// Adds a borrowed string without copying.
-    pub fn insert_borrowed(&mut self, token: &GhostToken<'brand>, s: &'brand str) -> usize {
+    pub fn insert_borrowed<Token>(&mut self, token: &Token, s: &'brand str) -> usize
+    where
+        Token: GhostBorrow<'brand>,
+    {
         self.insert(token, Cow::Borrowed(s))
     }
 
     /// Adds an owned string.
-    pub fn insert_owned(&mut self, token: &GhostToken<'brand>, s: String) -> usize {
+    pub fn insert_owned<Token>(&mut self, token: &Token, s: String) -> usize
+    where
+        Token: GhostBorrow<'brand>,
+    {
         self.insert(token, Cow::Owned(s))
     }
 
     /// Gets a reference to a string by index with zero-copy access.
     #[inline(always)]
-    pub fn get<'a>(
+    pub fn get<'a, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
+        token: &'a Token,
         idx: usize,
-    ) -> Option<&'a Cow<'brand, str>> {
+    ) -> Option<&'a Cow<'brand, str>>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         self.strings.get(token, idx)
     }
 
     /// Gets a reference to a string by value with zero-copy lookup.
     #[inline(always)]
-    pub fn get_by_value<'a>(
+    pub fn get_by_value<'a, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
+        token: &'a Token,
         value: &str,
-    ) -> Option<&'a Cow<'brand, str>> {
+    ) -> Option<&'a Cow<'brand, str>>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         let hash = self.hash_str(value);
         match self.find_slot(token, value, hash) {
             Ok(idx) => self.get(token, idx),
@@ -228,21 +246,25 @@ impl<'brand> BrandedCowStrings<'brand> {
     }
 
     /// Zero-copy iterator over all strings.
-    pub fn iter<'a>(
+    pub fn iter<'a, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
-    ) -> impl Iterator<Item = &'a Cow<'brand, str>> {
+        token: &'a Token,
+    ) -> impl Iterator<Item = &'a Cow<'brand, str>>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         self.strings.iter(token)
     }
 
     /// Zero-copy filter operation.
-    pub fn filter_ref<'a, F>(
+    pub fn filter_ref<'a, F, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
+        token: &'a Token,
         f: F,
     ) -> impl Iterator<Item = &'a Cow<'brand, str>> + 'a
     where
         F: Fn(&Cow<'brand, str>) -> bool + 'a,
+        Token: GhostBorrow<'brand>,
     {
         self.iter(token).filter(move |item| f(item))
     }
@@ -275,6 +297,7 @@ impl Default for BrandedCowStrings<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::GhostToken;
 
     #[test]
     fn test_cow_strings_zero_copy() {

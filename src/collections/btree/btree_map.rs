@@ -6,8 +6,9 @@
 
 use crate::collections::BrandedCollection;
 use crate::{BrandedVec, GhostToken};
+use crate::token::traits::{GhostBorrow, GhostBorrowMut};
 use std::borrow::Borrow;
-use std::cmp::Ordering;
+// use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 
@@ -189,10 +190,11 @@ where
     K: Ord,
 {
     /// Returns a shared reference to the value corresponding to the key.
-    pub fn get<'a, Q: ?Sized>(&'a self, token: &'a GhostToken<'brand>, key: &Q) -> Option<&'a V>
+    pub fn get<'a, Q: ?Sized, Token>(&'a self, token: &'a Token, key: &Q) -> Option<&'a V>
     where
         K: Borrow<Q>,
         Q: Ord,
+        Token: GhostBorrow<'brand>,
     {
         let mut curr = self.root;
         while curr.is_some() {
@@ -213,14 +215,15 @@ where
     }
 
     /// Returns a mutable reference to the value corresponding to the key.
-    pub fn get_mut<'a, Q: ?Sized>(
+    pub fn get_mut<'a, Q: ?Sized, Token>(
         &'a self,
-        token: &'a mut GhostToken<'brand>,
+        token: &'a mut Token,
         key: &Q,
     ) -> Option<&'a mut V>
     where
         K: Borrow<Q>,
         Q: Ord,
+        Token: GhostBorrowMut<'brand>,
     {
         let mut curr = self.root;
         while curr.is_some() {
@@ -250,10 +253,11 @@ where
     }
 
     /// Returns true if the map contains a value for the specified key.
-    pub fn contains_key_with_token<Q: ?Sized>(&self, token: &GhostToken<'brand>, key: &Q) -> bool
+    pub fn contains_key_with_token<Q: ?Sized, Token>(&self, token: &Token, key: &Q) -> bool
     where
         K: Borrow<Q>,
         Q: Ord,
+        Token: GhostBorrow<'brand>,
     {
         self.get(token, key).is_some()
     }
@@ -837,8 +841,11 @@ where
     }
 
     /// Returns an iterator over the map.
-    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> Iter<'a, 'brand, K, V> {
-        let mut iter = Iter {
+    pub fn iter<'a, Token>(&'a self, token: &'a Token) -> impl Iterator<Item = (&'a K, &'a V)> + use<'a, 'brand, K, V, Token>
+    where
+        Token: GhostBorrow<'brand>,
+    {
+        let mut iter = Iter::<_, _, Token> {
             map: self,
             token,
             stack: Vec::new(),
@@ -851,8 +858,11 @@ where
     }
 
     /// Returns an iterator over the keys of the map.
-    pub fn keys<'a>(&'a self, token: &'a GhostToken<'brand>) -> Keys<'a, 'brand, K, V> {
-        let mut iter = Keys {
+    pub fn keys<'a, Token>(&'a self, token: &'a Token) -> impl Iterator<Item = &'a K> + use<'a, 'brand, K, V, Token>
+    where
+        Token: GhostBorrow<'brand>,
+    {
+        let mut iter = Keys::<_, _, Token> {
             map: self,
             token,
             stack: Vec::new(),
@@ -865,18 +875,24 @@ where
     }
 
     /// Applies `f` to all entries in the map, allowing mutation of values.
-    pub fn for_each_mut<F>(&self, token: &mut GhostToken<'brand>, mut f: F)
+    pub fn for_each_mut<F, Token>(&self, token: &mut Token, mut f: F)
     where
         F: FnMut(&K, &mut V),
+        Token: GhostBorrowMut<'brand>,
     {
         if self.root.is_some() {
             self.for_each_node(self.root, token, &mut f);
         }
     }
 
-    fn for_each_node<F>(&self, node_idx: NodeIdx<'brand>, token: &mut GhostToken<'brand>, f: &mut F)
-    where
+    fn for_each_node<F, Token>(
+        &self,
+        node_idx: NodeIdx<'brand>,
+        token: &mut Token,
+        f: &mut F,
+    ) where
         F: FnMut(&K, &mut V),
+        Token: GhostBorrowMut<'brand>,
     {
         unsafe {
             // We can't hold reference to node while recurring.
@@ -893,7 +909,10 @@ where
 
             for i in 0..len {
                 if !is_leaf {
-                    let child_idx = self.nodes.get_unchecked(token, node_idx.index()).children[i];
+                    let child_idx = self
+                        .nodes
+                        .get_unchecked(token, node_idx.index())
+                        .children[i];
                     self.for_each_node(child_idx, token, f);
                 }
 
@@ -906,26 +925,38 @@ where
             }
 
             if !is_leaf {
-                let child_idx = self.nodes.get_unchecked(token, node_idx.index()).children[len];
+                let child_idx = self
+                    .nodes
+                    .get_unchecked(token, node_idx.index())
+                    .children[len];
                 self.for_each_node(child_idx, token, f);
             }
         }
     }
 }
 
-pub struct Iter<'a, 'brand, K, V> {
+pub struct Iter<'a, 'brand, K, V, Token = GhostToken<'brand>>
+where
+    Token: GhostBorrow<'brand>,
+{
     map: &'a BrandedBTreeMap<'brand, K, V>,
-    token: &'a GhostToken<'brand>,
+    token: &'a Token,
     stack: Vec<(NodeIdx<'brand>, usize)>,
     len: usize,
 }
 
-impl<'a, 'brand, K, V> Iter<'a, 'brand, K, V> {
+impl<'a, 'brand, K, V, Token> Iter<'a, 'brand, K, V, Token>
+where
+    Token: GhostBorrow<'brand>,
+{
     fn push_leftmost(&mut self, mut node_idx: NodeIdx<'brand>) {
         while node_idx.is_some() {
             self.stack.push((node_idx, 0));
             unsafe {
-                let node = self.map.nodes.get_unchecked(self.token, node_idx.index());
+                let node = self
+                    .map
+                    .nodes
+                    .get_unchecked(self.token, node_idx.index());
                 if node.is_leaf {
                     break;
                 }
@@ -935,7 +966,10 @@ impl<'a, 'brand, K, V> Iter<'a, 'brand, K, V> {
     }
 }
 
-impl<'a, 'brand, K, V> Iterator for Iter<'a, 'brand, K, V> {
+impl<'a, 'brand, K, V, Token> Iterator for Iter<'a, 'brand, K, V, Token>
+where
+    Token: GhostBorrow<'brand>,
+{
     type Item = (&'a K, &'a V);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -943,7 +977,10 @@ impl<'a, 'brand, K, V> Iterator for Iter<'a, 'brand, K, V> {
             let (node_idx, idx) = self.stack.last_mut()?;
 
             unsafe {
-                let node = self.map.nodes.get_unchecked(self.token, node_idx.index());
+                let node = self
+                    .map
+                    .nodes
+                    .get_unchecked(self.token, node_idx.index());
 
                 if *idx < node.len as usize {
                     let key = node.key_at(*idx);
@@ -965,19 +1002,28 @@ impl<'a, 'brand, K, V> Iterator for Iter<'a, 'brand, K, V> {
     }
 }
 
-pub struct Keys<'a, 'brand, K, V> {
+pub struct Keys<'a, 'brand, K, V, Token = GhostToken<'brand>>
+where
+    Token: GhostBorrow<'brand>,
+{
     map: &'a BrandedBTreeMap<'brand, K, V>,
-    token: &'a GhostToken<'brand>,
+    token: &'a Token,
     stack: Vec<(NodeIdx<'brand>, usize)>,
     len: usize,
 }
 
-impl<'a, 'brand, K: 'a, V> Keys<'a, 'brand, K, V> {
+impl<'a, 'brand, K: 'a, V, Token> Keys<'a, 'brand, K, V, Token>
+where
+    Token: GhostBorrow<'brand>,
+{
     fn push_leftmost(&mut self, mut node_idx: NodeIdx<'brand>) {
         while node_idx.is_some() {
             self.stack.push((node_idx, 0));
             unsafe {
-                let node = self.map.nodes.get_unchecked(self.token, node_idx.index());
+                let node = self
+                    .map
+                    .nodes
+                    .get_unchecked(self.token, node_idx.index());
                 if node.is_leaf {
                     break;
                 }
@@ -987,7 +1033,10 @@ impl<'a, 'brand, K: 'a, V> Keys<'a, 'brand, K, V> {
     }
 }
 
-impl<'a, 'brand, K: 'a, V> Iterator for Keys<'a, 'brand, K, V> {
+impl<'a, 'brand, K: 'a, V, Token> Iterator for Keys<'a, 'brand, K, V, Token>
+where
+    Token: GhostBorrow<'brand>,
+{
     type Item = &'a K;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -995,7 +1044,10 @@ impl<'a, 'brand, K: 'a, V> Iterator for Keys<'a, 'brand, K, V> {
             let (node_idx, idx) = self.stack.last_mut()?;
 
             unsafe {
-                let node = self.map.nodes.get_unchecked(self.token, node_idx.index());
+                let node = self
+                    .map
+                    .nodes
+                    .get_unchecked(self.token, node_idx.index());
 
                 if *idx < node.len as usize {
                     let key = node.key_at(*idx);

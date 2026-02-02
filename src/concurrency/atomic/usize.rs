@@ -103,7 +103,7 @@ impl<'brand> GhostAtomicUsize<'brand> {
         &self,
         set_order: Ordering,
         fetch_order: Ordering,
-        mut f: F,
+        f: F,
     ) -> Result<usize, usize>
     where
         F: FnMut(usize) -> Option<usize>,

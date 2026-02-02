@@ -8,14 +8,11 @@
 //! - `edges`: chunked contiguous `usize` targets for each row
 //! - `visited`: `VisitedSet<'brand>` for lock-free concurrent traversals
 
-use core::sync::atomic::Ordering;
-
 use crate::{
     collections::ChunkedVec,
-    concurrency::atomic::GhostAtomicBitset,
-    concurrency::worklist::{GhostChaseLevDeque, GhostTreiberStack},
     graph::access::visited::VisitedSet,
 };
+use std::sync::atomic::Ordering;
 
 /// A CSR graph whose visited bitmap is branded.
 ///

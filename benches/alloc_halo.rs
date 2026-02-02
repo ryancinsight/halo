@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use halo::allocator::HaloAllocator;
+use halo::alloc::HaloAllocator;
 
 #[global_allocator]
 static GLOBAL: HaloAllocator = HaloAllocator;

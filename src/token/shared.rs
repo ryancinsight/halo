@@ -21,32 +21,24 @@
 //!   - Sets `writer_active` (SeqCst).
 //!   - Waits for the sum of *all* shard counters to be zero (with backoff).
 
-use crate::concurrency::CachePadded;
+use crate::concurrency::{CachePadded, SHARD_COUNT, current_shard_index};
+use crate::concurrency::sync::{wait_on_u32, wake_all_u32};
+use crate::token::traits::{GhostBorrow, GhostBorrowMut};
 use crate::GhostToken;
-use std::cell::{Cell, UnsafeCell};
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+use std::cell::UnsafeCell;
 use std::ops::{Deref, DerefMut};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::thread;
+use std::sync::atomic::{AtomicU32, Ordering};
 
-/// Number of stripes for the reader counters.
-/// Power of two to allow cheap modulo masking.
-const SHARD_COUNT: usize = 32;
-const SHARD_MASK: usize = SHARD_COUNT - 1;
-
-thread_local! {
-    /// Caches the shard index for the current thread to avoid re-hashing.
-    static THREAD_SHARD_INDEX: Cell<Option<usize>> = const { Cell::new(None) };
-}
+const WRITER_ACTIVE: u32 = 1;
+const WRITER_INACTIVE: u32 = 0;
 
 /// A thread-safe, shared handle to a ghost token with scalable read performance.
 pub struct SharedGhostToken<'brand> {
     token: UnsafeCell<GhostToken<'brand>>,
     /// Global flag: true if a writer is active or pending.
-    writer_active: AtomicBool,
+    writer_active: AtomicU32,
     /// Striped reader counters, padded to avoid false sharing.
-    shards: [CachePadded<AtomicUsize>; SHARD_COUNT],
+    shards: [CachePadded<AtomicU32>; SHARD_COUNT],
 }
 
 // SAFETY: Synchronization is handled internally.
@@ -56,68 +48,35 @@ unsafe impl<'brand> Send for SharedGhostToken<'brand> {}
 impl<'brand> SharedGhostToken<'brand> {
     /// Creates a new shared token handle.
     pub fn new(token: GhostToken<'brand>) -> Self {
-        let shards = core::array::from_fn(|_| CachePadded::new(AtomicUsize::new(0)));
+        let shards = core::array::from_fn(|_| CachePadded::new(AtomicU32::new(0)));
 
         Self {
             token: UnsafeCell::new(token),
-            writer_active: AtomicBool::new(false),
+            writer_active: AtomicU32::new(WRITER_INACTIVE),
             shards,
         }
     }
 
-    /// Helper to get the current thread's shard index, initializing it if necessary.
-    #[inline(always)]
-    fn current_shard_index() -> usize {
-        THREAD_SHARD_INDEX.with(|idx| {
-            if let Some(i) = idx.get() {
-                i
-            } else {
-                let mut hasher = DefaultHasher::new();
-                thread::current().id().hash(&mut hasher);
-                let i = (hasher.finish() as usize) & SHARD_MASK;
-                idx.set(Some(i));
-                i
-            }
-        })
-    }
-
-    /// Simple backoff strategy: spin a bit, then yield.
-    fn backoff(spin_count: &mut u32) {
-        if *spin_count < 10 {
-            std::hint::spin_loop();
-        } else {
-            thread::yield_now();
-        }
-        *spin_count = spin_count.saturating_add(1);
-    }
-
     /// Acquires a shared read lock on the token.
     pub fn read<'a>(&'a self) -> SharedTokenReadGuard<'a, 'brand> {
-        let shard_idx = Self::current_shard_index();
+        let shard_idx = current_shard_index();
         let shard = &self.shards[shard_idx];
-        let mut spins = 0;
-
         loop {
-            // Optimistic read check
-            if self.writer_active.load(Ordering::SeqCst) {
-                Self::backoff(&mut spins);
+            if self.writer_active.load(Ordering::SeqCst) == WRITER_ACTIVE {
+                wait_on_u32(&self.writer_active, WRITER_ACTIVE);
                 continue;
             }
 
-            // Increment local shard counter.
-            // We use SeqCst to ensure this store is visible before we load `writer_active`.
             shard.fetch_add(1, Ordering::SeqCst);
 
-            // Re-check writer status to ensure we didn't race with a writer.
-            // This Load must not be reordered before the previous Store.
-            if self.writer_active.load(Ordering::SeqCst) {
-                // Writer became active; back off
-                shard.fetch_sub(1, Ordering::SeqCst);
-                Self::backoff(&mut spins);
+            if self.writer_active.load(Ordering::SeqCst) == WRITER_ACTIVE {
+                let prev = shard.fetch_sub(1, Ordering::SeqCst);
+                if prev == 1 {
+                    wake_all_u32(shard);
+                }
                 continue;
             }
 
-            // Successfully acquired
             return SharedTokenReadGuard {
                 parent: self,
                 shard_index: shard_idx,
@@ -127,21 +86,17 @@ impl<'brand> SharedGhostToken<'brand> {
 
     /// Acquires an exclusive write lock on the token.
     pub fn write<'a>(&'a self) -> SharedTokenWriteGuard<'a, 'brand> {
-        let mut spins = 0;
-
-        // Phase 1: Announce writer intent.
-        // Must be SeqCst to ensure readers see this store.
-        while self.writer_active.swap(true, Ordering::SeqCst) {
-            Self::backoff(&mut spins);
+        while self.writer_active.swap(WRITER_ACTIVE, Ordering::SeqCst) == WRITER_ACTIVE {
+            wait_on_u32(&self.writer_active, WRITER_ACTIVE);
         }
 
-        // Phase 2: Wait for all readers to drain.
-        // We reset spins here because phase 1 might have taken a while,
-        // but now we are waiting on a different condition.
-        spins = 0;
         for shard in &self.shards {
-            while shard.load(Ordering::SeqCst) > 0 {
-                Self::backoff(&mut spins);
+            loop {
+                let count = shard.load(Ordering::SeqCst);
+                if count == 0 {
+                    break;
+                }
+                wait_on_u32(shard, count);
             }
         }
 
@@ -165,11 +120,16 @@ impl<'a, 'brand> Deref for SharedTokenReadGuard<'a, 'brand> {
 
 impl<'a, 'brand> Drop for SharedTokenReadGuard<'a, 'brand> {
     fn drop(&mut self) {
-        // Decrement the specific shard we incremented.
-        // SeqCst to match the Acquire/SeqCst logic in write().
-        self.parent.shards[self.shard_index].fetch_sub(1, Ordering::SeqCst);
+        let shard = &self.parent.shards[self.shard_index];
+        let prev = shard.fetch_sub(1, Ordering::SeqCst);
+        if prev == 1 {
+            wake_all_u32(shard);
+        }
     }
 }
+
+// Implement GhostBorrow for ReadGuard to allow use with GhostCell
+impl<'a, 'brand> GhostBorrow<'brand> for SharedTokenReadGuard<'a, 'brand> {}
 
 /// RAII guard for exclusive write access.
 pub struct SharedTokenWriteGuard<'a, 'brand> {
@@ -192,7 +152,13 @@ impl<'a, 'brand> DerefMut for SharedTokenWriteGuard<'a, 'brand> {
 
 impl<'a, 'brand> Drop for SharedTokenWriteGuard<'a, 'brand> {
     fn drop(&mut self) {
-        // Clear the writer bit.
-        self.parent.writer_active.store(false, Ordering::SeqCst);
+        self.parent
+            .writer_active
+            .store(WRITER_INACTIVE, Ordering::SeqCst);
+        wake_all_u32(&self.parent.writer_active);
     }
 }
+
+// Implement GhostBorrow and GhostBorrowMut for WriteGuard
+impl<'a, 'brand> GhostBorrow<'brand> for SharedTokenWriteGuard<'a, 'brand> {}
+impl<'a, 'brand> GhostBorrowMut<'brand> for SharedTokenWriteGuard<'a, 'brand> {}

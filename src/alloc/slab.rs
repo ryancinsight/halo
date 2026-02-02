@@ -5,16 +5,16 @@
 //! or concurrent access via `GhostAlloc`.
 
 use crate::{GhostToken, GhostCell};
+use crate::token::traits::GhostBorrow;
 use crate::alloc::{GhostAlloc, AllocError};
-use crate::concurrency::CachePadded;
+use crate::alloc::page::{PAGE_SIZE, align_up};
+use crate::alloc::segregated::size_class::{SLAB_CLASS_COUNT, get_size_class_index, get_block_size};
+use crate::concurrency::{CachePadded, SHARD_COUNT, SHARD_MASK, current_shard_index};
 use core::alloc::Layout;
 use core::ptr::NonNull;
 use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::alloc::{alloc, dealloc};
-use std::cell::{Cell, UnsafeCell};
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-use std::thread;
+use std::cell::UnsafeCell;
 
 // Unique Thread ID generator for Page Ownership
 static NEXT_THREAD_ID: AtomicU64 = AtomicU64::new(1);
@@ -27,35 +27,6 @@ thread_local! {
 #[inline(always)]
 fn current_thread_id() -> u64 {
     LOCAL_THREAD_ID.with(|id| *id)
-}
-
-// Constants
-const PAGE_SIZE: usize = 4096;
-const MAX_SMALL_SIZE: usize = 2048; // Anything larger goes to global allocator
-
-// Sharding constants for Thread-Local Caching (TLH)
-const SHARD_COUNT: usize = 32;
-const SHARD_MASK: usize = SHARD_COUNT - 1;
-
-thread_local! {
-    /// Caches the shard index for the current thread to avoid re-hashing.
-    static THREAD_SHARD_INDEX: Cell<Option<usize>> = const { Cell::new(None) };
-}
-
-/// Helper to get the current thread's shard index.
-#[inline(always)]
-fn current_shard_index() -> usize {
-    THREAD_SHARD_INDEX.with(|idx| {
-        if let Some(i) = idx.get() {
-            i
-        } else {
-            let mut hasher = DefaultHasher::new();
-            thread::current().id().hash(&mut hasher);
-            let i = (hasher.finish() as usize) & SHARD_MASK;
-            idx.set(Some(i));
-            i
-        }
-    })
 }
 
 // Tag constants for ABA prevention in free list
@@ -132,12 +103,7 @@ impl Page {
 
         // Calculate where blocks start
         let header_size = std::mem::size_of::<Page>();
-        let mut start_offset = header_size;
-
-        let align_mask = block_size - 1;
-        if (start_offset & align_mask) != 0 {
-            start_offset = (start_offset + align_mask) & !align_mask;
-        }
+        let start_offset = align_up(header_size, block_size);
 
         if start_offset >= PAGE_SIZE {
             return None;
@@ -245,8 +211,7 @@ impl Page {
     unsafe fn get_block_ptr(&self, idx: usize) -> *mut u8 {
         let page_addr = self as *const Page as usize;
         let header_size = std::mem::size_of::<Page>();
-        let align_mask = self.block_size - 1;
-        let start_offset = (header_size + align_mask) & !align_mask;
+        let start_offset = align_up(header_size, self.block_size);
         let block_offset = start_offset + idx * self.block_size;
         (page_addr + block_offset) as *mut u8
     }
@@ -255,8 +220,7 @@ impl Page {
         let page_addr = self as *const Page as usize;
         let ptr_addr = ptr.as_ptr() as usize;
         let header_size = std::mem::size_of::<Page>();
-        let align_mask = self.block_size - 1;
-        let start_offset = (header_size + align_mask) & !align_mask;
+        let start_offset = align_up(header_size, self.block_size);
         let offset = ptr_addr - page_addr - start_offset;
         offset / self.block_size
     }
@@ -280,10 +244,10 @@ impl Page {
 struct SlabState {
     // Array of available page lists (Treiber Stack), one for each size class.
     // Stored as AtomicUsize (pointers to Page).
-    heads: [[CachePadded<AtomicUsize>; SHARD_COUNT]; 9],
+    heads: [[CachePadded<AtomicUsize>; SHARD_COUNT]; SLAB_CLASS_COUNT],
     // Array of all page lists, one for each size class.
     // Used for memory reclamation on Drop.
-    all_heads: [[CachePadded<AtomicUsize>; SHARD_COUNT]; 9],
+    all_heads: [[CachePadded<AtomicUsize>; SHARD_COUNT]; SLAB_CLASS_COUNT],
 }
 
 impl SlabState {
@@ -292,23 +256,6 @@ impl SlabState {
             heads: core::array::from_fn(|_| core::array::from_fn(|_| CachePadded::new(AtomicUsize::new(0)))),
             all_heads: core::array::from_fn(|_| core::array::from_fn(|_| CachePadded::new(AtomicUsize::new(0)))),
         }
-    }
-
-    fn get_class_index(size: usize) -> Option<usize> {
-        if size <= 8 { return Some(0); }
-        if size > MAX_SMALL_SIZE { return None; }
-
-        let mut idx = 0;
-        let mut s = 8;
-        while s < size {
-            s <<= 1;
-            idx += 1;
-        }
-        Some(idx)
-    }
-
-    fn get_block_size(class_idx: usize) -> usize {
-        8 << class_idx
     }
 }
 
@@ -407,7 +354,7 @@ impl<'brand> BrandedSlab<'brand> {
 
         let state = self.state.borrow_mut(token);
 
-        if let Some(class_idx) = SlabState::get_class_index(size) {
+        if let Some(class_idx) = get_size_class_index(size) {
             let shard_idx = page.shard_index;
             let head_atomic = &mut state.heads[class_idx][shard_idx];
             let all_head_atomic = &mut state.all_heads[class_idx][shard_idx];
@@ -429,7 +376,7 @@ impl<'brand> BrandedSlab<'brand> {
         let state = self.state.borrow_mut(token);
         unsafe {
             let layout = Layout::from_size_align_unchecked(PAGE_SIZE, PAGE_SIZE);
-            for class_idx in 0..9 {
+            for class_idx in 0..SLAB_CLASS_COUNT {
                 for shard_idx in 0..SHARD_COUNT {
                     let head_atomic = &mut state.heads[class_idx][shard_idx];
                     let mut current_ptr_val = *head_atomic.get_mut();
@@ -496,8 +443,8 @@ impl<'brand> BrandedSlab<'brand> {
         let size = layout.size().max(layout.align()).max(std::mem::size_of::<usize>());
         let state = self.state.borrow_mut(token);
 
-        if let Some(class_idx) = SlabState::get_class_index(size) {
-            let block_size = SlabState::get_block_size(class_idx);
+        if let Some(class_idx) = get_size_class_index(size) {
+            let block_size = get_block_size(class_idx);
             let shard_idx = current_shard_index();
             let head_atomic = &mut state.heads[class_idx][shard_idx];
             let all_heads_atomic = &mut state.all_heads[class_idx][shard_idx];
@@ -572,7 +519,7 @@ impl<'brand> BrandedSlab<'brand> {
     ) {
         let size = layout.size().max(layout.align()).max(std::mem::size_of::<usize>());
 
-        if let Some(class_idx) = SlabState::get_class_index(size) {
+        if let Some(class_idx) = get_size_class_index(size) {
             let mut page_ptr = Page::from_ptr(ptr);
             let page = page_ptr.as_mut();
             page.dealloc_local(ptr);
@@ -666,7 +613,7 @@ impl<'brand> Default for BrandedSlab<'brand> {
 impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
     fn allocate(
         &self,
-        token: &GhostToken<'brand>,
+        token: &impl GhostBorrow<'brand>,
         layout: Layout,
     ) -> Result<NonNull<u8>, AllocError> {
         self.allocate_in(token, layout, None)
@@ -674,14 +621,14 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
 
     fn allocate_in(
         &self,
-        token: &GhostToken<'brand>,
+        token: &impl GhostBorrow<'brand>,
         layout: Layout,
         shard_hint: Option<usize>,
     ) -> Result<NonNull<u8>, AllocError> {
         let size = layout.size().max(layout.align()).max(std::mem::size_of::<usize>());
         let state = self.state.borrow(token);
 
-        if let Some(class_idx) = SlabState::get_class_index(size) {
+        if let Some(class_idx) = get_size_class_index(size) {
             let shard_idx = if let Some(hint) = shard_hint {
                 hint & SHARD_MASK
             } else {
@@ -741,7 +688,7 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
             }
 
             // 2. Create new page
-            let block_size = SlabState::get_block_size(class_idx);
+            let block_size = get_block_size(class_idx);
             let all_heads_atomic = &state.all_heads[class_idx][shard_idx];
 
             if let Some(mut new_page) = Page::new(block_size, 0, shard_idx) {
@@ -771,13 +718,13 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
 
     unsafe fn deallocate(
         &self,
-        token: &GhostToken<'brand>,
+        token: &impl GhostBorrow<'brand>,
         ptr: NonNull<u8>,
         layout: Layout,
     ) {
         let size = layout.size().max(layout.align()).max(std::mem::size_of::<usize>());
 
-        if let Some(class_idx) = SlabState::get_class_index(size) {
+        if let Some(class_idx) = get_size_class_index(size) {
             let page_ptr = Page::from_ptr(ptr);
             let page = page_ptr.as_ref();
             page.dealloc_remote(ptr);

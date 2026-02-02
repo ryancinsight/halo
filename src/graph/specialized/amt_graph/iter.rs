@@ -1,11 +1,17 @@
 /// Iterator over neighbors in AMT graph.
 pub enum AmtNeighborIter<'a> {
+    /// Iterator over a sparse node's neighbors (stored as a list).
     Sparse(std::slice::Iter<'a, usize>),
+    /// Iterator over a dense node's neighbors (stored as a bitset).
     Dense {
+        /// The bitset containing neighbor information.
         bitset: &'a [u64],
+        /// Current index in the bitset.
         index: usize,
+        /// Maximum index to check.
         len: usize,
     },
+    /// Iterator over a sorted node's neighbors.
     Sorted(std::slice::Iter<'a, usize>),
 }
 

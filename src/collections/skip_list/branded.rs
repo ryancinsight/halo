@@ -13,7 +13,8 @@
 //! Access is controlled via `GhostToken`.
 
 use crate::collections::{BrandedCollection, ZeroCopyMapOps};
-use crate::{BrandedVec, GhostToken};
+use crate::token::traits::{GhostBorrow, GhostBorrowMut};
+use crate::BrandedVec;
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::marker::PhantomData;
@@ -167,23 +168,25 @@ where
     K: Ord,
 {
     /// Returns a shared reference to the value corresponding to the key.
-    pub fn get<'a, Q: ?Sized>(&'a self, token: &'a GhostToken<'brand>, key: &Q) -> Option<&'a V>
+    pub fn get<'a, Q: ?Sized, Token>(&'a self, token: &'a Token, key: &Q) -> Option<&'a V>
     where
         K: Borrow<Q>,
         Q: Ord,
+        Token: GhostBorrow<'brand>,
     {
         self.find_entry(token, key).map(|(_, v)| v)
     }
 
     /// Finds the entry.
-    fn find_entry<'a, Q: ?Sized>(
+    fn find_entry<'a, Q: ?Sized, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
+        token: &'a Token,
         key: &Q,
     ) -> Option<(&'a K, &'a V)>
     where
         K: Borrow<Q>,
         Q: Ord,
+        Token: GhostBorrow<'brand>,
     {
         let mut curr = NodeIdx::NONE;
         let mut level = self.max_level.saturating_sub(1);
@@ -240,14 +243,15 @@ where
         None
     }
 
-    pub fn get_mut<'a, Q: ?Sized>(
+    pub fn get_mut<'a, Q: ?Sized, Token>(
         &'a self,
-        token: &'a mut GhostToken<'brand>,
+        token: &'a mut Token,
         key: &Q,
     ) -> Option<&'a mut V>
     where
         K: Borrow<Q>,
         Q: Ord,
+        Token: GhostBorrowMut<'brand>,
     {
         // Copy logic from find_entry but return mut ref
         let mut curr = NodeIdx::NONE;
@@ -296,21 +300,27 @@ where
     }
 
     // Helper
-    fn get_next(
+    fn get_next<Token>(
         &self,
-        token: &GhostToken<'brand>,
+        token: &Token,
         curr: NodeIdx<'brand>,
         level: usize,
-    ) -> NodeIdx<'brand> {
+    ) -> NodeIdx<'brand>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         self.get_next_unchecked(token, curr, level)
     }
 
-    fn get_next_unchecked(
+    fn get_next_unchecked<Token>(
         &self,
-        token: &GhostToken<'brand>,
+        token: &Token,
         curr: NodeIdx<'brand>,
         level: usize,
-    ) -> NodeIdx<'brand> {
+    ) -> NodeIdx<'brand>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         if curr.is_some() {
             unsafe {
                 let node = self.nodes.get_unchecked(token, curr.index());
@@ -323,7 +333,10 @@ where
     }
 
     /// Inserts a key-value pair into the map.
-    pub fn insert(&mut self, token: &mut GhostToken<'brand>, key: K, value: V) -> Option<V> {
+    pub fn insert<Token>(&mut self, token: &mut Token, key: K, value: V) -> Option<V>
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         let mut update = [NodeIdx::NONE; MAX_LEVEL];
         let mut curr = NodeIdx::NONE;
         let mut level = self.max_level.saturating_sub(1);
@@ -410,7 +423,10 @@ where
         None
     }
 
-    fn create_first_node(&mut self, _token: &mut GhostToken<'brand>, key: K, value: V) {
+    fn create_first_node<Token>(&mut self, _token: &mut Token, key: K, value: V)
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         let level = self.random_level();
         if level > self.max_level {
             self.max_level = level;
@@ -434,13 +450,15 @@ where
         self.nodes.push(node);
     }
 
-    fn insert_into_leaf(
+    fn insert_into_leaf<Token>(
         &mut self,
-        token: &mut GhostToken<'brand>,
+        token: &mut Token,
         node_idx: NodeIdx<'brand>,
         key: K,
         value: V,
-    ) {
+    ) where
+        Token: GhostBorrowMut<'brand>,
+    {
         unsafe {
             let node = self.nodes.get_unchecked_mut(token, node_idx.index());
             // Find position
@@ -472,14 +490,16 @@ where
         }
     }
 
-    fn split_and_insert(
+    fn split_and_insert<Token>(
         &mut self,
-        token: &mut GhostToken<'brand>,
+        token: &mut Token,
         node_idx: NodeIdx<'brand>,
         update: &mut [NodeIdx<'brand>],
         key: K,
         value: V,
-    ) {
+    ) where
+        Token: GhostBorrowMut<'brand>,
+    {
         // 1. Create new node
         let new_level = self.random_level();
         if new_level > self.max_level {
@@ -611,9 +631,10 @@ impl<'brand, K, V> BrandedCollection<'brand> for BrandedSkipList<'brand, K, V> {
 }
 
 impl<'brand, K, V> ZeroCopyMapOps<'brand, K, V> for BrandedSkipList<'brand, K, V> {
-    fn find_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<(&'a K, &'a V)>
+    fn find_ref<'a, F, Token>(&'a self, token: &'a Token, f: F) -> Option<(&'a K, &'a V)>
     where
         F: Fn(&K, &V) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         let mut curr = self.head_links[0];
         while curr.is_some() {
@@ -632,16 +653,18 @@ impl<'brand, K, V> ZeroCopyMapOps<'brand, K, V> for BrandedSkipList<'brand, K, V
         None
     }
 
-    fn any_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    fn any_ref<F, Token>(&self, token: &Token, f: F) -> bool
     where
         F: Fn(&K, &V) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         self.find_ref(token, f).is_some()
     }
 
-    fn all_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    fn all_ref<F, Token>(&self, token: &Token, f: F) -> bool
     where
         F: Fn(&K, &V) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         let mut curr = self.head_links[0];
         while curr.is_some() {
@@ -660,14 +683,20 @@ impl<'brand, K, V> ZeroCopyMapOps<'brand, K, V> for BrandedSkipList<'brand, K, V
 }
 
 // Iterators
-pub struct Iter<'a, 'brand, K, V> {
+struct Iter<'a, 'brand, K, V, Token>
+where
+    Token: GhostBorrow<'brand>,
+{
     list: &'a BrandedSkipList<'brand, K, V>,
-    token: &'a GhostToken<'brand>,
+    token: &'a Token,
     curr: NodeIdx<'brand>,
     idx: usize,
 }
 
-impl<'a, 'brand, K, V> Iterator for Iter<'a, 'brand, K, V> {
+impl<'a, 'brand, K, V, Token> Iterator for Iter<'a, 'brand, K, V, Token>
+where
+    Token: GhostBorrow<'brand>,
+{
     type Item = (&'a K, &'a V);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -691,14 +720,20 @@ impl<'a, 'brand, K, V> Iterator for Iter<'a, 'brand, K, V> {
     }
 }
 
-pub struct IterMut<'a, 'brand, K, V> {
+struct IterMut<'a, 'brand, K, V, Token>
+where
+    Token: GhostBorrowMut<'brand>,
+{
     list: &'a BrandedSkipList<'brand, K, V>,
-    token: &'a mut GhostToken<'brand>,
+    token: &'a mut Token,
     curr: NodeIdx<'brand>,
     idx: usize,
 }
 
-impl<'a, 'brand, K, V> Iterator for IterMut<'a, 'brand, K, V> {
+impl<'a, 'brand, K, V, Token> Iterator for IterMut<'a, 'brand, K, V, Token>
+where
+    Token: GhostBorrowMut<'brand>,
+{
     type Item = (&'a K, &'a mut V);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -731,8 +766,11 @@ impl<'a, 'brand, K, V> Iterator for IterMut<'a, 'brand, K, V> {
 }
 
 impl<'brand, K, V> BrandedSkipList<'brand, K, V> {
-    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> Iter<'a, 'brand, K, V> {
-        Iter {
+    pub fn iter<'a, Token>(&'a self, token: &'a Token) -> impl Iterator<Item = (&'a K, &'a V)> + use<'a, 'brand, K, V, Token>
+    where
+        Token: GhostBorrow<'brand>,
+    {
+        Iter::<_, _, Token> {
             list: self,
             token,
             curr: self.head_links[0],
@@ -740,8 +778,14 @@ impl<'brand, K, V> BrandedSkipList<'brand, K, V> {
         }
     }
 
-    pub fn iter_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>) -> IterMut<'a, 'brand, K, V> {
-        IterMut {
+    pub fn iter_mut<'a, Token>(
+        &'a self,
+        token: &'a mut Token,
+    ) -> impl Iterator<Item = (&'a K, &'a mut V)> + use<'a, 'brand, K, V, Token>
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
+        IterMut::<_, _, Token> {
             list: self,
             curr: self.head_links[0],
             token,

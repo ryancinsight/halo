@@ -6,11 +6,12 @@
 //!
 //! Backed by `BrandedPool` for zero-overhead, cache-friendly storage.
 
-use crate::alloc::pool::{PoolSlot, PoolView, PoolViewMut};
+use crate::alloc::pool::{PoolView, PoolViewMut};
 use crate::alloc::BrandedPool;
 use crate::collections::ZeroCopyOps;
-use crate::GhostToken;
-use core::fmt;
+use crate::token::traits::{GhostBorrow, GhostBorrowMut};
+// use crate::GhostCell;
+// use core::fmt;
 use core::marker::PhantomData;
 
 /// Internal node structure with 3 legs (Tripod).
@@ -22,29 +23,63 @@ struct TripodNode<T> {
 }
 
 /// Zero-cost iterator for TripodList.
-pub struct TripodListIter<'a, 'brand, T> {
+struct TripodListIter<'a, 'brand, T, Token>
+where
+    Token: GhostBorrow<'brand>,
+{
     view: PoolView<'a, TripodNode<T>>,
-    current: Option<usize>,
-    _marker: PhantomData<fn(&'brand ()) -> &'brand ()>,
+    head: Option<usize>,
+    tail: Option<usize>,
+    remaining: usize,
+    _marker: PhantomData<(&'a Token, &'brand ())>,
 }
 
-impl<'a, 'brand, T> Iterator for TripodListIter<'a, 'brand, T> {
+impl<'a, 'brand, T, Token> Iterator for TripodListIter<'a, 'brand, T, Token>
+where
+    Token: GhostBorrow<'brand>,
+{
     type Item = &'a T;
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        let idx = self.current?;
+        if self.remaining == 0 {
+            return None;
+        }
+        let idx = self.head?;
         if idx < self.view.storage.len() {
-            let word_idx = idx >> 6;
-            let bit_idx = idx & 63;
-            if (self.view.occupied[word_idx] & (1 << bit_idx)) != 0 {
-                unsafe {
-                    let node = &self.view.storage[idx].occupied;
-                    self.current = node.next;
-                    Some(&node.value)
-                }
-            } else {
-                None
+             unsafe {
+                let node = &self.view.storage[idx].occupied;
+                self.head = node.next;
+                self.remaining -= 1;
+                Some(&node.value)
+            }
+        } else {
+            None
+        }
+    }
+
+    #[inline(always)]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.remaining, Some(self.remaining))
+    }
+}
+
+impl<'a, 'brand, T, Token> DoubleEndedIterator for TripodListIter<'a, 'brand, T, Token>
+where
+    Token: GhostBorrow<'brand>,
+{
+    #[inline(always)]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.remaining == 0 {
+            return None;
+        }
+        let idx = self.tail?;
+        if idx < self.view.storage.len() {
+             unsafe {
+                let node = &self.view.storage[idx].occupied;
+                self.tail = node.prev;
+                self.remaining -= 1;
+                Some(&node.value)
             }
         } else {
             None
@@ -52,36 +87,90 @@ impl<'a, 'brand, T> Iterator for TripodListIter<'a, 'brand, T> {
     }
 }
 
+impl<'a, 'brand, T, Token> std::iter::FusedIterator for TripodListIter<'a, 'brand, T, Token>
+where
+    Token: GhostBorrow<'brand>,
+{}
+
+impl<'a, 'brand, T, Token> ExactSizeIterator for TripodListIter<'a, 'brand, T, Token>
+where
+    Token: GhostBorrow<'brand>,
+{}
+
 /// Mutable iterator for TripodList.
-pub struct TripodListIterMut<'a, 'brand, T> {
+struct TripodListIterMut<'a, 'brand, T, Token>
+where
+    Token: GhostBorrowMut<'brand>,
+{
     view: PoolViewMut<'a, TripodNode<T>>,
-    current: Option<usize>,
-    _marker: PhantomData<fn(&'brand ()) -> &'brand ()>,
+    head: Option<usize>,
+    tail: Option<usize>,
+    remaining: usize,
+    _marker: PhantomData<(&'a mut Token, &'brand ())>,
 }
 
-impl<'a, 'brand, T> Iterator for TripodListIterMut<'a, 'brand, T> {
+impl<'a, 'brand, T, Token> Iterator for TripodListIterMut<'a, 'brand, T, Token>
+where
+    Token: GhostBorrowMut<'brand>,
+{
     type Item = &'a mut T;
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        let idx = self.current?;
+        if self.remaining == 0 {
+            return None;
+        }
+        let idx = self.head?;
         unsafe {
             if idx >= self.view.storage.len() {
                 return None;
             }
-            let word_idx = idx >> 6;
-            let bit_idx = idx & 63;
-            if (self.view.occupied[word_idx] & (1 << bit_idx)) != 0 {
-                let ptr = self.view.storage.as_mut_ptr().add(idx);
-                let node = &mut (*ptr).occupied;
-                self.current = node.next;
-                Some(&mut node.value)
-            } else {
-                None
+            let ptr = self.view.storage.as_mut_ptr().add(idx);
+            let node = &mut (*ptr).occupied;
+            self.head = node.next;
+            self.remaining -= 1;
+            Some(&mut node.value)
+        }
+    }
+
+    #[inline(always)]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.remaining, Some(self.remaining))
+    }
+}
+
+impl<'a, 'brand, T, Token> DoubleEndedIterator for TripodListIterMut<'a, 'brand, T, Token>
+where
+    Token: GhostBorrowMut<'brand>,
+{
+    #[inline(always)]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.remaining == 0 {
+            return None;
+        }
+        let idx = self.tail?;
+        unsafe {
+            if idx >= self.view.storage.len() {
+                return None;
             }
+            let ptr = self.view.storage.as_mut_ptr().add(idx);
+            let node = &mut (*ptr).occupied;
+            self.tail = node.prev;
+            self.remaining -= 1;
+            Some(&mut node.value)
         }
     }
 }
+
+impl<'a, 'brand, T, Token> std::iter::FusedIterator for TripodListIterMut<'a, 'brand, T, Token>
+where
+    Token: GhostBorrowMut<'brand>,
+{}
+
+impl<'a, 'brand, T, Token> ExactSizeIterator for TripodListIterMut<'a, 'brand, T, Token>
+where
+    Token: GhostBorrowMut<'brand>,
+{}
 
 /// A doubly linked list where each node has a parent pointer.
 pub struct TripodList<'brand, T> {
@@ -121,7 +210,10 @@ impl<'brand, T> TripodList<'brand, T> {
     }
 
     /// Pushes an element to the front.
-    pub fn push_front(&mut self, token: &mut GhostToken<'brand>, value: T) -> usize {
+    pub fn push_front<Token>(&mut self, token: &mut Token, value: T) -> usize
+    where
+        Token: crate::token::traits::GhostBorrowMut<'brand>,
+    {
         let node = TripodNode {
             prev: None,
             next: self.head,
@@ -146,7 +238,10 @@ impl<'brand, T> TripodList<'brand, T> {
     }
 
     /// Pushes an element to the back.
-    pub fn push_back(&mut self, token: &mut GhostToken<'brand>, value: T) -> usize {
+    pub fn push_back<Token>(&mut self, token: &mut Token, value: T) -> usize
+    where
+        Token: crate::token::traits::GhostBorrowMut<'brand>,
+    {
         let node = TripodNode {
             prev: self.tail,
             next: None,
@@ -171,7 +266,10 @@ impl<'brand, T> TripodList<'brand, T> {
     }
 
     /// Pops an element from the front.
-    pub fn pop_front(&mut self, token: &mut GhostToken<'brand>) -> Option<T> {
+    pub fn pop_front<Token>(&mut self, token: &mut Token) -> Option<T>
+    where
+        Token: crate::token::traits::GhostBorrowMut<'brand>,
+    {
         let head_idx = self.head?;
         let node = unsafe { self.pool.take(token, head_idx) };
         let next_idx = node.next;
@@ -191,7 +289,10 @@ impl<'brand, T> TripodList<'brand, T> {
     }
 
     /// Pops an element from the back.
-    pub fn pop_back(&mut self, token: &mut GhostToken<'brand>) -> Option<T> {
+    pub fn pop_back<Token>(&mut self, token: &mut Token) -> Option<T>
+    where
+        Token: crate::token::traits::GhostBorrowMut<'brand>,
+    {
         let tail_idx = self.tail?;
         let node = unsafe { self.pool.take(token, tail_idx) };
         let prev_idx = node.prev;
@@ -211,51 +312,75 @@ impl<'brand, T> TripodList<'brand, T> {
     }
 
     /// Returns a reference to the front element.
-    pub fn front<'a>(&'a self, token: &'a GhostToken<'brand>) -> Option<&'a T> {
+    pub fn front<'a, Token>(&'a self, token: &'a Token) -> Option<&'a T>
+    where
+        Token: crate::token::traits::GhostBorrow<'brand>,
+    {
         let head_idx = self.head?;
         self.pool.get(token, head_idx).map(|n| &n.value)
     }
 
     /// Returns a reference to the back element.
-    pub fn back<'a>(&'a self, token: &'a GhostToken<'brand>) -> Option<&'a T> {
+    pub fn back<'a, Token>(&'a self, token: &'a Token) -> Option<&'a T>
+    where
+        Token: crate::token::traits::GhostBorrow<'brand>,
+    {
         let tail_idx = self.tail?;
         self.pool.get(token, tail_idx).map(|n| &n.value)
     }
 
     /// Gets the parent index of a node at `index`.
-    pub fn get_parent(&self, token: &GhostToken<'brand>, index: usize) -> Option<usize> {
+    pub fn get_parent<Token>(&self, token: &Token, index: usize) -> Option<usize>
+    where
+        Token: crate::token::traits::GhostBorrow<'brand>,
+    {
         self.pool.get(token, index).and_then(|n| n.parent)
     }
 
     /// Sets the parent index of a node at `index`.
-    pub fn set_parent(
+    pub fn set_parent<Token>(
         &mut self,
-        token: &mut GhostToken<'brand>,
+        token: &mut Token,
         index: usize,
         parent: Option<usize>,
-    ) {
+    ) where
+        Token: crate::token::traits::GhostBorrowMut<'brand>,
+    {
         if let Some(node) = self.pool.get_mut(token, index) {
             node.parent = parent;
         }
     }
 
     /// Iterates over the list.
-    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> TripodListIter<'a, 'brand, T> {
-        TripodListIter {
+    pub fn iter<'a, Token>(
+        &'a self,
+        token: &'a Token,
+    ) -> impl Iterator<Item = &'a T> + DoubleEndedIterator + ExactSizeIterator + std::iter::FusedIterator + 'a + use<'a, 'brand, T, Token>
+    where
+        Token: crate::token::traits::GhostBorrow<'brand>,
+    {
+        TripodListIter::<_, Token> {
             view: self.pool.view(token),
-            current: self.head,
+            head: self.head,
+            tail: self.tail,
+            remaining: self.len,
             _marker: PhantomData,
         }
     }
 
     /// Iterates over the list mutably.
-    pub fn iter_mut<'a>(
+    pub fn iter_mut<'a, Token>(
         &'a self,
-        token: &'a mut GhostToken<'brand>,
-    ) -> TripodListIterMut<'a, 'brand, T> {
-        TripodListIterMut {
+        token: &'a mut Token,
+    ) -> impl Iterator<Item = &'a mut T> + DoubleEndedIterator + ExactSizeIterator + std::iter::FusedIterator + 'a + use<'a, 'brand, T, Token>
+    where
+        Token: crate::token::traits::GhostBorrowMut<'brand>,
+    {
+        TripodListIterMut::<_, Token> {
             view: self.pool.view_mut(token),
-            current: self.head,
+            head: self.head,
+            tail: self.tail,
+            remaining: self.len,
             _marker: PhantomData,
         }
     }
@@ -277,23 +402,26 @@ impl<'brand, T> Default for TripodList<'brand, T> {
 }
 
 impl<'brand, T> ZeroCopyOps<'brand, T> for TripodList<'brand, T> {
-    fn find_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<&'a T>
+    fn find_ref<'a, F, Token>(&'a self, token: &'a Token, f: F) -> Option<&'a T>
     where
         F: Fn(&T) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         self.iter(token).find(|&item| f(item))
     }
 
-    fn any_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    fn any_ref<F, Token>(&self, token: &Token, f: F) -> bool
     where
         F: Fn(&T) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         self.iter(token).any(|item| f(item))
     }
 
-    fn all_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    fn all_ref<F, Token>(&self, token: &Token, f: F) -> bool
     where
         F: Fn(&T) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         self.iter(token).all(|item| f(item))
     }
@@ -307,19 +435,28 @@ pub struct TripodCursorMut<'a, 'brand, T> {
 
 impl<'a, 'brand, T> TripodCursorMut<'a, 'brand, T> {
     /// Returns reference to current element.
-    pub fn current<'b>(&'b self, token: &'b GhostToken<'brand>) -> Option<&'b T> {
+    pub fn current<'b, Token>(&'b self, token: &'b Token) -> Option<&'b T>
+    where
+        Token: crate::token::traits::GhostBorrow<'brand>,
+    {
         let idx = self.current?;
         self.list.pool.get(token, idx).map(|n| &n.value)
     }
 
     /// Returns mutable reference to current element.
-    pub fn current_mut<'b>(&'b mut self, token: &'b mut GhostToken<'brand>) -> Option<&'b mut T> {
+    pub fn current_mut<'b, Token>(&'b mut self, token: &'b mut Token) -> Option<&'b mut T>
+    where
+        Token: crate::token::traits::GhostBorrowMut<'brand>,
+    {
         let idx = self.current?;
         self.list.pool.get_mut(token, idx).map(|n| &mut n.value)
     }
 
     /// Moves to next element.
-    pub fn move_next(&mut self, token: &GhostToken<'brand>) {
+    pub fn move_next<Token>(&mut self, token: &Token)
+    where
+        Token: crate::token::traits::GhostBorrow<'brand>,
+    {
         if let Some(idx) = self.current {
             if let Some(node) = self.list.pool.get(token, idx) {
                 self.current = node.next;
@@ -330,13 +467,19 @@ impl<'a, 'brand, T> TripodCursorMut<'a, 'brand, T> {
     }
 
     /// Returns the parent of the current element.
-    pub fn parent(&self, token: &GhostToken<'brand>) -> Option<usize> {
+    pub fn parent<Token>(&self, token: &Token) -> Option<usize>
+    where
+        Token: crate::token::traits::GhostBorrow<'brand>,
+    {
         let idx = self.current?;
         self.list.pool.get(token, idx).and_then(|n| n.parent)
     }
 
     /// Sets the parent of the current element.
-    pub fn set_parent(&mut self, token: &mut GhostToken<'brand>, parent: Option<usize>) {
+    pub fn set_parent<Token>(&mut self, token: &mut Token, parent: Option<usize>)
+    where
+        Token: crate::token::traits::GhostBorrowMut<'brand>,
+    {
         if let Some(idx) = self.current {
             if let Some(node) = self.list.pool.get_mut(token, idx) {
                 node.parent = parent;

@@ -11,9 +11,11 @@
 //! - **Zero-copy operations** via `ZeroCopyOps`
 
 use crate::collections::{BrandedCollection, BrandedVec, ZeroCopyOps};
-use crate::{GhostCell, GhostToken};
+use crate::GhostCell;
 use core::mem::MaybeUninit;
 use core::ptr;
+
+use crate::token::traits::{GhostBorrow, GhostBorrowMut};
 
 /// A vector that stores up to `N` elements inline, spilling to the heap if necessary.
 pub struct BrandedSmallVec<'brand, T, const N: usize> {
@@ -103,54 +105,71 @@ impl<'brand, T, const N: usize> BrandedSmallVec<'brand, T, N> {
         }
     }
 
+    /// Returns a slice of the underlying elements.
+    #[inline]
+    pub fn as_slice<'a, Token>(&'a self, token: &'a Token) -> &'a [T]
+    where
+        Token: GhostBorrow<'brand>,
+    {
+        match &self.inner {
+            SmallVecInner::Inline { len, data } => unsafe {
+                // SAFETY: GhostCell<T> has the same layout as T, and MaybeUninit<U> has the same layout as U.
+                // We have shared access via the token, so reading is safe.
+                let ptr = data.as_ptr() as *const T;
+                core::slice::from_raw_parts(ptr, *len)
+            },
+            SmallVecInner::Heap(v) => v.as_slice(token),
+        }
+    }
+
+    /// Returns a mutable slice of the underlying elements.
+    #[inline]
+    pub fn as_mut_slice<'a, Token>(&'a self, token: &'a mut Token) -> &'a mut [T]
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
+        match &self.inner {
+            SmallVecInner::Inline { len, data } => unsafe {
+                // SAFETY: GhostCell<T> has the same layout as T.
+                // We have exclusive access via the mutable token, so writing is safe.
+                let ptr = data.as_ptr() as *mut T;
+                core::slice::from_raw_parts_mut(ptr, *len)
+            },
+            SmallVecInner::Heap(v) => v.as_mut_slice(token),
+        }
+    }
+
     /// Returns a shared reference to the element at `index`.
     #[inline]
-    pub fn get<'a>(&'a self, token: &'a GhostToken<'brand>, index: usize) -> Option<&'a T> {
-        match &self.inner {
-            SmallVecInner::Inline { len, data } => {
-                if index < *len {
-                    // SAFETY: index checked against len
-                    let cell = unsafe { data.get_unchecked(index).assume_init_ref() };
-                    Some(cell.borrow(token))
-                } else {
-                    None
-                }
-            }
-            SmallVecInner::Heap(v) => v.get(token, index),
-        }
+    pub fn get<'a, Token>(&'a self, token: &'a Token, index: usize) -> Option<&'a T>
+    where
+        Token: GhostBorrow<'brand>,
+    {
+        self.as_slice(token).get(index)
     }
 
     /// Returns a mutable reference to the element at `index`.
     #[inline]
-    pub fn get_mut<'a>(
+    pub fn get_mut<'a, Token>(
         &'a self,
-        token: &'a mut GhostToken<'brand>,
+        token: &'a mut Token,
         index: usize,
-    ) -> Option<&'a mut T> {
-        match &self.inner {
-            SmallVecInner::Inline { len, data } => {
-                if index < *len {
-                    // SAFETY: index checked against len
-                    let cell = unsafe { data.get_unchecked(index).assume_init_ref() };
-                    Some(cell.borrow_mut(token))
-                } else {
-                    None
-                }
-            }
-            SmallVecInner::Heap(v) => v.get_mut(token, index),
-        }
+    ) -> Option<&'a mut T>
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
+        self.as_mut_slice(token).get_mut(index)
     }
 
     /// Iterates over elements by shared reference.
-    pub fn iter<'a>(
+    pub fn iter<'a, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
-    ) -> impl Iterator<Item = &'a T> + 'a + use<'a, 'brand, T, N> {
-        BrandedSmallVecIter {
-            vec: self,
-            index: 0,
-            token,
-        }
+        token: &'a Token,
+    ) -> impl Iterator<Item = &'a T> + ExactSizeIterator + DoubleEndedIterator + std::iter::FusedIterator + use<'a, 'brand, T, N, Token>
+    where
+        Token: GhostBorrow<'brand>,
+    {
+        self.as_slice(token).iter()
     }
 
     /// Returns true if the vector is spilled to the heap.
@@ -195,45 +214,28 @@ impl<'brand, T, const N: usize> BrandedCollection<'brand> for BrandedSmallVec<'b
 }
 
 impl<'brand, T, const N: usize> ZeroCopyOps<'brand, T> for BrandedSmallVec<'brand, T, N> {
-    fn find_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<&'a T>
+    fn find_ref<'a, F, Token>(&'a self, token: &'a Token, f: F) -> Option<&'a T>
     where
         F: Fn(&T) -> bool,
+        Token: GhostBorrow<'brand>,
     {
-        self.iter(token).find(|&x| f(x))
+        self.as_slice(token).iter().find(|&x| f(x))
     }
 
-    fn any_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    fn any_ref<F, Token>(&self, token: &Token, f: F) -> bool
     where
         F: Fn(&T) -> bool,
+        Token: GhostBorrow<'brand>,
     {
-        self.iter(token).any(|x| f(x))
+        self.as_slice(token).iter().any(|x| f(x))
     }
 
-    fn all_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    fn all_ref<F, Token>(&self, token: &Token, f: F) -> bool
     where
         F: Fn(&T) -> bool,
+        Token: GhostBorrow<'brand>,
     {
-        self.iter(token).all(|x| f(x))
-    }
-}
-
-struct BrandedSmallVecIter<'a, 'brand, T, const N: usize> {
-    vec: &'a BrandedSmallVec<'brand, T, N>,
-    index: usize,
-    token: &'a GhostToken<'brand>,
-}
-
-impl<'a, 'brand, T, const N: usize> Iterator for BrandedSmallVecIter<'a, 'brand, T, N> {
-    type Item = &'a T;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.index < self.vec.len() {
-            let item = self.vec.get(self.token, self.index);
-            self.index += 1;
-            item
-        } else {
-            None
-        }
+        self.as_slice(token).iter().all(|x| f(x))
     }
 }
 
@@ -302,9 +304,6 @@ impl<'brand, T, const N: usize> Drop for BrandedSmallVecIntoIter<'brand, T, N> {
         }
     }
 }
-
-// Clone requires a token to access elements, so we cannot implement standard Clone trait.
-// We could implement `clone_with_token` if needed.
 
 #[cfg(test)]
 mod tests {

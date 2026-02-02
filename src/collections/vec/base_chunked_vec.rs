@@ -414,7 +414,7 @@ mod tests {
             assert_eq!(*v.get(i).unwrap(), i);
         }
         let sum: usize = v.iter().copied().sum();
-        assert_eq!(sum, (0..v.len()).sum());
+        assert_eq!(sum, (0..v.len()).sum::<usize>());
     }
 
     #[test]

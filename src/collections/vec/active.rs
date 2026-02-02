@@ -8,21 +8,26 @@
 
 use super::slice::{BrandedSlice, BrandedSliceMut};
 use super::{BrandedVec, BrandedVecDeque};
-use crate::GhostToken;
-use std::slice;
+use crate::token::traits::GhostBorrowMut;
 
-/// A wrapper around a mutable reference to a `BrandedVec` and a mutable reference to a `GhostToken`.
+/// A wrapper around a mutable reference to a `BrandedVec` and a mutable reference to a `Token`.
 ///
 /// This type acts as an "active handle" to the vector, allowing mutation and access without
 /// repeatedly passing the token.
-pub struct ActiveVec<'a, 'brand, T> {
+pub struct ActiveVec<'a, 'brand, T, Token>
+where
+    Token: GhostBorrowMut<'brand>,
+{
     vec: &'a mut BrandedVec<'brand, T>,
-    token: &'a mut GhostToken<'brand>,
+    token: &'a mut Token,
 }
 
-impl<'a, 'brand, T> ActiveVec<'a, 'brand, T> {
+impl<'a, 'brand, T, Token> ActiveVec<'a, 'brand, T, Token>
+where
+    Token: GhostBorrowMut<'brand>,
+{
     /// Creates a new active vector handle.
-    pub fn new(vec: &'a mut BrandedVec<'brand, T>, token: &'a mut GhostToken<'brand>) -> Self {
+    pub fn new(vec: &'a mut BrandedVec<'brand, T>, token: &'a mut Token) -> Self {
         Self { vec, token }
     }
 
@@ -74,7 +79,7 @@ impl<'a, 'brand, T> ActiveVec<'a, 'brand, T> {
     }
 
     /// Returns a shared slice of the vector content.
-    pub fn as_slice(&self) -> BrandedSlice<'_, 'brand, T> {
+    pub fn as_slice(&self) -> BrandedSlice<'_, 'brand, T, Token> {
         BrandedSlice::new(&self.vec.inner, self.token)
     }
 
@@ -91,12 +96,12 @@ impl<'a, 'brand, T> ActiveVec<'a, 'brand, T> {
     }
 
     /// Iterates over elements by shared reference.
-    pub fn iter(&self) -> slice::Iter<'_, T> {
+    pub fn iter(&self) -> impl Iterator<Item = &T> + ExactSizeIterator + DoubleEndedIterator + std::iter::FusedIterator + use<'_, 'brand, T, Token> {
         self.as_slice().into_slice().iter()
     }
 
     /// Iterates over elements by mutable reference.
-    pub fn iter_mut(&mut self) -> slice::IterMut<'_, T> {
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> + ExactSizeIterator + DoubleEndedIterator + std::iter::FusedIterator + use<'_, 'brand, T, Token> {
         self.as_mut_slice().into_mut_slice().iter_mut()
     }
 
@@ -112,26 +117,43 @@ impl<'a, 'brand, T> ActiveVec<'a, 'brand, T> {
 /// Extension trait to easily create ActiveVec from BrandedVec.
 pub trait ActivateVec<'brand, T> {
     /// Activates the vector with the given token, returning a handle that bundles them.
-    fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveVec<'a, 'brand, T>;
+    fn activate<'a, Token>(
+        &'a mut self,
+        token: &'a mut Token,
+    ) -> ActiveVec<'a, 'brand, T, Token>
+    where
+        Token: GhostBorrowMut<'brand>;
 }
 
 impl<'brand, T> ActivateVec<'brand, T> for BrandedVec<'brand, T> {
-    fn activate<'a>(&'a mut self, token: &'a mut GhostToken<'brand>) -> ActiveVec<'a, 'brand, T> {
+    fn activate<'a, Token>(
+        &'a mut self,
+        token: &'a mut Token,
+    ) -> ActiveVec<'a, 'brand, T, Token>
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         ActiveVec::new(self, token)
     }
 }
 
-/// A wrapper around a mutable reference to a `BrandedVecDeque` and a mutable reference to a `GhostToken`.
-pub struct ActiveVecDeque<'a, 'brand, T> {
+/// A wrapper around a mutable reference to a `BrandedVecDeque` and a mutable reference to a `Token`.
+pub struct ActiveVecDeque<'a, 'brand, T, Token>
+where
+    Token: GhostBorrowMut<'brand>,
+{
     deque: &'a mut BrandedVecDeque<'brand, T>,
-    token: &'a mut GhostToken<'brand>,
+    token: &'a mut Token,
 }
 
-impl<'a, 'brand, T> ActiveVecDeque<'a, 'brand, T> {
+impl<'a, 'brand, T, Token> ActiveVecDeque<'a, 'brand, T, Token>
+where
+    Token: GhostBorrowMut<'brand>,
+{
     /// Creates a new active deque handle.
     pub fn new(
         deque: &'a mut BrandedVecDeque<'brand, T>,
-        token: &'a mut GhostToken<'brand>,
+        token: &'a mut Token,
     ) -> Self {
         Self { deque, token }
     }
@@ -196,8 +218,13 @@ impl<'a, 'brand, T> ActiveVecDeque<'a, 'brand, T> {
     }
 
     /// Iterates over elements.
-    pub fn iter(&self) -> impl Iterator<Item = &T> {
+    pub fn iter(&self) -> impl Iterator<Item = &T> + DoubleEndedIterator + std::iter::FusedIterator + use<'_, 'brand, T, Token> {
         self.deque.iter(self.token)
+    }
+
+    /// Iterates over elements (mutable).
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> + DoubleEndedIterator + std::iter::FusedIterator + use<'_, 'brand, T, Token> {
+        self.deque.iter_mut(self.token)
     }
 
     /// Exclusive iteration via callback.
@@ -211,17 +238,22 @@ impl<'a, 'brand, T> ActiveVecDeque<'a, 'brand, T> {
 
 /// Extension trait to easily create ActiveVecDeque from BrandedVecDeque.
 pub trait ActivateVecDeque<'brand, T> {
-    fn activate<'a>(
+    fn activate<'a, Token>(
         &'a mut self,
-        token: &'a mut GhostToken<'brand>,
-    ) -> ActiveVecDeque<'a, 'brand, T>;
+        token: &'a mut Token,
+    ) -> ActiveVecDeque<'a, 'brand, T, Token>
+    where
+        Token: GhostBorrowMut<'brand>;
 }
 
 impl<'brand, T> ActivateVecDeque<'brand, T> for BrandedVecDeque<'brand, T> {
-    fn activate<'a>(
+    fn activate<'a, Token>(
         &'a mut self,
-        token: &'a mut GhostToken<'brand>,
-    ) -> ActiveVecDeque<'a, 'brand, T> {
+        token: &'a mut Token,
+    ) -> ActiveVecDeque<'a, 'brand, T, Token>
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         ActiveVecDeque::new(self, token)
     }
 }

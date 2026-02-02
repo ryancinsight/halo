@@ -13,6 +13,7 @@
 use core::sync::atomic::Ordering;
 
 use crate::concurrency::atomic::GhostAtomicUsize;
+use crate::token::GhostBorrow;
 
 /// Sentinel for an empty stack / null next pointer.
 pub const NONE: usize = usize::MAX;
@@ -35,7 +36,8 @@ impl<'brand> GhostTreiberStack<'brand> {
 
     /// Clears the stack (does not clear `next` for all nodes; push overwrites it).
     #[inline]
-    pub fn clear(&self) {
+    pub fn clear<T: GhostBorrow<'brand>>(&self, token: &T) {
+        let _ = token;
         self.head.store(NONE, Ordering::Relaxed);
     }
 
@@ -44,7 +46,8 @@ impl<'brand> GhostTreiberStack<'brand> {
     /// # Panics
     /// Panics if `idx >= capacity`.
     #[inline]
-    pub fn push(&self, idx: usize) {
+    pub fn push<T: GhostBorrow<'brand>>(&self, token: &T, idx: usize) {
+        let _ = token;
         assert!(idx < self.next.len());
         loop {
             let h = self.head.load(Ordering::Acquire);
@@ -71,7 +74,8 @@ impl<'brand> GhostTreiberStack<'brand> {
     /// This stack stores only indices, so the caller must ensure each index is not
     /// concurrently pushed multiple times without a reclamation/ABA strategy.
     /// In our graph traversal usage, `visited` guarantees single push per node.
-    pub fn push_batch(&self, batch: &[usize]) {
+    pub fn push_batch<T: GhostBorrow<'brand>>(&self, token: &T, batch: &[usize]) {
+        let _ = token;
         if batch.is_empty() {
             return;
         }
@@ -102,7 +106,8 @@ impl<'brand> GhostTreiberStack<'brand> {
 
     /// Pops an index, if any.
     #[inline]
-    pub fn pop(&self) -> Option<usize> {
+    pub fn pop<T: GhostBorrow<'brand>>(&self, token: &T) -> Option<usize> {
+        let _ = token;
         loop {
             let h = self.head.load(Ordering::Acquire);
             if h == NONE {

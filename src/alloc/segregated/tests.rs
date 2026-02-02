@@ -1,10 +1,11 @@
 use crate::GhostToken;
 use crate::alloc::segregated::size_class::{SC, get_size_class_index, get_block_size};
 use crate::alloc::segregated::freelist::BrandedFreelist;
-use crate::alloc::segregated::slab::BrandedSlab;
+use crate::alloc::segregated::slab::SegregatedSlab;
 use crate::alloc::segregated::manager::{SizeClassManager, ThreadLocalCache};
 use crate::alloc::page::GlobalPageAlloc;
 use core::ptr;
+use core::ptr::NonNull;
 
 #[test]
 fn test_size_class_helpers() {
@@ -23,8 +24,8 @@ fn test_freelist_basic() {
         // Use stack variables as blocks
         let mut block1 = [0usize; 4];
         let mut block2 = [0usize; 4];
-        let p1 = block1.as_mut_ptr() as *mut u8;
-        let p2 = block2.as_mut_ptr() as *mut u8;
+        let p1 = NonNull::new(block1.as_mut_ptr() as *mut u8).unwrap();
+        let p2 = NonNull::new(block2.as_mut_ptr() as *mut u8).unwrap();
 
         unsafe {
             fl.push(&token, p1);
@@ -41,7 +42,10 @@ fn test_freelist_batch() {
     GhostToken::new(|token| {
         let fl = BrandedFreelist::new();
         let mut blocks = [[0usize; 4]; 5];
-        let ptrs: Vec<_> = blocks.iter_mut().map(|b| b.as_mut_ptr() as *mut u8).collect();
+        let ptrs: Vec<_> = blocks
+            .iter_mut()
+            .map(|b| NonNull::new(b.as_mut_ptr() as *mut u8).unwrap())
+            .collect();
 
         unsafe {
             fl.push_batch(&token, ptrs.clone());
@@ -60,7 +64,7 @@ fn test_slab_basic() {
         // Alloc 16 byte objects. Slab 4096.
         // N can be up to ~250.
         const N: usize = 100;
-        let slab = BrandedSlab::<'_, 16, N>::new().unwrap();
+        let slab = SegregatedSlab::<'_, 16, N>::new().unwrap();
         let slab_ref = unsafe { slab.as_ref() };
 
         let p1 = slab_ref.alloc(&token).unwrap();

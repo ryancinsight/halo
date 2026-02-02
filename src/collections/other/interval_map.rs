@@ -9,7 +9,7 @@
 //! - Zero-copy iteration over intervals.
 
 use crate::collections::{BrandedCollection, BrandedVec};
-use crate::GhostToken;
+use crate::token::traits::{GhostBorrow, GhostBorrowMut};
 use core::cmp::Ordering;
 use core::fmt::Debug;
 
@@ -65,9 +65,10 @@ where
     /// with existing ones, the overlapping parts of existing intervals are overwritten.
     ///
     /// Requires `&mut GhostToken` because it modifies the structure.
-    pub fn insert(&mut self, token: &mut GhostToken<'brand>, start: K, end: K, value: V)
+    pub fn insert<Token>(&mut self, token: &mut Token, start: K, end: K, value: V)
     where
         V: Clone + PartialEq,
+        Token: GhostBorrowMut<'brand>,
     {
         if start >= end {
             return;
@@ -179,7 +180,10 @@ where
     }
 
     /// Gets the value at the given point.
-    pub fn get<'a>(&'a self, token: &'a GhostToken<'brand>, point: K) -> Option<&'a V> {
+    pub fn get<'a, Token>(&'a self, token: &'a Token, point: K) -> Option<&'a V>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         let slice = self.entries.as_slice(token);
 
         match slice.binary_search_by(|entry| {
@@ -197,20 +201,26 @@ where
     }
 
     /// Iterates over all intervals.
-    pub fn iter<'a>(
+    pub fn iter<'a, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
-    ) -> impl Iterator<Item = &'a Interval<K, V>> + 'a {
+        token: &'a Token,
+    ) -> impl Iterator<Item = &'a Interval<K, V>> + 'a + use<'a, 'brand, Token, K, V>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         self.entries.iter(token)
     }
 
     /// Iterates over intervals overlapping the given range `[start, end)`.
-    pub fn iter_overlaps<'a>(
+    pub fn iter_overlaps<'a, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
+        token: &'a Token,
         start: K,
         end: K,
-    ) -> impl Iterator<Item = &'a Interval<K, V>> + 'a {
+    ) -> impl Iterator<Item = &'a Interval<K, V>> + 'a + use<'a, 'brand, Token, K, V>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         // Zero-copy slicing of the iterator
         let slice = self.entries.as_slice(token);
 

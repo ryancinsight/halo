@@ -1,22 +1,26 @@
 //! Active wrappers for `trie` collections.
 
 use super::{BrandedRadixTrieMap, BrandedRadixTrieSet};
-use crate::GhostToken;
+use crate::token::traits::GhostBorrowMut;
 
-/// A wrapper around a mutable reference to a `BrandedRadixTrieMap` and a mutable reference to a `GhostToken`.
-pub struct ActiveRadixTrieMap<'a, 'brand, K, V> {
+/// A wrapper around a mutable reference to a `BrandedRadixTrieMap` and a mutable reference to a `Token`.
+pub struct ActiveRadixTrieMap<'a, 'brand, K, V, Token>
+where
+    Token: GhostBorrowMut<'brand>,
+{
     map: &'a mut BrandedRadixTrieMap<'brand, K, V>,
-    token: &'a mut GhostToken<'brand>,
+    token: &'a mut Token,
 }
 
-impl<'a, 'brand, K, V> ActiveRadixTrieMap<'a, 'brand, K, V>
+impl<'a, 'brand, K, V, Token> ActiveRadixTrieMap<'a, 'brand, K, V, Token>
 where
     K: AsRef<[u8]>,
+    Token: GhostBorrowMut<'brand>,
 {
     /// Creates a new active map handle.
     pub fn new(
         map: &'a mut BrandedRadixTrieMap<'brand, K, V>,
-        token: &'a mut GhostToken<'brand>,
+        token: &'a mut Token,
     ) -> Self {
         Self { map, token }
     }
@@ -63,42 +67,56 @@ where
     {
         self.map.for_each(self.token, f)
     }
+
+    /// Iterates over the map.
+    pub fn iter(&self) -> impl Iterator<Item = (crate::alloc::BrandedRc<'brand, crate::collections::vec::BrandedVec<'brand, u8>>, &V)> + use<'_, 'brand, K, V, Token> {
+        self.map.iter(self.token)
+    }
 }
 
 /// Extension trait to easily create ActiveRadixTrieMap from BrandedRadixTrieMap.
 pub trait ActivateRadixTrieMap<'brand, K, V> {
-    fn activate<'a>(
+    fn activate<'a, Token>(
         &'a mut self,
-        token: &'a mut GhostToken<'brand>,
-    ) -> ActiveRadixTrieMap<'a, 'brand, K, V>;
+        token: &'a mut Token,
+    ) -> ActiveRadixTrieMap<'a, 'brand, K, V, Token>
+    where
+        Token: GhostBorrowMut<'brand>;
 }
 
 impl<'brand, K, V> ActivateRadixTrieMap<'brand, K, V> for BrandedRadixTrieMap<'brand, K, V>
 where
     K: AsRef<[u8]>,
 {
-    fn activate<'a>(
+    fn activate<'a, Token>(
         &'a mut self,
-        token: &'a mut GhostToken<'brand>,
-    ) -> ActiveRadixTrieMap<'a, 'brand, K, V> {
+        token: &'a mut Token,
+    ) -> ActiveRadixTrieMap<'a, 'brand, K, V, Token>
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         ActiveRadixTrieMap::new(self, token)
     }
 }
 
-/// A wrapper around a mutable reference to a `BrandedRadixTrieSet` and a mutable reference to a `GhostToken`.
-pub struct ActiveRadixTrieSet<'a, 'brand, T> {
+/// A wrapper around a mutable reference to a `BrandedRadixTrieSet` and a mutable reference to a `Token`.
+pub struct ActiveRadixTrieSet<'a, 'brand, T, Token>
+where
+    Token: GhostBorrowMut<'brand>,
+{
     set: &'a mut BrandedRadixTrieSet<'brand, T>,
-    token: &'a mut GhostToken<'brand>,
+    token: &'a mut Token,
 }
 
-impl<'a, 'brand, T> ActiveRadixTrieSet<'a, 'brand, T>
+impl<'a, 'brand, T, Token> ActiveRadixTrieSet<'a, 'brand, T, Token>
 where
     T: AsRef<[u8]>,
+    Token: GhostBorrowMut<'brand>,
 {
     /// Creates a new active set handle.
     pub fn new(
         set: &'a mut BrandedRadixTrieSet<'brand, T>,
-        token: &'a mut GhostToken<'brand>,
+        token: &'a mut Token,
     ) -> Self {
         Self { set, token }
     }
@@ -140,24 +158,34 @@ where
     {
         self.set.for_each(self.token, f)
     }
+
+    /// Iterates over the set.
+    pub fn iter(&self) -> impl Iterator<Item = crate::alloc::BrandedRc<'brand, crate::collections::vec::BrandedVec<'brand, u8>>> + use<'_, 'brand, T, Token> {
+        self.set.iter(self.token)
+    }
 }
 
 /// Extension trait to easily create ActiveRadixTrieSet from BrandedRadixTrieSet.
 pub trait ActivateRadixTrieSet<'brand, T> {
-    fn activate<'a>(
+    fn activate<'a, Token>(
         &'a mut self,
-        token: &'a mut GhostToken<'brand>,
-    ) -> ActiveRadixTrieSet<'a, 'brand, T>;
+        token: &'a mut Token,
+    ) -> ActiveRadixTrieSet<'a, 'brand, T, Token>
+    where
+        Token: GhostBorrowMut<'brand>;
 }
 
 impl<'brand, T> ActivateRadixTrieSet<'brand, T> for BrandedRadixTrieSet<'brand, T>
 where
     T: AsRef<[u8]>,
 {
-    fn activate<'a>(
+    fn activate<'a, Token>(
         &'a mut self,
-        token: &'a mut GhostToken<'brand>,
-    ) -> ActiveRadixTrieSet<'a, 'brand, T> {
+        token: &'a mut Token,
+    ) -> ActiveRadixTrieSet<'a, 'brand, T, Token>
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         ActiveRadixTrieSet::new(self, token)
     }
 }

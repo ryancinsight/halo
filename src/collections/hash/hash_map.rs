@@ -14,13 +14,13 @@
 //! - **SWAR (SIMD Within A Register)**: Uses `u64` operations to check 8 slots in parallel.
 //! - **GhostToken Gating**: Values are wrapped in `GhostCell`, ensuring zero-cost safety.
 
-use crate::{GhostCell, GhostToken};
+use crate::GhostCell;
 use core::hash::{BuildHasher, Hash, Hasher};
 use core::mem::MaybeUninit;
 use std::alloc::{self, Layout};
-use std::borrow::Borrow;
+use core::borrow::Borrow;
 use std::collections::hash_map::RandomState;
-use std::marker::PhantomData;
+// use std::marker::PhantomData;
 use std::ptr::NonNull;
 
 // Control byte constants
@@ -269,13 +269,14 @@ where
     }
 
     #[inline]
-    pub fn get<'a, Q: ?Sized + Hash + Eq>(
+    pub fn get<'a, Q: ?Sized + Hash + Eq, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
+        token: &'a Token,
         key: &Q,
     ) -> Option<&'a V>
     where
         K: Borrow<Q>,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         if self.capacity == 0 {
             return None;
@@ -297,13 +298,14 @@ where
     }
 
     #[inline]
-    pub fn get_mut<'a, Q: ?Sized + Hash + Eq>(
+    pub fn get_mut<'a, Q: ?Sized + Hash + Eq, Token>(
         &'a self,
-        token: &'a mut GhostToken<'brand>,
+        token: &'a mut Token,
         key: &Q,
     ) -> Option<&'a mut V>
     where
         K: Borrow<Q>,
+        Token: crate::token::traits::GhostBorrowMut<'brand>,
     {
         if self.capacity == 0 {
             return None;
@@ -535,10 +537,13 @@ where
             })
     }
 
-    pub fn values<'a>(
+    pub fn values<'a, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
-    ) -> impl Iterator<Item = &'a V> + use<'a, 'brand, K, V, S> {
+        token: &'a Token,
+    ) -> impl Iterator<Item = &'a V> + use<'a, 'brand, K, V, S, Token>
+    where
+        Token: crate::token::traits::GhostBorrow<'brand>,
+    {
         self.ctrl[0..self.capacity]
             .iter()
             .enumerate()
@@ -552,9 +557,10 @@ where
     }
 
     /// Applies `f` to all entries in the map, allowing mutation of values.
-    pub fn for_each_mut<F>(&self, token: &mut GhostToken<'brand>, mut f: F)
+    pub fn for_each_mut<F, Token>(&self, token: &mut Token, mut f: F)
     where
         F: FnMut(&K, &mut V),
+        Token: crate::token::traits::GhostBorrowMut<'brand>,
     {
         for i in 0..self.capacity {
             if self.ctrl[i] & 0x80 == 0 {
@@ -572,7 +578,10 @@ where
     }
 
     /// Returns a mutable iterator over the map entries.
-    pub fn iter_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>) -> IterMut<'a, 'brand, K, V> {
+    pub fn iter_mut<'a, Token>(&'a self, token: &'a mut Token) -> IterMut<'a, 'brand, K, V, Token>
+    where
+        Token: crate::token::traits::GhostBorrowMut<'brand>,
+    {
         IterMut {
             ctrl: &self.ctrl,
             keys: &self.keys,
@@ -585,16 +594,19 @@ where
 }
 
 /// Mutable iterator over the map entries.
-pub struct IterMut<'a, 'brand, K, V> {
+pub struct IterMut<'a, 'brand, K, V, Token> {
     ctrl: &'a [u8],
     keys: &'a [MaybeUninit<K>],
     values: &'a [MaybeUninit<GhostCell<'brand, V>>],
-    token: &'a mut GhostToken<'brand>,
+    token: &'a mut Token,
     index: usize,
     items_left: usize,
 }
 
-impl<'a, 'brand, K, V> Iterator for IterMut<'a, 'brand, K, V> {
+impl<'a, 'brand, K, V, Token> Iterator for IterMut<'a, 'brand, K, V, Token>
+where
+    Token: crate::token::traits::GhostBorrowMut<'brand>,
+{
     type Item = (&'a K, &'a mut V);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -619,7 +631,7 @@ impl<'a, 'brand, K, V> Iterator for IterMut<'a, 'brand, K, V> {
                     let cell = self.values.get_unchecked(i).assume_init_ref();
 
                     // SAFETY:
-                    // 1. We hold &'a mut GhostToken.
+                    // 1. We hold &'a mut Token.
                     // 2. We yield unique elements because 'i' increments.
                     // 3. We use as_mut_ptr to get *mut V, then lift to &'a mut V.
                     //    This extends lifetime from self.token reborrow to 'a.
@@ -636,8 +648,14 @@ impl<'a, 'brand, K, V> Iterator for IterMut<'a, 'brand, K, V> {
     }
 }
 
-impl<'a, 'brand, K, V> ExactSizeIterator for IterMut<'a, 'brand, K, V> {}
-impl<'a, 'brand, K, V> std::iter::FusedIterator for IterMut<'a, 'brand, K, V> {}
+impl<'a, 'brand, K, V, Token> ExactSizeIterator for IterMut<'a, 'brand, K, V, Token> where
+    Token: crate::token::traits::GhostBorrowMut<'brand>,
+{
+}
+impl<'a, 'brand, K, V, Token> std::iter::FusedIterator for IterMut<'a, 'brand, K, V, Token> where
+    Token: crate::token::traits::GhostBorrowMut<'brand>,
+{
+}
 
 impl<'brand, K, V, S> Drop for BrandedHashMap<'brand, K, V, S> {
     fn drop(&mut self) {
@@ -681,9 +699,10 @@ where
     K: Eq + Hash,
     S: BuildHasher,
 {
-    fn find_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<(&'a K, &'a V)>
+    fn find_ref<'a, F, Token>(&'a self, token: &'a Token, f: F) -> Option<(&'a K, &'a V)>
     where
         F: Fn(&K, &V) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         for i in 0..self.capacity {
             if self.ctrl[i] & 0x80 == 0 {
@@ -699,16 +718,18 @@ where
         None
     }
 
-    fn any_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    fn any_ref<F, Token>(&self, token: &Token, f: F) -> bool
     where
         F: Fn(&K, &V) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         self.find_ref(token, f).is_some()
     }
 
-    fn all_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    fn all_ref<F, Token>(&self, token: &Token, f: F) -> bool
     where
         F: Fn(&K, &V) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         if self.is_empty() {
             return true;

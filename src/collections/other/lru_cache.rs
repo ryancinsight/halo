@@ -6,7 +6,7 @@
 
 use crate::collections::hash::external_map::BrandedExternalHashMap;
 use crate::collections::other::BrandedDoublyLinkedList;
-use crate::GhostToken;
+use crate::token::traits::{GhostBorrow, GhostBorrowMut};
 use core::fmt;
 use core::hash::Hash;
 
@@ -52,7 +52,10 @@ where
     }
 
     /// Gets a reference to the value associated with `key`.
-    pub fn get<'a>(&'a mut self, token: &'a mut GhostToken<'brand>, key: &K) -> Option<&'a V> {
+    pub fn get<'a, Token>(&'a mut self, token: &'a mut Token, key: &K) -> Option<&'a V>
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         let index = self.map.get(key, |idx| {
             self.list.get(token, idx).map(|(k, _): &(_, _)| k)
         })?;
@@ -64,11 +67,14 @@ where
     }
 
     /// A version of `get` that allows mutating the value.
-    pub fn get_mut<'a>(
+    pub fn get_mut<'a, Token>(
         &'a mut self,
-        token: &'a mut GhostToken<'brand>,
+        token: &'a mut Token,
         key: &K,
-    ) -> Option<&'a mut V> {
+    ) -> Option<&'a mut V>
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         let index = self.map.get(key, |idx| {
             self.list.get(token, idx).map(|(k, _): &(_, _)| k)
         })?;
@@ -79,7 +85,10 @@ where
     }
 
     /// Returns a reference to the value without updating the LRU order.
-    pub fn peek<'a>(&'a self, token: &'a GhostToken<'brand>, key: &K) -> Option<&'a V> {
+    pub fn peek<'a, Token>(&'a self, token: &'a Token, key: &K) -> Option<&'a V>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         let index = self.map.get(key, |idx| {
             self.list.get(token, idx).map(|(k, _): &(_, _)| k)
         })?;
@@ -88,7 +97,10 @@ where
     }
 
     /// Puts a key-value pair into the cache.
-    pub fn put(&mut self, token: &mut GhostToken<'brand>, key: K, value: V) -> Option<V> {
+    pub fn put<Token>(&mut self, token: &mut Token, key: K, value: V) -> Option<V>
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         let index_opt = self.map.get(&key, |idx| {
             self.list.get(token, idx).map(|(k, _): &(_, _)| k)
         });

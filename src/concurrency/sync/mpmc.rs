@@ -8,7 +8,6 @@
 
 use crate::concurrency::atomic::GhostAtomicUsize;
 use core::cell::UnsafeCell;
-use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 use core::sync::atomic::Ordering;
 
@@ -255,7 +254,7 @@ mod tests {
 
             p.join().unwrap();
             let sum = c.join().unwrap();
-            assert_eq!(sum, (0..1000).sum());
+            assert_eq!(sum, (0..1000).sum::<i32>());
         });
     }
 }

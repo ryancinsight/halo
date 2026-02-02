@@ -14,7 +14,8 @@
 //! - **Index Access**: O(1) access by index.
 
 use crate::collections::{BrandedCollection, BrandedVec, ZeroCopyMapOps};
-use crate::{GhostCell, GhostToken};
+use crate::token::traits::{GhostBorrow, GhostBorrowMut};
+use crate::GhostCell;
 use core::hash::{BuildHasher, Hash, Hasher};
 use std::collections::hash_map::RandomState;
 // Control byte constants
@@ -125,11 +126,14 @@ impl<'brand, K, V, S> BrandedIndexMap<'brand, K, V, S> {
     }
 
     /// Returns the key-value pair at the given index.
-    pub fn get_index<'a>(
+    pub fn get_index<'a, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
+        token: &'a Token,
         index: usize,
-    ) -> Option<(&'a K, &'a V)> {
+    ) -> Option<(&'a K, &'a V)>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         if index < self.keys.len() {
             let key = &self.keys[index];
             let val = self.values.get(token, index)?;
@@ -140,11 +144,14 @@ impl<'brand, K, V, S> BrandedIndexMap<'brand, K, V, S> {
     }
 
     /// Returns the key-value pair at the given index (mutable).
-    pub fn get_index_mut<'a>(
+    pub fn get_index_mut<'a, Token>(
         &'a self,
-        token: &'a mut GhostToken<'brand>,
+        token: &'a mut Token,
         index: usize,
-    ) -> Option<(&'a K, &'a mut V)> {
+    ) -> Option<(&'a K, &'a mut V)>
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         if index < self.keys.len() {
             let key = &self.keys[index];
             let val = self.values.get_mut(token, index)?;
@@ -170,23 +177,32 @@ impl<'brand, K, V, S> BrandedIndexMap<'brand, K, V, S> {
     }
 
     /// Iterator over values.
-    pub fn values<'a>(&'a self, token: &'a GhostToken<'brand>) -> impl Iterator<Item = &'a V> {
+    pub fn values<'a, Token>(&'a self, token: &'a Token) -> impl Iterator<Item = &'a V> + use<'a, 'brand, K, V, S, Token>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         self.values.iter(token)
     }
 
     /// Iterator over key-value pairs.
-    pub fn iter<'a>(
+    pub fn iter<'a, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
-    ) -> impl Iterator<Item = (&'a K, &'a V)> {
+        token: &'a Token,
+    ) -> impl Iterator<Item = (&'a K, &'a V)> + use<'a, 'brand, K, V, S, Token>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         self.keys.iter().zip(self.values.iter(token))
     }
 
     /// Iterator over key-value pairs (mutable).
-    pub fn iter_mut<'a>(
+    pub fn iter_mut<'a, Token>(
         &'a self,
-        token: &'a mut GhostToken<'brand>,
-    ) -> impl Iterator<Item = (&'a K, &'a mut V)> {
+        token: &'a mut Token,
+    ) -> impl Iterator<Item = (&'a K, &'a mut V)> + use<'a, 'brand, K, V, S, Token>
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         self.keys
             .iter()
             .zip(self.values.as_mut_slice(token).iter_mut())
@@ -443,7 +459,10 @@ where
     }
 
     /// Gets a shared reference to the value associated with the key.
-    pub fn get<'a>(&'a self, token: &'a GhostToken<'brand>, key: &K) -> Option<&'a V> {
+    pub fn get<'a, Token>(&'a self, token: &'a Token, key: &K) -> Option<&'a V>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         if self.table_capacity == 0 {
             return None;
         }
@@ -461,7 +480,10 @@ where
     }
 
     /// Gets a mutable reference to the value associated with the key.
-    pub fn get_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>, key: &K) -> Option<&'a mut V> {
+    pub fn get_mut<'a, Token>(&'a self, token: &'a mut Token, key: &K) -> Option<&'a mut V>
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         if self.table_capacity == 0 {
             return None;
         }
@@ -494,23 +516,26 @@ where
     K: Eq + Hash,
     S: BuildHasher,
 {
-    fn find_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<(&'a K, &'a V)>
+    fn find_ref<'a, F, Token>(&'a self, token: &'a Token, f: F) -> Option<(&'a K, &'a V)>
     where
         F: Fn(&K, &V) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         self.iter(token).find(|(k, v)| f(k, v))
     }
 
-    fn any_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    fn any_ref<F, Token>(&self, token: &Token, f: F) -> bool
     where
         F: Fn(&K, &V) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         self.iter(token).any(|(k, v)| f(k, v))
     }
 
-    fn all_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    fn all_ref<F, Token>(&self, token: &Token, f: F) -> bool
     where
         F: Fn(&K, &V) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         self.iter(token).all(|(k, v)| f(k, v))
     }

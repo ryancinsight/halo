@@ -10,6 +10,7 @@
 //! - **SoA Layout**: Separate arrays for keys, values, prev, next, to improve cache locality for lookups.
 
 use crate::collections::{BrandedCollection, ZeroCopyMapOps};
+use crate::token::traits::GhostBorrow;
 use crate::{GhostCell, GhostToken};
 use core::hash::{BuildHasher, Hash, Hasher};
 use core::mem::MaybeUninit;
@@ -546,10 +547,13 @@ where
 
     // Iterators
 
-    pub fn iter<'a>(
+    pub fn iter<'a, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
-    ) -> impl Iterator<Item = (&'a K, &'a V)> + use<'a, 'brand, K, V, S> {
+        token: &'a Token,
+    ) -> impl Iterator<Item = (&'a K, &'a V)> + use<'a, 'brand, K, V, S, Token>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         Iter {
             map: self,
             token,
@@ -558,13 +562,19 @@ where
     }
 }
 
-pub struct Iter<'a, 'brand, K, V, S> {
+pub struct Iter<'a, 'brand, K, V, S, Token>
+where
+    Token: GhostBorrow<'brand>,
+{
     map: &'a BrandedLinkedHashMap<'brand, K, V, S>,
-    token: &'a GhostToken<'brand>,
+    token: &'a Token,
     curr: usize,
 }
 
-impl<'a, 'brand, K, V, S> Iterator for Iter<'a, 'brand, K, V, S> {
+impl<'a, 'brand, K, V, S, Token> Iterator for Iter<'a, 'brand, K, V, S, Token>
+where
+    Token: GhostBorrow<'brand>,
+{
     type Item = (&'a K, &'a V);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -599,23 +609,26 @@ where
     K: Eq + Hash,
     S: BuildHasher,
 {
-    fn find_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<(&'a K, &'a V)>
+    fn find_ref<'a, F, Token>(&'a self, token: &'a Token, f: F) -> Option<(&'a K, &'a V)>
     where
         F: Fn(&K, &V) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         self.iter(token).find(|(k, v)| f(k, v))
     }
 
-    fn any_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    fn any_ref<F, Token>(&self, token: &Token, f: F) -> bool
     where
         F: Fn(&K, &V) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         self.iter(token).any(|(k, v)| f(k, v))
     }
 
-    fn all_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    fn all_ref<F, Token>(&self, token: &Token, f: F) -> bool
     where
         F: Fn(&K, &V) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         self.iter(token).all(|(k, v)| f(k, v))
     }

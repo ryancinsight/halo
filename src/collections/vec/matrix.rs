@@ -12,7 +12,7 @@
 //!   without requiring the global `GhostToken`. This enables splitting the matrix recursively.
 
 use crate::collections::vec::{slice::BrandedSlice, slice::BrandedSliceMut, BrandedVec};
-use crate::{GhostCell, GhostToken};
+use crate::GhostCell;
 use std::marker::PhantomData;
 use std::slice;
 
@@ -88,12 +88,15 @@ impl<'brand, T> BrandedMatrix<'brand, T> {
 
     /// Returns a shared reference to the element at (row, col).
     #[inline(always)]
-    pub fn get<'a>(
+    pub fn get<'a, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
+        token: &'a Token,
         row: usize,
         col: usize,
-    ) -> Option<&'a T> {
+    ) -> Option<&'a T>
+    where
+        Token: crate::token::traits::GhostBorrow<'brand>,
+    {
         if row < self.rows && col < self.cols {
             // SAFETY: bounds checked above.
             unsafe { Some(self.data.get_unchecked(token, row * self.cols + col)) }
@@ -104,12 +107,15 @@ impl<'brand, T> BrandedMatrix<'brand, T> {
 
     /// Returns a mutable reference to the element at (row, col).
     #[inline(always)]
-    pub fn get_mut<'a>(
+    pub fn get_mut<'a, Token>(
         &'a self,
-        token: &'a mut GhostToken<'brand>,
+        token: &'a mut Token,
         row: usize,
         col: usize,
-    ) -> Option<&'a mut T> {
+    ) -> Option<&'a mut T>
+    where
+        Token: crate::token::traits::GhostBorrowMut<'brand>,
+    {
         if row < self.rows && col < self.cols {
             // SAFETY: bounds checked above.
             unsafe { Some(self.data.get_unchecked_mut(token, row * self.cols + col)) }
@@ -119,11 +125,14 @@ impl<'brand, T> BrandedMatrix<'brand, T> {
     }
 
     /// Returns a row as a `BrandedSlice`.
-    pub fn row<'a>(
+    pub fn row<'a, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
+        token: &'a Token,
         row: usize,
-    ) -> Option<BrandedSlice<'a, 'brand, T>> {
+    ) -> Option<BrandedSlice<'a, 'brand, T, Token>>
+    where
+        Token: crate::token::traits::GhostBorrow<'brand>,
+    {
         if row < self.rows {
             let start = row * self.cols;
             let end = start + self.cols;

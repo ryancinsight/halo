@@ -49,7 +49,7 @@ Halo explores a unique niche: **Statically Verified Lock-Free Concurrency**.
     *   In traditional lock-free code, you must be careful about memory ordering and ABA problems everywhere.
     *   In Halo, if you have `&mut GhostToken`, you *know* you are the only one. You can use non-atomic operations safely.
     *   If you have `&GhostToken` (shared), you are forced to use `GhostAtomic`, preventing accidental data races.
-    *   **ABA Prevention**: Halo's `GenerationalPool` and other structures use the token brand to prevent ABA issues at the type level (a pointer from an old brand cannot be used with a new brand).
+    *   **ABA Prevention**: Halo's branded indices prevent ABA issues at the type level (a pointer from an old brand cannot be used with a new brand).
 
 ## Conclusion
 

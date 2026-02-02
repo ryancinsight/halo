@@ -3,7 +3,9 @@ use core::marker::PhantomData;
 use core::ptr::{self, NonNull};
 use std::alloc::{alloc, dealloc, handle_alloc_error};
 
-use crate::alloc::allocator::AllocError;
+// use crate::alloc::allocator::GlobalAlloc;
+// use crate::alloc::allocator::AllocError;
+// use crate::alloc::page::{PageAlloc, PAGE_SIZE};
 use crate::{GhostCell, GhostToken, GhostUnsafeCell};
 
 /// A chunk of memory in the bump allocator.

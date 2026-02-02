@@ -12,6 +12,7 @@ pub struct EccEdge {
 }
 
 impl EccEdge {
+    /// Creates a new unweighted edge.
     #[inline]
     pub fn new(source: usize, target: usize) -> Self {
         Self {
@@ -21,6 +22,7 @@ impl EccEdge {
         }
     }
 
+    /// Creates a new weighted edge.
     #[inline]
     pub fn with_weight(source: usize, target: usize, weight: i32) -> Self {
         Self {

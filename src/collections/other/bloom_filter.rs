@@ -4,7 +4,7 @@
 //! Uses double hashing to simulate `k` hash functions.
 
 use crate::collections::other::bit_set::BrandedBitSet;
-use crate::GhostToken;
+use crate::token::traits::{GhostBorrow, GhostBorrowMut};
 use core::hash::{BuildHasher, Hash, Hasher};
 use std::collections::hash_map::RandomState;
 use std::marker::PhantomData;
@@ -92,7 +92,10 @@ where
     }
 
     /// Adds an item to the Bloom filter.
-    pub fn insert(&mut self, token: &mut GhostToken<'brand>, item: &T) {
+    pub fn insert<Token>(&mut self, token: &mut Token, item: &T)
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         let (h1, h2) = self.get_hashes(item);
         let m = self.bit_size as u64;
 
@@ -103,7 +106,10 @@ where
     }
 
     /// Checks if an item is possibly in the Bloom filter.
-    pub fn contains(&self, token: &GhostToken<'brand>, item: &T) -> bool {
+    pub fn contains<Token>(&self, token: &Token, item: &T) -> bool
+    where
+        Token: GhostBorrow<'brand>,
+    {
         let (h1, h2) = self.get_hashes(item);
         let m = self.bit_size as u64;
 

@@ -12,7 +12,7 @@
 //! - **Stable Indices**: Interned values are never moved or removed (append-only), providing stable `InternId`s.
 
 use crate::collections::{BrandedCollection, BrandedVec};
-use crate::GhostToken;
+use crate::token::traits::{GhostBorrow, GhostBorrowMut};
 use std::borrow::Cow;
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hash, Hasher};
@@ -122,15 +122,16 @@ where
 
     /// Helper to find a slot for a given key.
     /// Returns `Ok(index)` if found, `Err(slot_index)` if not found (where to insert).
-    fn find_slot<Q: ?Sized>(
+    fn find_slot<Q: ?Sized, Token>(
         &self,
-        token: &GhostToken<'brand>,
+        token: &Token,
         key: &Q,
         hash: u64,
     ) -> Result<usize, usize>
     where
         T: std::borrow::Borrow<Q>,
         Q: Eq,
+        Token: GhostBorrow<'brand>,
     {
         let mask = self.buckets.len() - 1;
         let mut idx = (hash as usize) & mask;
@@ -186,18 +187,24 @@ where
     ///
     /// If the value already exists, returns its `InternId`.
     /// If not, inserts it and returns a new `InternId`.
-    pub fn intern(&mut self, token: &GhostToken<'brand>, value: T) -> InternId<'brand> {
+    pub fn intern<Token>(&mut self, token: &mut Token, value: T) -> InternId<'brand>
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         self.intern_cow(token, Cow::Owned(value))
     }
 
     /// Interns a value from a Cow reference.
     ///
     /// This allows avoiding allocation if the value is already present.
-    pub fn intern_cow<'a>(
+    pub fn intern_cow<'a, Token>(
         &mut self,
-        token: &GhostToken<'brand>,
+        token: &mut Token,
         value: Cow<'a, T>,
-    ) -> InternId<'brand> {
+    ) -> InternId<'brand>
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         let hash = self.hash_val(value.as_ref());
 
         // Check load factor (75%)
@@ -222,21 +229,25 @@ where
 
     /// Gets a reference to an interned value by ID.
     #[inline(always)]
-    pub fn get<'a>(
+    pub fn get<'a, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
+        token: &'a Token,
         id: InternId<'brand>,
-    ) -> Option<&'a T> {
+    ) -> Option<&'a T>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         self.storage.get(token, id.index())
     }
 
     /// Looks up a value by reference without allocating.
     ///
     /// Returns the `InternId` if found.
-    pub fn get_id<Q: ?Sized>(&self, token: &GhostToken<'brand>, key: &Q) -> Option<InternId<'brand>>
+    pub fn get_id<Q: ?Sized, Token>(&self, token: &Token, key: &Q) -> Option<InternId<'brand>>
     where
         T: std::borrow::Borrow<Q>,
         Q: Hash + Eq,
+        Token: GhostBorrow<'brand>,
     {
         let hash = self.hash_val(key);
         match self.find_slot(token, key, hash) {
@@ -248,14 +259,15 @@ where
     /// Looks up a value by reference and returns a reference to the stored value.
     ///
     /// This is useful for canonicalizing values (replacing a lookup key with the stored canonical version).
-    pub fn get_val<'a, Q: ?Sized>(
+    pub fn get_val<'a, Q: ?Sized, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
+        token: &'a Token,
         key: &Q,
     ) -> Option<&'a T>
     where
         T: std::borrow::Borrow<Q>,
         Q: Hash + Eq,
+        Token: GhostBorrow<'brand>,
     {
         let hash = self.hash_val(key);
         match self.find_slot(token, key, hash) {
@@ -265,10 +277,13 @@ where
     }
 
     /// Iterates over all interned values.
-    pub fn iter<'a>(
+    pub fn iter<'a, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
-    ) -> impl Iterator<Item = (InternId<'brand>, &'a T)> {
+        token: &'a Token,
+    ) -> impl Iterator<Item = (InternId<'brand>, &'a T)>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         self.storage
             .iter(token)
             .enumerate()
@@ -303,12 +318,12 @@ mod tests {
 
     #[test]
     fn test_interner_basic() {
-        GhostToken::new(|token| {
+        GhostToken::new(|mut token| {
             let mut interner = BrandedInterner::new();
 
-            let id1 = interner.intern(&token, "hello".to_string());
-            let id2 = interner.intern(&token, "world".to_string());
-            let id3 = interner.intern(&token, "hello".to_string());
+            let id1 = interner.intern(&mut token, "hello".to_string());
+            let id2 = interner.intern(&mut token, "world".to_string());
+            let id3 = interner.intern(&mut token, "hello".to_string());
 
             assert_eq!(id1, id3);
             assert_ne!(id1, id2);
@@ -320,9 +335,9 @@ mod tests {
 
     #[test]
     fn test_interner_lookup() {
-        GhostToken::new(|token| {
+        GhostToken::new(|mut token| {
             let mut interner = BrandedInterner::new();
-            interner.intern(&token, "test".to_string());
+            interner.intern(&mut token, "test".to_string());
 
             let found = interner.get_val(&token, "test");
             assert_eq!(found, Some(&"test".to_string()));
@@ -334,12 +349,12 @@ mod tests {
 
     #[test]
     fn test_interner_types() {
-        GhostToken::new(|token| {
+        GhostToken::new(|mut token| {
             let mut interner = BrandedInterner::new();
 
             // Intern integers
-            let id1 = interner.intern(&token, 42);
-            let id2 = interner.intern(&token, 42);
+            let id1 = interner.intern(&mut token, 42);
+            let id2 = interner.intern(&mut token, 42);
 
             assert_eq!(id1, id2);
             assert_eq!(interner.get(&token, id1), Some(&42));

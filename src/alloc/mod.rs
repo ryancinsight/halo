@@ -2,31 +2,29 @@ pub mod allocator;
 pub mod arena;
 pub mod bump;
 pub mod pool;
-pub mod generational_pool;
 pub mod global;
 pub mod slab;
+pub mod system;
 
 pub use allocator::{AllocError, GhostAlloc};
 pub use arena::BrandedArena;
 pub use bump::BrandedBumpAllocator;
 pub use pool::BrandedPool;
-pub use generational_pool::GenerationalPool;
 pub use global::{DispatchGlobalAlloc, with_global_allocator};
 pub use slab::{BrandedSlab, init_slab_page};
 
 pub mod page;
-pub use page::{PageAlloc, GlobalPageAlloc};
+pub use page::{PageAlloc, GlobalPageAlloc, SyscallPageAlloc};
 
-pub mod branded;
 pub mod branded_box;
 pub mod branded_rc;
-pub mod heap;
 pub mod static_rc;
 pub mod segregated;
 
 pub use branded_box::BrandedBox;
 pub use branded_rc::BrandedRc;
 pub use static_rc::StaticRc;
+pub use system::HaloAllocator;
 
 // # Benchmark Comparison
 //

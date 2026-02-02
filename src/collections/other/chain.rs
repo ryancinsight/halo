@@ -5,7 +5,7 @@
 //! searching across both collections efficiently.
 
 use crate::collections::{BrandedCollection, ZeroCopyOps};
-use crate::GhostToken;
+// use crate::GhostToken;
 
 /// A collection that chains two other branded collections.
 pub struct BrandedChain<C1, C2> {
@@ -44,25 +44,28 @@ where
     C1: ZeroCopyOps<'brand, T>,
     C2: ZeroCopyOps<'brand, T>,
 {
-    fn find_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<&'a T>
+    fn find_ref<'a, F, Token>(&'a self, token: &'a Token, f: F) -> Option<&'a T>
     where
         F: Fn(&T) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         self.first
             .find_ref(token, &f)
             .or_else(|| self.second.find_ref(token, f))
     }
 
-    fn any_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    fn any_ref<F, Token>(&self, token: &Token, f: F) -> bool
     where
         F: Fn(&T) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         self.first.any_ref(token, &f) || self.second.any_ref(token, f)
     }
 
-    fn all_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    fn all_ref<F, Token>(&self, token: &Token, f: F) -> bool
     where
         F: Fn(&T) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         self.first.all_ref(token, &f) && self.second.all_ref(token, f)
     }

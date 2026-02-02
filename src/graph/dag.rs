@@ -10,6 +10,7 @@
 //! statically-known graphs, consider using `ConstDag` for compile-time guarantees.
 
 use crate::concurrency::worklist::{GhostChaseLevDeque, GhostTreiberStack};
+use crate::GhostToken;
 
 mod math_assert;
 pub mod math_proofs;
@@ -454,13 +455,23 @@ impl<'brand, const EDGE_CHUNK: usize> GhostDag<'brand, EDGE_CHUNK> {
     }
 
     /// DFS reachable count using the provided Treiber stack.
-    pub fn dfs_reachable_count(&self, start: usize, stack: &GhostTreiberStack<'brand>) -> usize {
-        self.graph.dfs_reachable_count(start, stack)
+    pub fn dfs_reachable_count(
+        &self,
+        token: &GhostToken<'brand>,
+        start: usize,
+        stack: &GhostTreiberStack<'brand>,
+    ) -> usize {
+        self.graph.dfs_reachable_count(token, start, stack)
     }
 
     /// BFS reachable count using the provided Chase–Lev deque.
-    pub fn bfs_reachable_count(&self, start: usize, deque: &GhostChaseLevDeque<'brand>) -> usize {
-        self.graph.bfs_reachable_count(start, deque)
+    pub fn bfs_reachable_count(
+        &self,
+        token: &GhostToken<'brand>,
+        start: usize,
+        deque: &GhostChaseLevDeque<'brand>,
+    ) -> usize {
+        self.graph.bfs_reachable_count(token, start, deque)
     }
 }
 
@@ -601,7 +612,7 @@ mod tests {
 
     #[test]
     fn dag_traversal() {
-        GhostToken::new(|_token| {
+        GhostToken::new(|token| {
             let adjacency = vec![vec![1, 2], vec![3], vec![3], vec![]];
 
             let dag = GhostDag::<1024>::from_adjacency(&adjacency);
@@ -609,11 +620,11 @@ mod tests {
             let deque = GhostChaseLevDeque::new(32);
 
             // Test DFS
-            let reachable = dag.dfs_reachable_count(0, &stack);
+            let reachable = dag.dfs_reachable_count(&token, 0, &stack);
             assert_eq!(reachable, 4);
 
             // Test BFS
-            let reachable = dag.bfs_reachable_count(0, &deque);
+            let reachable = dag.bfs_reachable_count(&token, 0, &deque);
             assert_eq!(reachable, 4);
         });
     }
@@ -722,16 +733,19 @@ impl<'brand, const N: usize, const M: usize, const EDGE_CHUNK: usize>
         self.graph.node_count()
     }
 
+    /// Returns the number of edges.
     #[inline(always)]
     pub fn edge_count(&self) -> usize {
         self.graph.edge_count()
     }
 
+    /// Returns an iterator over neighbors.
     #[inline(always)]
     pub fn neighbors(&self, node: usize) -> impl Iterator<Item = usize> + '_ {
         self.graph.neighbors(node)
     }
 
+    /// Returns the out-degree of a node.
     #[inline(always)]
     pub fn degree(&self, node: usize) -> usize {
         self.graph.degree(node)

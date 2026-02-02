@@ -12,7 +12,10 @@
 //! - **Memory Efficient**: Uses a union and bitset to minimize overhead.
 
 use crate::collections::vec::BrandedVec;
-use crate::{GhostCell, GhostToken};
+// use crate::alloc::allocator::AllocError;
+use crate::GhostCell;
+// use crate::GhostToken;
+// use crate::token::traits::{GhostBorrow, GhostBorrowMut};
 use core::mem::ManuallyDrop;
 
 /// A slot in the pool.
@@ -132,7 +135,10 @@ impl<'brand, T> BrandedPool<'brand, T> {
     }
 
     /// Reserves capacity for at least `additional` more elements to be allocated.
-    pub fn reserve(&self, token: &mut GhostToken<'brand>, additional: usize) {
+    pub fn reserve<Token>(&self, token: &mut Token, additional: usize)
+    where
+        Token: crate::token::traits::GhostBorrowMut<'brand>,
+    {
         let state = self.state.borrow_mut(token);
         state.storage.reserve(additional);
         let additional_words = (additional + 63) / 64;
@@ -141,7 +147,10 @@ impl<'brand, T> BrandedPool<'brand, T> {
 
     /// Allocates a value in the pool, returning its index.
     #[inline]
-    pub fn alloc(&self, token: &mut GhostToken<'brand>, value: T) -> usize {
+    pub fn alloc<Token>(&self, token: &mut Token, value: T) -> usize
+    where
+        Token: crate::token::traits::GhostBorrowMut<'brand>,
+    {
         let state = self.state.borrow_mut(token);
 
         state.len += 1;
@@ -197,7 +206,10 @@ impl<'brand, T> BrandedPool<'brand, T> {
     /// The `index` must be currently allocated (occupied).
     /// Double-freeing or freeing an invalid index causes undefined behavior.
     #[inline]
-    pub unsafe fn free(&self, token: &mut GhostToken<'brand>, index: usize) {
+    pub unsafe fn free<Token>(&self, token: &mut Token, index: usize)
+    where
+        Token: crate::token::traits::GhostBorrowMut<'brand>,
+    {
         let state = self.state.borrow_mut(token);
 
         state.len -= 1;
@@ -224,7 +236,10 @@ impl<'brand, T> BrandedPool<'brand, T> {
     /// # Safety
     /// The `index` must be currently allocated (occupied).
     #[inline]
-    pub unsafe fn take(&self, token: &mut GhostToken<'brand>, index: usize) -> T {
+    pub unsafe fn take<Token>(&self, token: &mut Token, index: usize) -> T
+    where
+        Token: crate::token::traits::GhostBorrowMut<'brand>,
+    {
         let state = self.state.borrow_mut(token);
 
         state.len -= 1;
@@ -252,7 +267,10 @@ impl<'brand, T> BrandedPool<'brand, T> {
     ///
     /// Returns `None` if the slot is free or index is out of bounds (safe).
     #[inline]
-    pub fn get<'a>(&'a self, token: &'a GhostToken<'brand>, index: usize) -> Option<&'a T> {
+    pub fn get<'a, Token>(&'a self, token: &'a Token, index: usize) -> Option<&'a T>
+    where
+        Token: crate::token::traits::GhostBorrow<'brand>,
+    {
         let state = self.state.borrow(token);
         if index < state.storage.len() {
             let word_idx = index >> BIT_SHIFT;
@@ -275,7 +293,10 @@ impl<'brand, T> BrandedPool<'brand, T> {
     /// # Safety
     /// The caller must ensure that `index` is within bounds and points to an `Occupied` slot.
     #[inline]
-    pub unsafe fn get_unchecked<'a>(&'a self, token: &'a GhostToken<'brand>, index: usize) -> &'a T {
+    pub unsafe fn get_unchecked<'a, Token>(&'a self, token: &'a Token, index: usize) -> &'a T
+    where
+        Token: crate::token::traits::GhostBorrow<'brand>,
+    {
         let state = self.state.borrow(token);
         &state.storage.get_unchecked(token, index).occupied
     }
@@ -284,11 +305,14 @@ impl<'brand, T> BrandedPool<'brand, T> {
     ///
     /// Returns `None` if the slot is free or index is out of bounds.
     #[inline]
-    pub fn get_mut<'a>(
+    pub fn get_mut<'a, Token>(
         &'a self,
-        token: &'a mut GhostToken<'brand>,
+        token: &'a mut Token,
         index: usize,
-    ) -> Option<&'a mut T> {
+    ) -> Option<&'a mut T>
+    where
+        Token: crate::token::traits::GhostBorrowMut<'brand>,
+    {
         let state = self.state.borrow_mut(token);
         unsafe {
             if index < state.storage.len() {
@@ -335,25 +359,37 @@ impl<'brand, T> BrandedPool<'brand, T> {
 
     /// Returns the current capacity of the pool.
     #[inline]
-    pub fn capacity(&self, token: &GhostToken<'brand>) -> usize {
+    pub fn capacity<Token>(&self, token: &Token) -> usize
+    where
+        Token: crate::token::traits::GhostBorrow<'brand>,
+    {
         self.state.borrow(token).storage.capacity()
     }
 
     /// Returns the number of allocated items.
     #[inline]
-    pub fn len(&self, token: &GhostToken<'brand>) -> usize {
+    pub fn len<Token>(&self, token: &Token) -> usize
+    where
+        Token: crate::token::traits::GhostBorrow<'brand>,
+    {
         self.state.borrow(token).len
     }
 
     /// Returns true if empty.
     #[inline]
-    pub fn is_empty(&self, token: &GhostToken<'brand>) -> bool {
+    pub fn is_empty<Token>(&self, token: &Token) -> bool
+    where
+        Token: crate::token::traits::GhostBorrow<'brand>,
+    {
         self.len(token) == 0
     }
 
     /// Returns a view of the underlying storage and occupancy map.
     #[inline]
-    pub fn view<'a>(&'a self, token: &'a GhostToken<'brand>) -> PoolView<'a, T> {
+    pub fn view<'a, Token>(&'a self, token: &'a Token) -> PoolView<'a, T>
+    where
+        Token: crate::token::traits::GhostBorrow<'brand>,
+    {
         let state = self.state.borrow(token);
         PoolView {
             storage: state.storage.as_slice(token),
@@ -363,7 +399,10 @@ impl<'brand, T> BrandedPool<'brand, T> {
 
     /// Returns a mutable view of the underlying storage and occupancy map.
     #[inline]
-    pub fn view_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>) -> PoolViewMut<'a, T> {
+    pub fn view_mut<'a, Token>(&'a self, token: &'a mut Token) -> PoolViewMut<'a, T>
+    where
+        Token: crate::token::traits::GhostBorrowMut<'brand>,
+    {
         let state = self.state.borrow_mut(token);
         PoolViewMut {
             storage: state.storage.as_mut_slice_exclusive(),
@@ -376,13 +415,14 @@ impl<'brand, T> BrandedPool<'brand, T> {
     /// Preserves the exact structure, including free lists and indices.
     /// Returns the new pool and an auxiliary vector containing the secondary output of `clone_fn`
     /// for occupied slots (and `None` for free slots).
-    pub fn clone_structure<'new_brand, U, Aux, F>(
+    pub fn clone_structure<'new_brand, U, Aux, F, Token>(
         &self,
-        token: &GhostToken<'brand>,
+        token: &Token,
         mut clone_fn: F,
     ) -> (BrandedPool<'new_brand, U>, Vec<Option<Aux>>)
     where
         F: FnMut(&T) -> (U, Aux),
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         let state = self.state.borrow(token);
         let mut new_storage = BrandedVec::with_capacity(state.storage.len());

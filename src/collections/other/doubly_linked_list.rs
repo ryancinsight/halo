@@ -4,10 +4,11 @@
 //! allowing safe index-based pointers with the `GhostCell` pattern.
 //! It supports O(1) insertion and removal at arbitrary positions via Cursors.
 
-use crate::alloc::pool::{PoolSlot, PoolView, PoolViewMut};
+use crate::alloc::pool::{PoolView, PoolViewMut};
 use crate::alloc::BrandedPool;
 use crate::collections::ZeroCopyOps;
-use crate::GhostToken;
+// use crate::GhostCell;
+// use crate::GhostToken;
 use core::fmt;
 use core::marker::PhantomData;
 
@@ -17,32 +18,69 @@ struct ListNode<T> {
     next: Option<usize>,
     value: T,
 }
+use crate::token::traits::{GhostBorrow, GhostBorrowMut};
 
 /// Zero-cost iterator for BrandedDoublyLinkedList.
-pub struct BrandedDoublyLinkedListIter<'a, 'brand, T> {
+struct BrandedDoublyLinkedListIter<'a, 'brand, T, Token>
+where
+    Token: GhostBorrow<'brand>,
+{
     view: PoolView<'a, ListNode<T>>,
-    current: Option<usize>,
-    _marker: PhantomData<fn(&'brand ()) -> &'brand ()>,
+    head: Option<usize>,
+    tail: Option<usize>,
+    remaining: usize,
+    _phantom: PhantomData<(&'a Token, &'brand ())>,
 }
 
-impl<'a, 'brand, T> Iterator for BrandedDoublyLinkedListIter<'a, 'brand, T> {
+impl<'a, 'brand, T, Token> Iterator for BrandedDoublyLinkedListIter<'a, 'brand, T, Token>
+where
+    T: 'a,
+    Token: GhostBorrow<'brand>,
+{
     type Item = &'a T;
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        let idx = self.current?;
+        if self.remaining == 0 {
+            return None;
+        }
+        let idx = self.head?;
+        // Check occupancy (sanity check, though pool should be valid)
         if idx < self.view.storage.len() {
-            let word_idx = idx >> 6;
-            let bit_idx = idx & 63;
-            // Check occupancy
-            if (self.view.occupied[word_idx] & (1 << bit_idx)) != 0 {
-                unsafe {
-                    let node = &self.view.storage[idx].occupied;
-                    self.current = node.next;
-                    Some(&node.value)
-                }
-            } else {
-                None // Should not happen
+             unsafe {
+                let node = &self.view.storage[idx].occupied;
+                self.head = node.next;
+                self.remaining -= 1;
+                Some(&node.value)
+            }
+        } else {
+            None
+        }
+    }
+
+    #[inline(always)]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.remaining, Some(self.remaining))
+    }
+}
+
+impl<'a, 'brand, T, Token> DoubleEndedIterator for BrandedDoublyLinkedListIter<'a, 'brand, T, Token>
+where
+    T: 'a,
+    Token: GhostBorrow<'brand>,
+{
+    #[inline(always)]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.remaining == 0 {
+            return None;
+        }
+        let idx = self.tail?;
+        if idx < self.view.storage.len() {
+             unsafe {
+                let node = &self.view.storage[idx].occupied;
+                self.tail = node.prev;
+                self.remaining -= 1;
+                Some(&node.value)
             }
         } else {
             None
@@ -50,37 +88,96 @@ impl<'a, 'brand, T> Iterator for BrandedDoublyLinkedListIter<'a, 'brand, T> {
     }
 }
 
+impl<'a, 'brand, T, Token> std::iter::FusedIterator for BrandedDoublyLinkedListIter<'a, 'brand, T, Token>
+where
+    T: 'a,
+    Token: GhostBorrow<'brand>,
+{}
+
+impl<'a, 'brand, T, Token> ExactSizeIterator for BrandedDoublyLinkedListIter<'a, 'brand, T, Token>
+where
+    T: 'a,
+    Token: GhostBorrow<'brand>,
+{}
+
 /// Mutable iterator for BrandedDoublyLinkedList.
-pub struct BrandedDoublyLinkedListIterMut<'a, 'brand, T> {
+struct BrandedDoublyLinkedListIterMut<'a, 'brand, T, Token>
+where
+    Token: GhostBorrowMut<'brand>,
+{
     view: PoolViewMut<'a, ListNode<T>>,
-    current: Option<usize>,
-    _marker: PhantomData<fn(&'brand ()) -> &'brand ()>,
+    head: Option<usize>,
+    tail: Option<usize>,
+    remaining: usize,
+    _phantom: PhantomData<(&'a mut Token, &'brand ())>,
 }
 
-impl<'a, 'brand, T> Iterator for BrandedDoublyLinkedListIterMut<'a, 'brand, T> {
+impl<'a, 'brand, T, Token> Iterator for BrandedDoublyLinkedListIterMut<'a, 'brand, T, Token>
+where
+    T: 'a,
+    Token: GhostBorrowMut<'brand>,
+{
     type Item = &'a mut T;
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        let idx = self.current?;
+        if self.remaining == 0 {
+            return None;
+        }
+        let idx = self.head?;
         unsafe {
             if idx >= self.view.storage.len() {
                 return None;
             }
-            let word_idx = idx >> 6;
-            let bit_idx = idx & 63;
+            let ptr = self.view.storage.as_mut_ptr().add(idx);
+            let node = &mut (*ptr).occupied;
+            self.head = node.next;
+            self.remaining -= 1;
+            Some(&mut node.value)
+        }
+    }
 
-            if (self.view.occupied[word_idx] & (1 << bit_idx)) != 0 {
-                let ptr = self.view.storage.as_mut_ptr().add(idx);
-                let node = &mut (*ptr).occupied;
-                self.current = node.next;
-                Some(&mut node.value)
-            } else {
-                None
+    #[inline(always)]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.remaining, Some(self.remaining))
+    }
+}
+
+impl<'a, 'brand, T, Token> DoubleEndedIterator for BrandedDoublyLinkedListIterMut<'a, 'brand, T, Token>
+where
+    T: 'a,
+    Token: GhostBorrowMut<'brand>,
+{
+    #[inline(always)]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.remaining == 0 {
+            return None;
+        }
+        let idx = self.tail?;
+        unsafe {
+            if idx >= self.view.storage.len() {
+                return None;
             }
+            let ptr = self.view.storage.as_mut_ptr().add(idx);
+            let node = &mut (*ptr).occupied;
+            self.tail = node.prev;
+            self.remaining -= 1;
+            Some(&mut node.value)
         }
     }
 }
+
+impl<'a, 'brand, T, Token> std::iter::FusedIterator for BrandedDoublyLinkedListIterMut<'a, 'brand, T, Token>
+where
+    T: 'a,
+    Token: GhostBorrowMut<'brand>,
+{}
+
+impl<'a, 'brand, T, Token> ExactSizeIterator for BrandedDoublyLinkedListIterMut<'a, 'brand, T, Token>
+where
+    T: 'a,
+    Token: GhostBorrowMut<'brand>,
+{}
 
 /// A doubly linked list with token-gated access.
 pub struct BrandedDoublyLinkedList<'brand, T> {
@@ -113,12 +210,18 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
     }
 
     /// Clears the list, removing all elements.
-    pub fn clear(&mut self, token: &mut GhostToken<'brand>) {
+    pub fn clear<Token>(&mut self, token: &mut Token)
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         while self.pop_front(token).is_some() {}
     }
 
     /// Pushes an element to the front of the list.
-    pub fn push_front(&mut self, token: &mut GhostToken<'brand>, value: T) -> usize {
+    pub fn push_front<Token>(&mut self, token: &mut Token, value: T) -> usize
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         let node = ListNode {
             prev: None,
             next: self.head,
@@ -142,7 +245,10 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
     }
 
     /// Pushes an element to the back of the list.
-    pub fn push_back(&mut self, token: &mut GhostToken<'brand>, value: T) -> usize {
+    pub fn push_back<Token>(&mut self, token: &mut Token, value: T) -> usize
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         let node = ListNode {
             prev: self.tail,
             next: None,
@@ -166,7 +272,10 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
     }
 
     /// Pops an element from the front of the list.
-    pub fn pop_front(&mut self, token: &mut GhostToken<'brand>) -> Option<T> {
+    pub fn pop_front<Token>(&mut self, token: &mut Token) -> Option<T>
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         let head_idx = self.head?;
 
         // We use take to extract value and free the slot
@@ -188,7 +297,10 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
     }
 
     /// Pops an element from the back of the list.
-    pub fn pop_back(&mut self, token: &mut GhostToken<'brand>) -> Option<T> {
+    pub fn pop_back<Token>(&mut self, token: &mut Token) -> Option<T>
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         let tail_idx = self.tail?;
 
         let node = unsafe { self.pool.take(token, tail_idx) };
@@ -209,89 +321,116 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
     }
 
     /// Returns a reference to the front element.
-    pub fn front<'a>(&'a self, token: &'a GhostToken<'brand>) -> Option<&'a T> {
+    pub fn front<'a, Token>(&'a self, token: &'a Token) -> Option<&'a T>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         let head_idx = self.head?;
         let node = self.pool.get(token, head_idx)?;
         Some(&node.value)
     }
 
     /// Returns a reference to the back element.
-    pub fn back<'a>(&'a self, token: &'a GhostToken<'brand>) -> Option<&'a T> {
+    pub fn back<'a, Token>(&'a self, token: &'a Token) -> Option<&'a T>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         let tail_idx = self.tail?;
         let node = self.pool.get(token, tail_idx)?;
         Some(&node.value)
     }
 
     /// Returns a reference to the element at the given index.
-    pub fn get<'a>(&'a self, token: &'a GhostToken<'brand>, index: usize) -> Option<&'a T> {
+    pub fn get<'a, Token>(&'a self, token: &'a Token, index: usize) -> Option<&'a T>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         let node = self.pool.get(token, index)?;
         Some(&node.value)
     }
 
     /// Returns a mutable reference to the element at the given index.
-    pub fn get_mut<'a>(
+    pub fn get_mut<'a, Token>(
         &'a mut self,
-        token: &'a mut GhostToken<'brand>,
+        token: &'a mut Token,
         index: usize,
-    ) -> Option<&'a mut T> {
+    ) -> Option<&'a mut T>
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         let node = self.pool.get_mut(token, index)?;
         Some(&mut node.value)
     }
 
     /// Iterates over the list elements.
-    pub fn iter<'a>(
+    pub fn iter<'a, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
-    ) -> BrandedDoublyLinkedListIter<'a, 'brand, T> {
-        BrandedDoublyLinkedListIter {
+        token: &'a Token,
+    ) -> impl Iterator<Item = &'a T> + DoubleEndedIterator + ExactSizeIterator + std::iter::FusedIterator + 'a + use<'a, 'brand, T, Token>
+    where
+        Token: GhostBorrow<'brand>,
+    {
+        BrandedDoublyLinkedListIter::<_, Token> {
             view: self.pool.view(token),
-            current: self.head,
-            _marker: PhantomData,
+            head: self.head,
+            tail: self.tail,
+            remaining: self.len,
+            _phantom: PhantomData,
         }
     }
 
     /// Iterates over the list elements (mutable).
-    pub fn iter_mut<'a>(
+    pub fn iter_mut<'a, Token>(
         &'a self,
-        token: &'a mut GhostToken<'brand>,
-    ) -> BrandedDoublyLinkedListIterMut<'a, 'brand, T> {
-        BrandedDoublyLinkedListIterMut {
+        token: &'a mut Token,
+    ) -> impl Iterator<Item = &'a mut T> + DoubleEndedIterator + ExactSizeIterator + std::iter::FusedIterator + 'a + use<'a, 'brand, T, Token>
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
+        BrandedDoublyLinkedListIterMut::<_, Token> {
             view: self.pool.view_mut(token),
-            current: self.head,
-            _marker: PhantomData,
+            head: self.head,
+            tail: self.tail,
+            remaining: self.len,
+            _phantom: PhantomData,
         }
     }
 
-    /// Moves the node at `index` to the front of the list.
-    pub fn move_to_front(&mut self, token: &mut GhostToken<'brand>, index: usize) {
+    /// Moves an existing element to the front of the list.
+    pub fn move_to_front<Token>(&mut self, token: &mut Token, index: usize)
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         if self.head == Some(index) {
             return;
         }
 
-        let (prev_idx, next_idx) = {
-            if let Some(node) = self.pool.get(token, index) {
-                (node.prev, node.next)
-            } else {
-                return; // Invalid index
-            }
+        // Detach
+        let (prev, next) = {
+            let node = self
+                .pool
+                .get(token, index)
+                .expect("Index out of bounds or invalid");
+            (node.prev, node.next)
         };
 
-        // Detach
-        if let Some(prev) = prev_idx {
-            if let Some(node) = self.pool.get_mut(token, prev) {
-                node.next = next_idx;
-            }
-        }
-
-        if let Some(next) = next_idx {
-            if let Some(node) = self.pool.get_mut(token, next) {
-                node.prev = prev_idx;
+        if let Some(prev_idx) = prev {
+            if let Some(node) = self.pool.get_mut(token, prev_idx) {
+                node.next = next;
             }
         } else {
-            self.tail = prev_idx;
+            // It was head, but we checked that
         }
 
-        // Attach
+        if let Some(next_idx) = next {
+            if let Some(node) = self.pool.get_mut(token, next_idx) {
+                node.prev = prev;
+            }
+        } else {
+            self.tail = prev;
+        }
+
+        // Attach to front
         let old_head = self.head;
         if let Some(head_idx) = old_head {
             if let Some(node) = self.pool.get_mut(token, head_idx) {
@@ -299,47 +438,49 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
             }
         }
 
-        if let Some(node_mut) = self.pool.get_mut(token, index) {
-            node_mut.prev = None;
-            node_mut.next = old_head;
+        if let Some(node) = self.pool.get_mut(token, index) {
+            node.prev = None;
+            node.next = old_head;
         }
 
         self.head = Some(index);
-        if self.tail.is_none() {
-            self.tail = Some(index);
-        }
     }
 
-    /// Moves the node at `index` to the back of the list.
-    pub fn move_to_back(&mut self, token: &mut GhostToken<'brand>, index: usize) {
+    /// Moves an existing element to the back of the list.
+    pub fn move_to_back<Token>(&mut self, token: &mut Token, index: usize)
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         if self.tail == Some(index) {
             return;
         }
 
-        let (prev_idx, next_idx) = {
-            if let Some(node) = self.pool.get(token, index) {
-                (node.prev, node.next)
-            } else {
-                return; // Invalid index
-            }
+        // Detach
+        let (prev, next) = {
+            let node = self
+                .pool
+                .get(token, index)
+                .expect("Index out of bounds or invalid");
+            (node.prev, node.next)
         };
 
-        // Detach
-        if let Some(prev) = prev_idx {
-            if let Some(node) = self.pool.get_mut(token, prev) {
-                node.next = next_idx;
+        if let Some(prev_idx) = prev {
+            if let Some(node) = self.pool.get_mut(token, prev_idx) {
+                node.next = next;
             }
         } else {
-            self.head = next_idx;
+            self.head = next;
         }
 
-        if let Some(next) = next_idx {
-            if let Some(node) = self.pool.get_mut(token, next) {
-                node.prev = prev_idx;
+        if let Some(next_idx) = next {
+            if let Some(node) = self.pool.get_mut(token, next_idx) {
+                node.prev = prev;
             }
+        } else {
+            // It was tail, but we checked that
         }
 
-        // Attach
+        // Attach to back
         let old_tail = self.tail;
         if let Some(tail_idx) = old_tail {
             if let Some(node) = self.pool.get_mut(token, tail_idx) {
@@ -347,15 +488,12 @@ impl<'brand, T> BrandedDoublyLinkedList<'brand, T> {
             }
         }
 
-        if let Some(node_mut) = self.pool.get_mut(token, index) {
-            node_mut.next = None;
-            node_mut.prev = old_tail;
+        if let Some(node) = self.pool.get_mut(token, index) {
+            node.prev = old_tail;
+            node.next = None;
         }
 
         self.tail = Some(index);
-        if self.head.is_none() {
-            self.head = Some(index);
-        }
     }
 
     /// Creates a cursor at the front of the list.
@@ -414,23 +552,26 @@ impl<'brand, T> Drop for BrandedDoublyLinkedList<'brand, T> {
 }
 
 impl<'brand, T> ZeroCopyOps<'brand, T> for BrandedDoublyLinkedList<'brand, T> {
-    fn find_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<&'a T>
+    fn find_ref<'a, F, Token>(&'a self, token: &'a Token, f: F) -> Option<&'a T>
     where
         F: Fn(&T) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         self.iter(token).find(|&item| f(item))
     }
 
-    fn any_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    fn any_ref<F, Token>(&self, token: &Token, f: F) -> bool
     where
         F: Fn(&T) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         self.iter(token).any(|item| f(item))
     }
 
-    fn all_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    fn all_ref<F, Token>(&self, token: &Token, f: F) -> bool
     where
         F: Fn(&T) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         self.iter(token).all(|item| f(item))
     }
@@ -450,21 +591,30 @@ impl<'a, 'brand, T> CursorMut<'a, 'brand, T> {
     }
 
     /// Returns a reference to the current element.
-    pub fn current<'b>(&'b self, token: &'b GhostToken<'brand>) -> Option<&'b T> {
+    pub fn current<'b, Token>(&'b self, token: &'b Token) -> Option<&'b T>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         let idx = self.current?;
         let node = self.list.pool.get(token, idx)?;
         Some(&node.value)
     }
 
     /// Returns a mutable reference to the current element.
-    pub fn current_mut<'b>(&'b mut self, token: &'b mut GhostToken<'brand>) -> Option<&'b mut T> {
+    pub fn current_mut<'b, Token>(&'b mut self, token: &'b mut Token) -> Option<&'b mut T>
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         let idx = self.current?;
         let node = self.list.pool.get_mut(token, idx)?;
         Some(&mut node.value)
     }
 
     /// Moves the cursor to the next element.
-    pub fn move_next(&mut self, token: &GhostToken<'brand>) {
+    pub fn move_next<Token>(&mut self, token: &Token)
+    where
+        Token: GhostBorrow<'brand>,
+    {
         if let Some(curr_idx) = self.current {
             if let Some(node) = self.list.pool.get(token, curr_idx) {
                 self.current = node.next;
@@ -479,7 +629,10 @@ impl<'a, 'brand, T> CursorMut<'a, 'brand, T> {
     }
 
     /// Moves the cursor to the previous element.
-    pub fn move_prev(&mut self, token: &GhostToken<'brand>) {
+    pub fn move_prev<Token>(&mut self, token: &Token)
+    where
+        Token: GhostBorrow<'brand>,
+    {
         if let Some(curr_idx) = self.current {
             if let Some(node) = self.list.pool.get(token, curr_idx) {
                 self.current = node.prev;
@@ -494,7 +647,10 @@ impl<'a, 'brand, T> CursorMut<'a, 'brand, T> {
     }
 
     /// Inserts a new element after the current element.
-    pub fn insert_after(&mut self, token: &mut GhostToken<'brand>, value: T) -> usize {
+    pub fn insert_after<Token>(&mut self, token: &mut Token, value: T) -> usize
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         if let Some(curr_idx) = self.current {
             // Read next_idx
             let next_idx = self.list.pool.get(token, curr_idx).unwrap().next;
@@ -532,7 +688,10 @@ impl<'a, 'brand, T> CursorMut<'a, 'brand, T> {
     }
 
     /// Inserts a new element before the current element.
-    pub fn insert_before(&mut self, token: &mut GhostToken<'brand>, value: T) -> usize {
+    pub fn insert_before<Token>(&mut self, token: &mut Token, value: T) -> usize
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         if let Some(curr_idx) = self.current {
             // Read prev_idx
             let prev_idx = self.list.pool.get(token, curr_idx).unwrap().prev;
@@ -571,7 +730,10 @@ impl<'a, 'brand, T> CursorMut<'a, 'brand, T> {
     }
 
     /// Removes the current element. The cursor moves to the next element.
-    pub fn remove_current(&mut self, token: &mut GhostToken<'brand>) -> Option<T> {
+    pub fn remove_current<Token>(&mut self, token: &mut Token) -> Option<T>
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         let curr_idx = self.current?;
 
         let node = unsafe { self.list.pool.take(token, curr_idx) };

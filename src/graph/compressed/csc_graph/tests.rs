@@ -2,10 +2,11 @@
 
 use super::*;
 use crate::GhostToken;
+use crate::concurrency::worklist::{GhostChaseLevDeque, GhostTreiberStack};
 
 #[test]
 fn csc_graph_from_adjacency() {
-    GhostToken::new(|_token| {
+    GhostToken::new(|token| {
         // Create a simple graph: 0->1, 0->2, 1->2
         let adjacency = vec![
             vec![1, 2], // node 0
@@ -27,7 +28,7 @@ fn csc_graph_from_adjacency() {
 
 #[test]
 fn csc_graph_dfs_traversal() {
-    GhostToken::new(|_token| {
+    GhostToken::new(|token| {
         // Create a graph: 0->1->2, 0->2
         let adjacency = vec![
             vec![1, 2], // node 0
@@ -39,14 +40,14 @@ fn csc_graph_dfs_traversal() {
         let stack = GhostTreiberStack::new(10);
 
         // Incoming traversal: nodes that can reach `start` in the original graph.
-        assert_eq!(csc.dfs_reachable_count(0, &stack), 1);
-        assert_eq!(csc.dfs_reachable_count(2, &stack), 3);
+        assert_eq!(csc.dfs_reachable_count(&token, 0, &stack), 1);
+        assert_eq!(csc.dfs_reachable_count(&token, 2, &stack), 3);
     });
 }
 
 #[test]
 fn csc_graph_bfs_traversal() {
-    GhostToken::new(|_token| {
+    GhostToken::new(|token| {
         // Create a graph: 0->1->2, 0->2
         let adjacency = vec![
             vec![1, 2], // node 0
@@ -57,8 +58,8 @@ fn csc_graph_bfs_traversal() {
         let csc = GhostCscGraph::<1024>::from_adjacency(&adjacency);
         let deque = GhostChaseLevDeque::new(32);
 
-        assert_eq!(csc.bfs_reachable_count(0, &deque), 1);
-        assert_eq!(csc.bfs_reachable_count(2, &deque), 3);
+        assert_eq!(csc.bfs_reachable_count(&token, 0, &deque), 1);
+        assert_eq!(csc.bfs_reachable_count(&token, 2, &deque), 3);
     });
 }
 

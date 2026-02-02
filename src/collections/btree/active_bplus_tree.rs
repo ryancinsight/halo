@@ -1,18 +1,21 @@
 //! `ActiveBPlusTree` — a convenient wrapper for `BrandedBPlusTree`.
 
-use super::bplus_tree::{BrandedBPlusTree, Iter};
-use crate::GhostToken;
+use super::bplus_tree::BrandedBPlusTree;
+use crate::token::traits::GhostBorrowMut;
 
-pub struct ActiveBPlusTree<'a, 'brand, K, V> {
+pub struct ActiveBPlusTree<'a, 'brand, K, V, Token>
+where
+    Token: GhostBorrowMut<'brand>,
+{
     tree: &'a mut BrandedBPlusTree<'brand, K, V>,
-    token: &'a mut GhostToken<'brand>,
+    token: &'a mut Token,
 }
 
-impl<'a, 'brand, K, V> ActiveBPlusTree<'a, 'brand, K, V> {
-    pub fn new(
-        tree: &'a mut BrandedBPlusTree<'brand, K, V>,
-        token: &'a mut GhostToken<'brand>,
-    ) -> Self {
+impl<'a, 'brand, K, V, Token> ActiveBPlusTree<'a, 'brand, K, V, Token>
+where
+    Token: GhostBorrowMut<'brand>,
+{
+    pub fn new(tree: &'a mut BrandedBPlusTree<'brand, K, V>, token: &'a mut Token) -> Self {
         Self { tree, token }
     }
 
@@ -45,16 +48,28 @@ impl<'a, 'brand, K, V> ActiveBPlusTree<'a, 'brand, K, V> {
         self.tree.is_empty()
     }
 
-    pub fn iter<'b>(&'b self) -> Iter<'b, 'brand, K, V> {
+    pub fn iter<'b>(&'b self) -> impl Iterator<Item = (&'b K, &'b V)> + use<'b, 'brand, K, V, Token> {
         self.tree.iter(self.token)
     }
 }
 
-impl<'brand, K, V> BrandedBPlusTree<'brand, K, V> {
-    pub fn activate<'a>(
+pub trait ActivateBPlusTree<'brand, K, V> {
+    fn activate<'a, Token>(
         &'a mut self,
-        token: &'a mut GhostToken<'brand>,
-    ) -> ActiveBPlusTree<'a, 'brand, K, V> {
+        token: &'a mut Token,
+    ) -> ActiveBPlusTree<'a, 'brand, K, V, Token>
+    where
+        Token: GhostBorrowMut<'brand>;
+}
+
+impl<'brand, K, V> ActivateBPlusTree<'brand, K, V> for BrandedBPlusTree<'brand, K, V> {
+    fn activate<'a, Token>(
+        &'a mut self,
+        token: &'a mut Token,
+    ) -> ActiveBPlusTree<'a, 'brand, K, V, Token>
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         ActiveBPlusTree::new(self, token)
     }
 }

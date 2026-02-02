@@ -1,4 +1,4 @@
-use halo::allocator::HaloAllocator;
+use halo::alloc::HaloAllocator;
 use std::time::Instant;
 
 #[global_allocator]

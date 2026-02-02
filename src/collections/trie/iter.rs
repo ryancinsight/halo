@@ -2,23 +2,30 @@ use super::map::BrandedRadixTrieMap;
 use super::node::NodeSlot;
 use crate::alloc::BrandedRc;
 use crate::collections::BrandedVec;
+use crate::token::traits::GhostBorrow;
 use crate::GhostToken;
 use std::vec::Vec;
 
 /// Iterator over key-value pairs of `BrandedRadixTrieMap`.
 /// Yields `(BrandedRc<BrandedVec<u8>>, &V)`.
-pub struct Iter<'a, 'brand, K, V> {
+pub struct Iter<'a, 'brand, K, V, Token = GhostToken<'brand>>
+where
+    Token: GhostBorrow<'brand>,
+{
     map: &'a BrandedRadixTrieMap<'brand, K, V>,
-    token: &'a GhostToken<'brand>,
+    token: &'a Token,
     // Stack of (node_idx, child_pos_index)
     stack: Vec<(usize, usize)>,
     // Current constructed key
     key_buf: BrandedRc<'brand, BrandedVec<'brand, u8>>,
 }
 
-impl<'a, 'brand, K, V> Iter<'a, 'brand, K, V> {
+impl<'a, 'brand, K, V, Token> Iter<'a, 'brand, K, V, Token>
+where
+    Token: GhostBorrow<'brand>,
+{
     /// Creates a new iterator over the map.
-    pub fn new(map: &'a BrandedRadixTrieMap<'brand, K, V>, token: &'a GhostToken<'brand>) -> Self {
+    pub fn new(map: &'a BrandedRadixTrieMap<'brand, K, V>, token: &'a Token) -> Self {
         let mut stack = Vec::new();
         let mut key_buf = BrandedVec::new();
 
@@ -38,7 +45,10 @@ impl<'a, 'brand, K, V> Iter<'a, 'brand, K, V> {
     }
 }
 
-impl<'a, 'brand, K, V> Iterator for Iter<'a, 'brand, K, V> {
+impl<'a, 'brand, K, V, Token> Iterator for Iter<'a, 'brand, K, V, Token>
+where
+    Token: GhostBorrow<'brand>,
+{
     type Item = (BrandedRc<'brand, BrandedVec<'brand, u8>>, &'a V);
 
     fn next(&mut self) -> Option<Self::Item> {

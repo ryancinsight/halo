@@ -14,9 +14,9 @@
 //!
 //! This is exactly the separation of *permissions* (token) from *data* (cells).
 
-use crate::{GhostCell, GhostToken};
-use core::slice;
-use core::mem::MaybeUninit;
+use crate::GhostCell;
+use crate::token::traits::{GhostBorrow, GhostBorrowMut};
+use std::mem::MaybeUninit;
 
 /// Compile-time assertion types for const generics bounds checking
 pub struct Assert<const COND: bool>;
@@ -153,27 +153,42 @@ impl<'brand, T> BrandedVec<'brand, T> {
     }
 
     /// Retains only the elements specified by the predicate.
-    pub fn retain<F>(&mut self, token: &mut GhostToken<'brand>, mut f: F)
+    pub fn retain<F, Token>(&mut self, token: &mut Token, mut f: F)
     where
         F: FnMut(&mut T) -> bool,
+        Token: crate::token::traits::GhostBorrowMut<'brand>,
     {
         self.inner.retain(|c| f(c.borrow_mut(token)));
     }
 
     /// Returns a token-gated shared reference to element `idx`, if in bounds.
     #[inline(always)]
-    pub fn get<'a>(&'a self, token: &'a GhostToken<'brand>, idx: usize) -> Option<&'a T> {
-        self.inner.get(idx).map(|c| c.borrow(token))
+    pub fn get<'a, Token>(&'a self, token: &'a Token, idx: usize) -> Option<&'a T>
+    where
+        Token: crate::token::traits::GhostBorrow<'brand>,
+    {
+        if idx < self.inner.len() {
+            unsafe { Some(self.inner.get_unchecked(idx).borrow(token)) }
+        } else {
+            None
+        }
     }
 
     /// Returns a token-gated exclusive reference to element `idx`, if in bounds.
     #[inline(always)]
-    pub fn get_mut<'a>(
+    pub fn get_mut<'a, Token>(
         &'a self,
-        token: &'a mut GhostToken<'brand>,
+        token: &'a mut Token,
         idx: usize,
-    ) -> Option<&'a mut T> {
-        self.inner.get(idx).map(|c| c.borrow_mut(token))
+    ) -> Option<&'a mut T>
+    where
+        Token: crate::token::traits::GhostBorrowMut<'brand>,
+    {
+        if idx < self.inner.len() {
+            unsafe { Some(self.inner.get_unchecked(idx).borrow_mut(token)) }
+        } else {
+            None
+        }
     }
 
     /// Returns a token-gated shared reference to element `idx` without bounds checking.
@@ -181,7 +196,10 @@ impl<'brand, T> BrandedVec<'brand, T> {
     /// # Safety
     /// Caller must ensure `idx < self.len()`.
     #[inline(always)]
-    pub unsafe fn get_unchecked<'a>(&'a self, token: &'a GhostToken<'brand>, idx: usize) -> &'a T {
+    pub unsafe fn get_unchecked<'a, Token>(&'a self, token: &'a Token, idx: usize) -> &'a T
+    where
+        Token: GhostBorrow<'brand>,
+    {
         self.inner.get_unchecked(idx).borrow(token)
     }
 
@@ -190,11 +208,14 @@ impl<'brand, T> BrandedVec<'brand, T> {
     /// # Safety
     /// Caller must ensure `idx < self.len()`.
     #[inline(always)]
-    pub unsafe fn get_unchecked_mut<'a>(
+    pub unsafe fn get_unchecked_mut<'a, Token>(
         &'a self,
-        token: &'a mut GhostToken<'brand>,
+        token: &'a mut Token,
         idx: usize,
-    ) -> &'a mut T {
+    ) -> &'a mut T
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         self.inner.get_unchecked(idx).borrow_mut(token)
     }
 
@@ -203,7 +224,10 @@ impl<'brand, T> BrandedVec<'brand, T> {
     /// # Panics
     /// Panics if `idx` is out of bounds.
     #[inline(always)]
-    pub fn borrow<'a>(&'a self, token: &'a GhostToken<'brand>, idx: usize) -> &'a T {
+    pub fn borrow<'a, Token>(&'a self, token: &'a Token, idx: usize) -> &'a T
+    where
+        Token: GhostBorrow<'brand>,
+    {
         self.get(token, idx).expect("index out of bounds")
     }
 
@@ -212,7 +236,10 @@ impl<'brand, T> BrandedVec<'brand, T> {
     /// # Panics
     /// Panics if `idx` is out of bounds.
     #[inline(always)]
-    pub fn borrow_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>, idx: usize) -> &'a mut T {
+    pub fn borrow_mut<'a, Token>(&'a self, token: &'a mut Token, idx: usize) -> &'a mut T
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         self.get_mut(token, idx).expect("index out of bounds")
     }
 
@@ -246,7 +273,10 @@ impl<'brand, T> BrandedVec<'brand, T> {
     /// 2. `UnsafeCell<T>` has the same memory layout as `T`.
     /// 3. The token guarantees we have access permission.
     #[inline(always)]
-    pub fn as_slice<'a>(&'a self, _token: &'a GhostToken<'brand>) -> &'a [T] {
+    pub fn as_slice<'a, Token>(&'a self, _token: &'a Token) -> &'a [T]
+    where
+        Token: GhostBorrow<'brand>,
+    {
         // SAFETY: We have shared token access, so reading T is safe.
         // We obtain a pointer to elements and create a slice.
         unsafe {
@@ -267,7 +297,10 @@ impl<'brand, T> BrandedVec<'brand, T> {
     /// 3. We hold `&self`, guaranteeing the vector buffer remains valid (no reallocation).
     /// 4. The returned lifetime is tied to `&mut GhostToken`, ensuring exclusivity is maintained.
     #[inline(always)]
-    pub fn as_mut_slice<'a>(&'a self, _token: &'a mut GhostToken<'brand>) -> &'a mut [T] {
+    pub fn as_mut_slice<'a, Token>(&'a self, _token: &'a mut Token) -> &'a mut [T]
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         unsafe {
             let ptr = self.inner.as_ptr() as *mut T;
             std::slice::from_raw_parts_mut(ptr, self.inner.len())
@@ -298,7 +331,17 @@ impl<'brand, T> BrandedVec<'brand, T> {
     /// Returns direct references to elements without indirection.
     ///
     /// Optimized to use slice iterator, bypassing per-element `GhostCell` borrowing overhead.
-    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> slice::Iter<'a, T> {
+    pub fn iter<'a, Token>(
+        &'a self,
+        token: &'a Token,
+    ) -> impl Iterator<Item = &'a T>
+           + ExactSizeIterator
+           + DoubleEndedIterator
+           + std::iter::FusedIterator
+           + use<'a, 'brand, T, Token>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         self.as_slice(token).iter()
     }
 
@@ -307,7 +350,10 @@ impl<'brand, T> BrandedVec<'brand, T> {
     /// This is the canonical safe pattern for *sequential* exclusive iteration:
     /// each `&mut T` is scoped to one callback invocation, which preserves the
     /// token linearity invariant without requiring an `Iterator<Item = &mut T>`.
-    pub fn for_each_mut(&self, token: &mut GhostToken<'brand>, mut f: impl FnMut(&mut T)) {
+    pub fn for_each_mut<Token>(&self, token: &mut Token, mut f: impl FnMut(&mut T))
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         self.inner.iter().for_each(|cell| {
             f(cell.borrow_mut(token));
         });
@@ -324,81 +370,90 @@ impl<'brand, T> BrandedVec<'brand, T> {
 
     /// Zero-copy filter with fused iterator operations.
     /// Returns an iterator that yields references to elements matching the predicate.
-    pub fn filter_ref<'a, F>(
+    pub fn filter_ref<'a, F, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
+        token: &'a Token,
         f: F,
-    ) -> impl Iterator<Item = &'a T> + 'a
+    ) -> impl Iterator<Item = &'a T> + 'a + use<'a, 'brand, F, Token, T>
     where
         F: Fn(&T) -> bool + 'a,
+        Token: GhostBorrow<'brand>,
     {
         self.iter(token).filter(move |item| f(*item))
     }
 
     /// Zero-copy find operation - returns reference without copying.
     #[inline(always)]
-    pub fn find_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<&'a T>
+    pub fn find_ref<'a, F, Token>(&'a self, token: &'a Token, f: F) -> Option<&'a T>
     where
         F: Fn(&T) -> bool,
+        Token: GhostBorrow<'brand>,
     {
         self.iter(token).find(move |item| f(item))
     }
 
     /// Zero-copy position finder with fused operations.
     #[inline(always)]
-    pub fn position_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> Option<usize>
+    pub fn position_ref<F, Token>(&self, token: &Token, f: F) -> Option<usize>
     where
         F: Fn(&T) -> bool,
+        Token: GhostBorrow<'brand>,
     {
         self.iter(token).position(move |item| f(item))
     }
 
     /// Zero-cost fold operation with iterator fusion.
-    pub fn fold_ref<B, F>(&self, token: &GhostToken<'brand>, init: B, f: F) -> B
+    pub fn fold_ref<B, F, Token>(&self, token: &Token, init: B, f: F) -> B
     where
         F: FnMut(B, &T) -> B,
+        Token: GhostBorrow<'brand>,
     {
         self.iter(token).fold(init, f)
     }
 
     /// Zero-cost any/all operations with short-circuiting.
     #[inline(always)]
-    pub fn any_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    pub fn any_ref<F, Token>(&self, token: &Token, f: F) -> bool
     where
         F: Fn(&T) -> bool,
+        Token: GhostBorrow<'brand>,
     {
         self.iter(token).any(move |item| f(item))
     }
 
     #[inline(always)]
-    pub fn all_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    pub fn all_ref<F, Token>(&self, token: &Token, f: F) -> bool
     where
         F: Fn(&T) -> bool,
+        Token: GhostBorrow<'brand>,
     {
         self.iter(token).all(move |item| f(item))
     }
 
     /// Zero-cost count operation.
     #[inline(always)]
-    pub fn count_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> usize
+    pub fn count_ref<F, Token>(&self, token: &Token, f: F) -> usize
     where
         F: Fn(&T) -> bool,
+        Token: GhostBorrow<'brand>,
     {
         self.iter(token).filter(move |item| f(item)).count()
     }
 
     /// Zero-cost min_by operation with custom comparator.
-    pub fn min_by_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<&'a T>
+    pub fn min_by_ref<'a, F, Token>(&'a self, token: &'a Token, f: F) -> Option<&'a T>
     where
         F: Fn(&T, &T) -> std::cmp::Ordering,
+        Token: GhostBorrow<'brand>,
     {
         self.iter(token).min_by(|a, b| f(a, b))
     }
 
     /// Zero-cost max_by operation with custom comparator.
-    pub fn max_by_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<&'a T>
+    pub fn max_by_ref<'a, F, Token>(&'a self, token: &'a Token, f: F) -> Option<&'a T>
     where
         F: Fn(&T, &T) -> std::cmp::Ordering,
+        Token: GhostBorrow<'brand>,
     {
         self.iter(token).max_by(|a, b| f(a, b))
     }
@@ -417,9 +472,10 @@ impl<'brand, T> BrandedVec<'brand, T> {
     /// This enables deep copying of the vector's contents when T is Clone.
     /// This is necessary because `BrandedVec` cannot implement `Clone` directly
     /// as it requires a token to read the elements.
-    pub fn clone_with_token(&self, token: &GhostToken<'brand>) -> Self
+    pub fn clone_with_token<Token>(&self, token: &Token) -> Self
     where
         T: Clone,
+        Token: GhostBorrow<'brand>,
     {
         let new_inner = self
             .inner
@@ -444,25 +500,28 @@ impl<'brand, T> crate::collections::BrandedCollection<'brand> for BrandedVec<'br
 
 impl<'brand, T> crate::collections::ZeroCopyOps<'brand, T> for BrandedVec<'brand, T> {
     #[inline(always)]
-    fn find_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<&'a T>
+    fn find_ref<'a, F, Token>(&'a self, token: &'a Token, f: F) -> Option<&'a T>
     where
         F: Fn(&T) -> bool,
+        Token: GhostBorrow<'brand>,
     {
         self.iter(token).find(move |item| f(item))
     }
 
     #[inline(always)]
-    fn any_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    fn any_ref<F, Token>(&self, token: &Token, f: F) -> bool
     where
         F: Fn(&T) -> bool,
+        Token: GhostBorrow<'brand>,
     {
         self.iter(token).any(move |item| f(item))
     }
 
     #[inline(always)]
-    fn all_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    fn all_ref<F, Token>(&self, token: &Token, f: F) -> bool
     where
         F: Fn(&T) -> bool,
+        Token: GhostBorrow<'brand>,
     {
         self.iter(token).all(move |item| f(item))
     }
@@ -526,10 +585,13 @@ impl<'brand, T, const CAPACITY: usize> BrandedArray<'brand, T, CAPACITY> {
     /// Compile-time bounds-checked get operation.
     /// Uses const generics to ensure bounds checking at compile time where possible.
     #[inline(always)]
-    pub fn get_const<'a, const IDX: usize>(
+    pub fn get_const<'a, const IDX: usize, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
-    ) -> Option<&'a T> {
+        token: &'a Token,
+    ) -> Option<&'a T>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         if IDX < self.len && IDX < CAPACITY {
             // Safety: We verified IDX < len, so the element is initialized
             Some(unsafe { self.inner[IDX].assume_init_ref() }.borrow(token))
@@ -540,10 +602,13 @@ impl<'brand, T, const CAPACITY: usize> BrandedArray<'brand, T, CAPACITY> {
 
     /// SIMD-friendly iteration with compile-time bounds.
     /// This method is optimized for SIMD operations on fixed-size arrays.
-    pub fn iter_simd<'a>(
+    pub fn iter_simd<'a, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
-    ) -> impl Iterator<Item = &'a T> + 'a + use<'a, 'brand, T, CAPACITY> {
+        token: &'a Token,
+    ) -> impl Iterator<Item = &'a T> + 'a + use<'a, 'brand, T, CAPACITY, Token>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         self.inner
             .iter()
             .take(self.len)
@@ -606,7 +671,10 @@ impl<'brand, T, const CAPACITY: usize> BrandedArray<'brand, T, CAPACITY> {
     }
 
     /// Returns a token-gated shared reference to element `idx`, if in bounds.
-    pub fn get<'a>(&'a self, token: &'a GhostToken<'brand>, idx: usize) -> Option<&'a T> {
+    pub fn get<'a, Token>(&'a self, token: &'a Token, idx: usize) -> Option<&'a T>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         if idx < self.len {
             // Safety: idx < len ensures initialization
             Some(unsafe { self.inner[idx].assume_init_ref() }.borrow(token))
@@ -616,11 +684,14 @@ impl<'brand, T, const CAPACITY: usize> BrandedArray<'brand, T, CAPACITY> {
     }
 
     /// Returns a token-gated exclusive reference to element `idx`, if in bounds.
-    pub fn get_mut<'a>(
+    pub fn get_mut<'a, Token>(
         &'a self,
-        token: &'a mut GhostToken<'brand>,
+        token: &'a mut Token,
         idx: usize,
-    ) -> Option<&'a mut T> {
+    ) -> Option<&'a mut T>
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         if idx < self.len {
             // Safety: idx < len ensures initialization
             Some(unsafe { self.inner[idx].assume_init_ref() }.borrow_mut(token))
@@ -634,7 +705,10 @@ impl<'brand, T, const CAPACITY: usize> BrandedArray<'brand, T, CAPACITY> {
     /// # Panics
     /// Panics if `idx` is out of bounds.
     #[inline(always)]
-    pub fn borrow<'a>(&'a self, token: &'a GhostToken<'brand>, idx: usize) -> &'a T {
+    pub fn borrow<'a, Token>(&'a self, token: &'a Token, idx: usize) -> &'a T
+    where
+        Token: GhostBorrow<'brand>,
+    {
         assert!(
             idx < self.len,
             "index {} out of bounds for BrandedArray of len {}",
@@ -649,7 +723,10 @@ impl<'brand, T, const CAPACITY: usize> BrandedArray<'brand, T, CAPACITY> {
     /// # Panics
     /// Panics if `idx` is out of bounds.
     #[inline(always)]
-    pub fn borrow_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>, idx: usize) -> &'a mut T {
+    pub fn borrow_mut<'a, Token>(&'a self, token: &'a mut Token, idx: usize) -> &'a mut T
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         assert!(
             idx < self.len,
             "index {} out of bounds for BrandedArray of len {}",
@@ -661,7 +738,10 @@ impl<'brand, T, const CAPACITY: usize> BrandedArray<'brand, T, CAPACITY> {
 
     /// Returns a slice of the underlying elements.
     #[inline(always)]
-    pub fn as_slice<'a>(&'a self, _token: &'a GhostToken<'brand>) -> &'a [T] {
+    pub fn as_slice<'a, Token>(&'a self, _token: &'a Token) -> &'a [T]
+    where
+        Token: GhostBorrow<'brand>,
+    {
         unsafe {
             // Cast *const MaybeUninit<GhostCell<T>> to *const T is valid because layouts match
             let ptr = self.inner.as_ptr() as *const T;
@@ -671,7 +751,10 @@ impl<'brand, T, const CAPACITY: usize> BrandedArray<'brand, T, CAPACITY> {
 
     /// Returns a mutable slice of the underlying elements.
     #[inline(always)]
-    pub fn as_mut_slice<'a>(&'a self, _token: &'a mut GhostToken<'brand>) -> &'a mut [T] {
+    pub fn as_mut_slice<'a, Token>(&'a self, _token: &'a mut Token) -> &'a mut [T]
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         unsafe {
             // Cast *const MaybeUninit<GhostCell<T>> to *mut T is valid because layouts match
             // We have exclusive access to the token, which grants exclusive access to the cells
@@ -681,20 +764,26 @@ impl<'brand, T, const CAPACITY: usize> BrandedArray<'brand, T, CAPACITY> {
     }
 
     /// Iterates over all elements by shared reference.
-    pub fn iter<'a>(
+    pub fn iter<'a, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
-    ) -> impl Iterator<Item = &'a T> + 'a + use<'a, 'brand, T, CAPACITY> {
+        token: &'a Token,
+    ) -> impl Iterator<Item = &'a T> + 'a + use<'a, 'brand, T, CAPACITY, Token>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         self.inner[..self.len]
             .iter()
-            .map(|cell| unsafe { cell.assume_init_ref() }.borrow(token))
+            .map(move |cell| unsafe { cell.assume_init_ref() }.borrow(token))
     }
 
     /// Applies `f` to each element by exclusive reference.
     ///
     /// This is the canonical safe pattern for *sequential* exclusive iteration:
     /// each `&mut T` is scoped to one callback invocation, preserving token linearity.
-    pub fn for_each_mut(&self, token: &mut GhostToken<'brand>, mut f: impl FnMut(&mut T)) {
+    pub fn for_each_mut<Token>(&self, token: &mut Token, mut f: impl FnMut(&mut T))
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         self.inner[..self.len].iter().for_each(|cell| {
             f(unsafe { cell.assume_init_ref() }.borrow_mut(token));
         });
@@ -859,7 +948,7 @@ mod tests {
             }
 
             let sum: i32 = v.iter(&token).copied().sum();
-            assert_eq!(sum, (0..10).sum());
+            assert_eq!(sum, (0..10).sum::<i32>());
 
             v.for_each_mut(&mut token, |x| *x *= 2);
             let doubled: Vec<i32> = v.iter(&token).copied().collect();

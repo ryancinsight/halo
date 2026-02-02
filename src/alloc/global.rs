@@ -12,14 +12,12 @@
 //! deallocation after the scope (which is generally not true for branded allocators).
 
 use crate::alloc::GhostAlloc;
+use crate::concurrency::current_thread_hash;
 use crate::GhostToken;
 use core::alloc::{GlobalAlloc, Layout};
 use core::cell::Cell;
 use core::ptr::NonNull;
 use std::alloc::System;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-use std::thread;
 
 /// A wrapper that dispatches `GlobalAlloc` calls to a thread-local `GhostAlloc`.
 ///
@@ -142,9 +140,7 @@ where
 {
     // Compute the shard hint once for this scope.
     // This allows the allocator to skip internal TLS/hashing operations.
-    let mut hasher = DefaultHasher::new();
-    thread::current().id().hash(&mut hasher);
-    let shard_hint = hasher.finish() as usize;
+    let shard_hint = current_thread_hash();
 
     let adapter = ScopedAdapter {
         allocator,

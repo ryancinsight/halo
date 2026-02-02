@@ -5,6 +5,7 @@ use core::sync::atomic::Ordering;
 use crate::{
     concurrency::worklist::{GhostChaseLevDeque, GhostTreiberStack},
     graph::compressed::csc_graph::GhostCscGraph,
+    GhostToken,
 };
 
 impl<'brand, const EDGE_CHUNK: usize> GhostCscGraph<'brand, EDGE_CHUNK> {
@@ -12,7 +13,12 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCscGraph<'brand, EDGE_CHUNK> {
     ///
     /// Uses a work-stealing stack for load balancing across threads.
     /// Returns the number of reachable nodes.
-    pub fn dfs_reachable_count(&self, start: usize, stack: &GhostTreiberStack<'brand>) -> usize {
+    pub fn dfs_reachable_count(
+        &self,
+        token: &GhostToken<'brand>,
+        start: usize,
+        stack: &GhostTreiberStack<'brand>,
+    ) -> usize {
         assert!(start < self.node_count(), "start {start} out of bounds");
 
         // Reset visited flags
@@ -20,15 +26,15 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCscGraph<'brand, EDGE_CHUNK> {
 
         // Mark start as visited
         debug_assert!(self.visited.try_visit(start, Ordering::Relaxed));
-        stack.push(start);
+        stack.push(token, start);
 
         let mut count = 1;
 
-        while let Some(node) = stack.pop() {
+        while let Some(node) = stack.pop(token) {
             // Visit all incoming neighbors (transpose traversal)
             for neighbor in self.in_neighbors(node) {
                 if self.visited.try_visit(neighbor, Ordering::Relaxed) {
-                    stack.push(neighbor);
+                    stack.push(token, neighbor);
                     count += 1;
                 }
             }
@@ -41,7 +47,12 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCscGraph<'brand, EDGE_CHUNK> {
     ///
     /// Uses a work-stealing deque for load balancing across threads.
     /// Returns the number of reachable nodes.
-    pub fn bfs_reachable_count(&self, start: usize, deque: &GhostChaseLevDeque<'brand>) -> usize {
+    pub fn bfs_reachable_count(
+        &self,
+        token: &GhostToken<'brand>,
+        start: usize,
+        deque: &GhostChaseLevDeque<'brand>,
+    ) -> usize {
         assert!(start < self.node_count(), "start {start} out of bounds");
 
         // Reset visited flags
@@ -49,15 +60,16 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCscGraph<'brand, EDGE_CHUNK> {
 
         // Mark start as visited
         debug_assert!(self.visited.try_visit(start, Ordering::Relaxed));
-        assert!(deque.push_bottom(start), "deque capacity too small");
+        assert!(deque.push_bottom(token, start), "deque capacity too small");
+        let steal_token = token.split_immutable().0;
 
         let mut count = 1;
 
-        while let Some(node) = deque.steal() {
+        while let Some(node) = deque.steal(&steal_token) {
             // Visit all incoming neighbors (transpose traversal)
             for neighbor in self.in_neighbors(node) {
                 if self.visited.try_visit(neighbor, Ordering::Relaxed) {
-                    assert!(deque.push_bottom(neighbor), "deque capacity too small");
+                    assert!(deque.push_bottom(token, neighbor), "deque capacity too small");
                     count += 1;
                 }
             }
@@ -69,7 +81,12 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCscGraph<'brand, EDGE_CHUNK> {
     /// Parallel reachable count following **incoming** edges.
     ///
     /// This counts how many vertices can reach `start` in the original graph.
-    pub fn parallel_reachable_count_incoming(&self, start: usize, threads: usize) -> usize {
+    pub fn parallel_reachable_count_incoming(
+        &self,
+        token: &GhostToken<'brand>,
+        start: usize,
+        threads: usize,
+    ) -> usize {
         use core::sync::atomic::AtomicUsize;
         assert!(threads != 0, "threads must be > 0");
         assert!(start < self.node_count(), "start {start} out of bounds");
@@ -77,17 +94,18 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCscGraph<'brand, EDGE_CHUNK> {
         self.reset_visited();
         let stack = GhostTreiberStack::new(self.node_count());
         debug_assert!(self.visited.try_visit(start, Ordering::Relaxed));
-        stack.push(start);
+        stack.push(token, start);
 
         let count = AtomicUsize::new(0);
         std::thread::scope(|scope| {
             for _ in 0..threads {
+                let token = token;
                 scope.spawn(|| {
-                    while let Some(u) = stack.pop() {
+                    while let Some(u) = stack.pop(token) {
                         count.fetch_add(1, Ordering::Relaxed);
                         for p in self.in_neighbors(u) {
                             if self.visited.try_visit(p, Ordering::AcqRel) {
-                                stack.push(p);
+                                stack.push(token, p);
                             }
                         }
                     }

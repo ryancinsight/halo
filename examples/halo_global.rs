@@ -1,4 +1,4 @@
-use halo::allocator::HaloAllocator;
+use halo::alloc::HaloAllocator;
 
 #[global_allocator]
 static ALLOC: HaloAllocator = HaloAllocator;

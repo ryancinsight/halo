@@ -6,6 +6,7 @@ use crate::{
     concurrency::atomic::GhostAtomicBitset,
     concurrency::worklist::{GhostChaseLevDeque, GhostTreiberStack},
     graph::compressed::csr_graph::GhostCsrGraph,
+    GhostToken,
 };
 
 impl<'brand, const EDGE_CHUNK: usize> GhostCsrGraph<'brand, EDGE_CHUNK> {
@@ -15,6 +16,7 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCsrGraph<'brand, EDGE_CHUNK> {
     /// more memory-efficient than a per-node `AtomicBool`.
     pub fn parallel_reachable_count_batched_with_stack_bitset(
         &self,
+        token: &GhostToken<'brand>,
         start: usize,
         threads: usize,
         stack: &GhostTreiberStack<'brand>,
@@ -30,12 +32,12 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCsrGraph<'brand, EDGE_CHUNK> {
         );
 
         visited.clear_all();
-        stack.clear();
+        stack.clear(token);
 
         let count = AtomicUsize::new(0);
 
         if visited.test_and_set(start, Ordering::Relaxed) {
-            stack.push(start);
+            stack.push(token, start);
         } else {
             return 0;
         }
@@ -56,6 +58,7 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCsrGraph<'brand, EDGE_CHUNK> {
 
         std::thread::scope(|scope| {
             for _ in 0..threads {
+                let token = token;
                 scope.spawn(|| {
                     let mut local = Vec::<usize>::with_capacity(batch);
                     // Per-node temporary buffers. Reused across iterations to avoid allocations.
@@ -63,7 +66,7 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCsrGraph<'brand, EDGE_CHUNK> {
                     // along with the index into `words` that it belongs to.
                     let mut words: Vec<WordEntry> = Vec::with_capacity(16);
                     let mut cands: Vec<Cand> = Vec::with_capacity(64);
-                    while let Some(u) = stack.pop() {
+                    while let Some(u) = stack.pop(token) {
                         count.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
                         let start_i = self.offsets[u];
                         let end_i = self.offsets[u + 1];
@@ -121,13 +124,13 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCsrGraph<'brand, EDGE_CHUNK> {
                             if (words[c.word_idx].prev & c.mask) == 0 {
                                 local.push(c.v);
                                 if local.len() == batch {
-                                    stack.push_batch(&local);
+                                    stack.push_batch(token, &local);
                                     local.clear();
                                 }
                             }
                         }
                         if !local.is_empty() {
-                            stack.push_batch(&local);
+                            stack.push_batch(token, &local);
                             local.clear();
                         }
                         words.clear();
@@ -141,19 +144,24 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCsrGraph<'brand, EDGE_CHUNK> {
     }
 
     /// Concurrent DFS traversal.
-    pub fn dfs_reachable_count(&self, start: usize, stack: &GhostTreiberStack<'brand>) -> usize {
+    pub fn dfs_reachable_count(
+        &self,
+        token: &GhostToken<'brand>,
+        start: usize,
+        stack: &GhostTreiberStack<'brand>,
+    ) -> usize {
         assert!(start < self.node_count(), "start {start} out of bounds");
 
         self.reset_visited();
         debug_assert!(self.try_visit(start));
-        stack.push(start);
+        stack.push(token, start);
 
         let mut count = 1;
 
-        while let Some(node) = stack.pop() {
+        while let Some(node) = stack.pop(token) {
             for neighbor in self.neighbors(node) {
                 if self.try_visit(neighbor) {
-                    stack.push(neighbor);
+                    stack.push(token, neighbor);
                     count += 1;
                 }
             }
@@ -163,19 +171,25 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCsrGraph<'brand, EDGE_CHUNK> {
     }
 
     /// Concurrent BFS traversal.
-    pub fn bfs_reachable_count(&self, start: usize, deque: &GhostChaseLevDeque<'brand>) -> usize {
+    pub fn bfs_reachable_count(
+        &self,
+        token: &GhostToken<'brand>,
+        start: usize,
+        deque: &GhostChaseLevDeque<'brand>,
+    ) -> usize {
         assert!(start < self.node_count(), "start {start} out of bounds");
 
         self.reset_visited();
         debug_assert!(self.try_visit(start));
-        assert!(deque.push_bottom(start), "deque capacity too small");
+        assert!(deque.push_bottom(token, start), "deque capacity too small");
+        let steal_token = token.split_immutable().0;
 
         let mut count = 1;
 
-        while let Some(node) = deque.steal() {
+        while let Some(node) = deque.steal(&steal_token) {
             for neighbor in self.neighbors(node) {
                 if self.try_visit(neighbor) {
-                    assert!(deque.push_bottom(neighbor), "deque capacity too small");
+                    assert!(deque.push_bottom(token, neighbor), "deque capacity too small");
                     count += 1;
                 }
             }
@@ -387,6 +401,7 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCsrGraph<'brand, EDGE_CHUNK> {
     /// for zero-copy reuse across runs.
     pub fn parallel_reachable_count_workstealing_with_deques(
         &self,
+        token: &GhostToken<'brand>,
         start: usize,
         deques: &[GhostChaseLevDeque<'brand>],
     ) -> usize {
@@ -398,7 +413,7 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCsrGraph<'brand, EDGE_CHUNK> {
         let count = AtomicUsize::new(0);
 
         if self.try_visit(start) {
-            assert!(deques[0].push_bottom(start), "deque capacity too small");
+            assert!(deques[0].push_bottom(token, start), "deque capacity too small");
             outstanding.store(1, core::sync::atomic::Ordering::Relaxed);
         } else {
             return 0;
@@ -407,15 +422,18 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCsrGraph<'brand, EDGE_CHUNK> {
         std::thread::scope(|scope| {
             let outstanding = &outstanding;
             let count = &count;
+            let steal_token = token.split_immutable().0;
             for tid in 0..threads {
+                let token = token;
+                let steal_token = steal_token;
                 scope.spawn(move || {
                     let me = &deques[tid];
                     loop {
-                        let task = me.pop_bottom().or_else(|| {
+                        let task = me.pop_bottom(token).or_else(|| {
                             // steal round-robin
                             for k in 1..threads {
                                 let victim = &deques[(tid + k) % threads];
-                                if let Some(x) = victim.steal() {
+                                if let Some(x) = victim.steal(&steal_token) {
                                     return Some(x);
                                 }
                             }
@@ -442,7 +460,7 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCsrGraph<'brand, EDGE_CHUNK> {
                             if unsafe { self.try_visit_unchecked(v) } {
                                 // Account for new work first, then push.
                                 outstanding.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
-                                let ok = me.push_bottom(v);
+                                let ok = me.push_bottom(token, v);
                                 assert!(ok, "deque capacity too small");
                             }
                         }
@@ -457,11 +475,16 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCsrGraph<'brand, EDGE_CHUNK> {
     }
 
     /// Convenience wrapper that allocates deques of size `capacity` (power-of-two) and runs work-stealing.
-    pub fn parallel_reachable_count_workstealing(&self, start: usize, threads: usize) -> usize {
+    pub fn parallel_reachable_count_workstealing(
+        &self,
+        token: &GhostToken<'brand>,
+        start: usize,
+        threads: usize,
+    ) -> usize {
         assert!(threads != 0);
         let cap = self.node_count().next_power_of_two().max(64);
         let deques: Vec<GhostChaseLevDeque<'brand>> =
             (0..threads).map(|_| GhostChaseLevDeque::new(cap)).collect();
-        self.parallel_reachable_count_workstealing_with_deques(start, &deques)
+        self.parallel_reachable_count_workstealing_with_deques(token, start, &deques)
     }
 }

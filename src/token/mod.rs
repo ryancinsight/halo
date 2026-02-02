@@ -11,13 +11,17 @@
 //! requires `&mut GhostToken<'brand>`, and Rust guarantees you cannot have two
 //! live mutable borrows of the same token simultaneously.
 
-use core::marker::PhantomData;
-
+/// Global singleton tokens for static lifetime branding.
 pub mod global;
+/// Hierarchical tokens allowing splitting and restricted views.
 pub mod hierarchy;
+/// Invariant lifetime definitions for branding.
 pub mod invariant;
+/// Macros for convenient token generation.
 pub mod macros;
+/// Shared tokens for reference-counted access.
 pub mod shared;
+/// Traits defining token capabilities (GhostBorrow/GhostBorrowMut).
 pub mod traits;
 
 pub use global::{static_token, with_static_token, with_static_token_mut, StaticBrand};

@@ -5,8 +5,9 @@
 //! buffer management and zero-cost token access, avoiding `std::vec::Vec`.
 
 use crate::collections::ZeroCopyOps;
-use crate::{GhostCell, GhostToken};
-use core::mem::{self, MaybeUninit};
+use crate::token::traits::{GhostBorrow, GhostBorrowMut};
+use crate::GhostCell;
+use core::mem;
 use core::ptr::{self, NonNull};
 use std::alloc::{alloc, dealloc, handle_alloc_error, Layout};
 
@@ -223,7 +224,10 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
 
     /// Returns a shared reference to the element at `idx`, if in bounds.
     #[inline]
-    pub fn get<'a>(&'a self, token: &'a GhostToken<'brand>, idx: usize) -> Option<&'a T> {
+    pub fn get<'a, Token>(&'a self, token: &'a Token, idx: usize) -> Option<&'a T>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         if idx >= self.len {
             return None;
         }
@@ -236,11 +240,14 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
 
     /// Returns an exclusive reference to the element at `idx`, if in bounds.
     #[inline]
-    pub fn get_mut<'a>(
+    pub fn get_mut<'a, Token>(
         &'a self,
-        token: &'a mut GhostToken<'brand>,
+        token: &'a mut Token,
         idx: usize,
-    ) -> Option<&'a mut T> {
+    ) -> Option<&'a mut T>
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         if idx >= self.len {
             return None;
         }
@@ -253,13 +260,19 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
 
     /// Returns a shared reference to the front element.
     #[inline]
-    pub fn front<'a>(&'a self, token: &'a GhostToken<'brand>) -> Option<&'a T> {
+    pub fn front<'a, Token>(&'a self, token: &'a Token) -> Option<&'a T>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         self.get(token, 0)
     }
 
     /// Returns a shared reference to the back element.
     #[inline]
-    pub fn back<'a>(&'a self, token: &'a GhostToken<'brand>) -> Option<&'a T> {
+    pub fn back<'a, Token>(&'a self, token: &'a Token) -> Option<&'a T>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         if self.len == 0 {
             None
         } else {
@@ -268,7 +281,10 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
     }
 
     /// Exclusive iteration via callback.
-    pub fn for_each_mut(&self, token: &mut GhostToken<'brand>, mut f: impl FnMut(&mut T)) {
+    pub fn for_each_mut<Token>(&self, token: &mut Token, mut f: impl FnMut(&mut T))
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         for i in 0..self.len {
             let actual_idx = (self.head + i) % self.cap;
             unsafe {
@@ -280,7 +296,10 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
     }
 
     /// Shared iteration via callback.
-    pub fn for_each(&self, token: &GhostToken<'brand>, mut f: impl FnMut(&T)) {
+    pub fn for_each<Token>(&self, token: &Token, mut f: impl FnMut(&T))
+    where
+        Token: GhostBorrow<'brand>,
+    {
         for i in 0..self.len {
             let actual_idx = (self.head + i) % self.cap;
             unsafe {
@@ -292,7 +311,10 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
     }
 
     /// Returns a pair of slices representing the deque contents.
-    pub fn as_slices<'a>(&'a self, _token: &'a GhostToken<'brand>) -> (&'a [T], &'a [T]) {
+    pub fn as_slices<'a, Token>(&'a self, _token: &'a Token) -> (&'a [T], &'a [T])
+    where
+        Token: GhostBorrow<'brand>,
+    {
         if self.len == 0 {
             return (&[], &[]);
         }
@@ -317,10 +339,13 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
     }
 
     /// Returns a pair of mutable slices representing the deque contents.
-    pub fn as_mut_slices<'a>(
+    pub fn as_mut_slices<'a, Token>(
         &'a self,
-        _token: &'a mut GhostToken<'brand>,
-    ) -> (&'a mut [T], &'a mut [T]) {
+        _token: &'a mut Token,
+    ) -> (&'a mut [T], &'a mut [T])
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         if self.len == 0 {
             return (&mut [], &mut []);
         }
@@ -343,16 +368,31 @@ impl<'brand, T> BrandedVecDeque<'brand, T> {
     }
 
     /// Iterates over the elements.
-    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> impl Iterator<Item = &'a T> + 'a {
+    pub fn iter<'a, Token>(
+        &'a self,
+        token: &'a Token,
+    ) -> impl Iterator<Item = &'a T>
+           + DoubleEndedIterator
+           + std::iter::FusedIterator
+           + use<'a, 'brand, T, Token>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         let (s1, s2) = self.as_slices(token);
         s1.iter().chain(s2.iter())
     }
 
     /// Iterates over the elements (mutable).
-    pub fn iter_mut<'a>(
+    pub fn iter_mut<'a, Token>(
         &'a self,
-        token: &'a mut GhostToken<'brand>,
-    ) -> impl Iterator<Item = &'a mut T> + 'a {
+        token: &'a mut Token,
+    ) -> impl Iterator<Item = &'a mut T>
+           + DoubleEndedIterator
+           + std::iter::FusedIterator
+           + use<'a, 'brand, T, Token>
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         let (s1, s2) = self.as_mut_slices(token);
         s1.iter_mut().chain(s2.iter_mut())
     }
@@ -647,25 +687,28 @@ impl<'brand, T> Drop for BrandedVecDeque<'brand, T> {
 
 impl<'brand, T> ZeroCopyOps<'brand, T> for BrandedVecDeque<'brand, T> {
     #[inline(always)]
-    fn find_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<&'a T>
+    fn find_ref<'a, F, Token>(&'a self, token: &'a Token, f: F) -> Option<&'a T>
     where
         F: Fn(&T) -> bool,
+        Token: GhostBorrow<'brand>,
     {
         self.iter(token).find(|&item| f(item))
     }
 
     #[inline(always)]
-    fn any_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    fn any_ref<F, Token>(&self, token: &Token, f: F) -> bool
     where
         F: Fn(&T) -> bool,
+        Token: GhostBorrow<'brand>,
     {
         self.iter(token).any(|item| f(item))
     }
 
     #[inline(always)]
-    fn all_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    fn all_ref<F, Token>(&self, token: &Token, f: F) -> bool
     where
         F: Fn(&T) -> bool,
+        Token: GhostBorrow<'brand>,
     {
         self.iter(token).all(|item| f(item))
     }
@@ -843,7 +886,7 @@ mod tests {
 
     #[test]
     fn branded_vec_deque_growth() {
-        GhostToken::new(|mut token| {
+        GhostToken::new(|token| {
             let mut dq = BrandedVecDeque::new();
             for i in 0..100 {
                 dq.push_back(i);
@@ -857,7 +900,7 @@ mod tests {
 
     #[test]
     fn branded_vec_deque_wrap_growth() {
-        GhostToken::new(|mut token| {
+        GhostToken::new(|token| {
             let mut dq = BrandedVecDeque::with_capacity(4);
             dq.push_back(1);
             dq.push_back(2);
@@ -887,7 +930,7 @@ mod tests {
 
         let counter = Rc::new(RefCell::new(0));
         {
-            GhostToken::new(|mut _token| {
+            GhostToken::new(|_token| {
                 let mut dq = BrandedVecDeque::new();
                 dq.push_back(Dropper(counter.clone()));
                 dq.push_back(Dropper(counter.clone()));
@@ -900,7 +943,7 @@ mod tests {
 
     #[test]
     fn branded_vec_deque_slices() {
-        GhostToken::new(|mut token| {
+        GhostToken::new(|token| {
             let mut dq = BrandedVecDeque::with_capacity(4);
             dq.push_back(1);
             dq.push_back(2);

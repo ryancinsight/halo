@@ -12,7 +12,7 @@
 //! - `neighbors`: O(1) to get iterator
 
 use crate::alloc::pool::BrandedPool;
-use crate::{GhostCell, GhostToken};
+use crate::GhostToken;
 use std::marker::PhantomData;
 
 /// A strongly-typed index for a node in a specific branded graph.
@@ -26,6 +26,7 @@ impl<'brand> NodeIdx<'brand> {
         Self(idx, PhantomData)
     }
 
+    /// Returns the raw index.
     #[inline(always)]
     pub fn index(self) -> usize {
         self.0

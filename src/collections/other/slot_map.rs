@@ -10,7 +10,8 @@
 //! - Generation counters prevent ABA problems when slots are reused.
 
 use crate::collections::BrandedCollection;
-use crate::{BrandedVec, GhostCell, GhostToken};
+use crate::token::traits::{GhostBorrow, GhostBorrowMut};
+use crate::{BrandedVec, GhostToken};
 use core::marker::PhantomData;
 use core::mem::ManuallyDrop;
 
@@ -76,7 +77,10 @@ impl<'brand, T> BrandedSlotMap<'brand, T> {
     }
 
     /// Inserts a value into the map, returning a branded key.
-    pub fn insert(&mut self, token: &mut GhostToken<'brand>, value: T) -> SlotKey<'brand> {
+    pub fn insert<Token>(&mut self, token: &mut Token, value: T) -> SlotKey<'brand>
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         self.len += 1;
 
         if self.free_head != u32::MAX {
@@ -118,7 +122,10 @@ impl<'brand, T> BrandedSlotMap<'brand, T> {
     }
 
     /// Returns a shared reference to the value associated with the key.
-    pub fn get<'a>(&'a self, token: &'a GhostToken<'brand>, key: SlotKey<'brand>) -> Option<&'a T> {
+    pub fn get<'a, Token>(&'a self, token: &'a Token, key: SlotKey<'brand>) -> Option<&'a T>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         let idx = key.index as usize;
 
         if let Some(entry) = self.slots.get(token, idx) {
@@ -136,11 +143,14 @@ impl<'brand, T> BrandedSlotMap<'brand, T> {
     }
 
     /// Returns a mutable reference to the value associated with the key.
-    pub fn get_mut<'a>(
+    pub fn get_mut<'a, Token>(
         &'a self,
-        token: &'a mut GhostToken<'brand>,
+        token: &'a mut Token,
         key: SlotKey<'brand>,
-    ) -> Option<&'a mut T> {
+    ) -> Option<&'a mut T>
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         let idx = key.index as usize;
 
         if let Some(entry) = self.slots.get_mut(token, idx) {
@@ -177,7 +187,10 @@ impl<'brand, T> BrandedSlotMap<'brand, T> {
     }
 
     /// Returns true if the map contains the key.
-    pub fn contains_key(&self, token: &GhostToken<'brand>, key: SlotKey<'brand>) -> bool {
+    pub fn contains_key<Token>(&self, token: &Token, key: SlotKey<'brand>) -> bool
+    where
+        Token: GhostBorrow<'brand>,
+    {
         let idx = key.index as usize;
         if let Some(entry) = self.slots.get(token, idx) {
             return entry.generation == key.generation && entry.generation % 2 == 0;
@@ -236,14 +249,20 @@ impl<'brand, T> BrandedCollection<'brand> for BrandedSlotMap<'brand, T> {
 }
 
 // Iterator
-pub struct Iter<'a, 'brand, T> {
+pub struct Iter<'a, 'brand, T, Token = GhostToken<'brand>>
+where
+    Token: GhostBorrow<'brand>,
+{
     map: &'a BrandedSlotMap<'brand, T>,
-    token: &'a GhostToken<'brand>,
+    token: &'a Token,
     index: usize,
     count: usize,
 }
 
-impl<'a, 'brand, T> Iterator for Iter<'a, 'brand, T> {
+impl<'a, 'brand, T, Token> Iterator for Iter<'a, 'brand, T, Token>
+where
+    Token: GhostBorrow<'brand>,
+{
     type Item = (SlotKey<'brand>, &'a T);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -270,7 +289,10 @@ impl<'a, 'brand, T> Iterator for Iter<'a, 'brand, T> {
 }
 
 impl<'brand, T> BrandedSlotMap<'brand, T> {
-    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> Iter<'a, 'brand, T> {
+    pub fn iter<'a, Token>(&'a self, token: &'a Token) -> Iter<'a, 'brand, T, Token>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         Iter {
             map: self,
             token,

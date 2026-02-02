@@ -1,4 +1,5 @@
 use core::sync::atomic::{AtomicUsize, Ordering};
+use core::ptr::NonNull;
 use crate::GhostToken;
 use crate::token::traits::GhostBorrow;
 
@@ -38,16 +39,16 @@ impl<'brand> BrandedFreelist<'brand> {
     /// # Safety
     /// `ptr` must be valid, aligned, and point to a block of at least `usize` bytes.
     /// The block must be effectively owned by the caller (not accessible by others).
-    pub unsafe fn push(&self, _token: &impl GhostBorrow<'brand>, ptr: *mut u8) {
+    pub unsafe fn push(&self, _token: &impl GhostBorrow<'brand>, ptr: NonNull<u8>) {
         let mut current = self.head.load(Ordering::Relaxed);
         loop {
             let (next_ptr, tag) = unpack(current);
 
             // Write next pointer into the block
-            *(ptr as *mut *mut u8) = next_ptr;
+            *(ptr.as_ptr() as *mut *mut u8) = next_ptr;
 
             let new_tag = tag.wrapping_add(1);
-            let new_head = pack(ptr, new_tag);
+            let new_head = pack(ptr.as_ptr(), new_tag);
 
             match self.head.compare_exchange_weak(
                 current,
@@ -68,7 +69,7 @@ impl<'brand> BrandedFreelist<'brand> {
     /// Returns the number of blocks pushed.
     pub unsafe fn push_batch<I>(&self, _token: &impl GhostBorrow<'brand>, iter: I) -> usize
     where
-        I: IntoIterator<Item = *mut u8>,
+        I: IntoIterator<Item = NonNull<u8>>,
     {
         let mut iter = iter.into_iter();
         let first = match iter.next() {
@@ -81,13 +82,13 @@ impl<'brand> BrandedFreelist<'brand> {
 
         // Link the batch locally
         for ptr in iter {
-            *(ptr as *mut *mut u8) = last;
+            *(ptr.as_ptr() as *mut *mut u8) = last.as_ptr();
             last = ptr;
             count += 1;
         }
 
-        let local_head = last;
-        let local_tail = first;
+        let local_head = last.as_ptr();
+        let local_tail = first.as_ptr();
 
         let mut current = self.head.load(Ordering::Relaxed);
         loop {
@@ -112,7 +113,7 @@ impl<'brand> BrandedFreelist<'brand> {
     }
 
     /// Pops a single block from the list.
-    pub unsafe fn pop(&self, _token: &impl GhostBorrow<'brand>) -> Option<*mut u8> {
+    pub unsafe fn pop(&self, _token: &impl GhostBorrow<'brand>) -> Option<NonNull<u8>> {
         let mut current = self.head.load(Ordering::Acquire);
         loop {
             let (ptr, tag) = unpack(current);
@@ -132,14 +133,14 @@ impl<'brand> BrandedFreelist<'brand> {
                 Ordering::AcqRel,
                 Ordering::Acquire,
             ) {
-                Ok(_) => return Some(ptr),
+                Ok(_) => return Some(NonNull::new_unchecked(ptr)),
                 Err(actual) => current = actual,
             }
         }
     }
 
     /// Pops a batch of up to `n` blocks.
-    pub unsafe fn pop_batch(&self, token: &impl GhostBorrow<'brand>, n: usize) -> Vec<*mut u8> {
+    pub unsafe fn pop_batch(&self, token: &impl GhostBorrow<'brand>, n: usize) -> Vec<NonNull<u8>> {
         let mut vec = Vec::with_capacity(n);
         for _ in 0..n {
             if let Some(ptr) = self.pop(token) {
@@ -153,7 +154,7 @@ impl<'brand> BrandedFreelist<'brand> {
 
     /// Pops all items. Unsafe because it ignores the token.
     /// Intended for cleanup when the freelist is exclusively owned.
-    pub unsafe fn pop_all(&mut self) -> Vec<*mut u8> {
+    pub unsafe fn pop_all(&mut self) -> Vec<NonNull<u8>> {
         let mut vec = Vec::new();
         let mut current = self.head.load(Ordering::Relaxed);
         loop {
@@ -161,7 +162,7 @@ impl<'brand> BrandedFreelist<'brand> {
             if ptr.is_null() {
                 break;
             }
-            vec.push(ptr);
+            vec.push(NonNull::new_unchecked(ptr));
             let next_ptr = *(ptr as *mut *mut u8);
             // We construct a fake packed value to continue traversal. Tag doesn't matter.
             current = pack(next_ptr, 0);

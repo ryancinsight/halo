@@ -18,7 +18,8 @@
 
 use core::{cell::UnsafeCell, marker::PhantomData, mem, ptr};
 
-use crate::{GhostBorrow, GhostBorrowMut, GhostToken};
+use crate::token::traits::{GhostBorrow, GhostBorrowMut};
+// use crate::{GhostBorrow, GhostBorrowMut, GhostToken};
 
 /// A token-branded wrapper around `core::cell::UnsafeCell<T>`.
 #[repr(transparent)]

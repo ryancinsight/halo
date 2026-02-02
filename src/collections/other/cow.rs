@@ -3,7 +3,8 @@
 //! This type allows working with either owned values or token-gated references
 //! uniformly. It provides methods to access the value using a `GhostToken`.
 
-use crate::{GhostCell, GhostToken};
+use crate::token::traits::GhostBorrow;
+use crate::GhostCell;
 
 /// A copy-on-write pointer for token-gated values.
 pub enum BrandedCow<'a, 'brand, T> {
@@ -16,7 +17,10 @@ pub enum BrandedCow<'a, 'brand, T> {
 impl<'a, 'brand, T> BrandedCow<'a, 'brand, T> {
     /// Returns a reference to the value, requiring a token if borrowed.
     #[inline]
-    pub fn get<'token>(&'token self, token: &'token GhostToken<'brand>) -> &'token T {
+    pub fn get<'token, Token>(&'token self, token: &'token Token) -> &'token T
+    where
+        Token: GhostBorrow<'brand>,
+    {
         match self {
             BrandedCow::Owned(val) => val,
             BrandedCow::Borrowed(cell) => cell.borrow(token),
@@ -37,9 +41,10 @@ impl<'a, 'brand, T> BrandedCow<'a, 'brand, T> {
 
     /// Converts into an owned value, cloning if necessary.
     #[inline]
-    pub fn into_owned(self, token: &GhostToken<'brand>) -> T
+    pub fn into_owned<Token>(self, token: &Token) -> T
     where
         T: Clone,
+        Token: GhostBorrow<'brand>,
     {
         match self {
             BrandedCow::Owned(val) => val,

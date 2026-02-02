@@ -16,7 +16,7 @@
 //! This implementation uses 0-based indexing logic internally to avoid dummy elements.
 
 use crate::collections::{BrandedCollection, BrandedVec};
-use crate::{GhostCell, GhostToken};
+use crate::token::traits::{GhostBorrow, GhostBorrowMut};
 use core::ops::{AddAssign, SubAssign};
 use std::iter::FromIterator;
 
@@ -58,7 +58,10 @@ where
     ///
     /// # Panics
     /// Panics if `index` is out of bounds.
-    pub fn add(&mut self, token: &mut GhostToken<'brand>, index: usize, delta: T) {
+    pub fn add<Token>(&mut self, token: &mut Token, index: usize, delta: T)
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         let n = self.len();
         assert!(index < n, "Index out of bounds");
 
@@ -95,7 +98,10 @@ where
     ///
     /// # Panics
     /// Panics if `index` is out of bounds.
-    pub fn prefix_sum(&self, token: &GhostToken<'brand>, index: usize) -> T {
+    pub fn prefix_sum<Token>(&self, token: &Token, index: usize) -> T
+    where
+        Token: GhostBorrow<'brand>,
+    {
         let n = self.len();
         if index >= n {
              panic!("Index out of bounds");
@@ -142,7 +148,10 @@ where
     ///
     /// # Panics
     /// Panics if indices are out of bounds or `start > end`.
-    pub fn range_sum(&self, token: &GhostToken<'brand>, start: usize, end: usize) -> T {
+    pub fn range_sum<Token>(&self, token: &Token, start: usize, end: usize) -> T
+    where
+        Token: GhostBorrow<'brand>,
+    {
         if start > end {
             panic!("start > end");
         }
@@ -161,7 +170,10 @@ where
     }
 
     /// Pushes a new value to the end of the tree.
-    pub fn push(&mut self, token: &mut GhostToken<'brand>, val: T) {
+    pub fn push<Token>(&mut self, token: &mut Token, val: T)
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         // Just appending `val` is not enough for Fenwick Tree logic unless we update parents.
         // But `push` implies appending to the array that the Fenwick Tree represents.
         // If we append to array A, A[n] = val.

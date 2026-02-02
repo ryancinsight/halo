@@ -6,10 +6,12 @@
 //! safe splitting of the tree into disjoint mutable regions for parallel processing.
 
 use crate::collections::{BrandedCollection, BrandedVec};
-use crate::{GhostCell, GhostToken};
+use crate::token::traits::{GhostBorrow, GhostBorrowMut};
+use crate::GhostCell;
 use std::borrow::Cow;
 use std::marker::PhantomData;
-use std::mem::MaybeUninit;
+// use core::cmp;
+// use std::mem::MaybeUninit;
 
 /// A branded Segment Tree.
 pub struct BrandedSegmentTree<'brand, T, F> {
@@ -63,7 +65,10 @@ where
     }
 
     /// Builds the tree from an initial slice.
-    pub fn build(&mut self, token: &mut GhostToken<'brand>, data: &[T]) {
+    pub fn build<Token>(&mut self, token: &mut Token, data: &[T])
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         assert!(data.len() <= self.n);
         // Reset
         for i in 0..self.tree.len() {
@@ -73,14 +78,16 @@ where
         self.build_recursive(token, data, 0, 0, self.n);
     }
 
-    fn build_recursive(
+    fn build_recursive<Token>(
         &mut self,
-        token: &mut GhostToken<'brand>,
+        token: &mut Token,
         data: &[T],
         node: usize,
         start: usize,
         end: usize,
-    ) {
+    ) where
+        Token: GhostBorrowMut<'brand>,
+    {
         if start >= end {
             return;
         }
@@ -107,20 +114,25 @@ where
     }
 
     /// Updates the value at `index` to `value`.
-    pub fn update(&mut self, token: &mut GhostToken<'brand>, index: usize, value: T) {
+    pub fn update<Token>(&mut self, token: &mut Token, index: usize, value: T)
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         assert!(index < self.n);
         self.update_recursive(token, 0, 0, self.n, index, value);
     }
 
-    fn update_recursive(
+    fn update_recursive<Token>(
         &mut self,
-        token: &mut GhostToken<'brand>,
+        token: &mut Token,
         node: usize,
         start: usize,
         end: usize,
         idx: usize,
         val: T,
-    ) {
+    ) where
+        Token: GhostBorrowMut<'brand>,
+    {
         if start == end - 1 {
             *self.tree.borrow_mut(token, node) = val;
             return;
@@ -146,27 +158,33 @@ where
     }
 
     /// Queries the range `[q_start, q_end)`.
-    pub fn query<'a>(
+    pub fn query<'a, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
+        token: &'a Token,
         q_start: usize,
         q_end: usize,
-    ) -> Cow<'a, T> {
+    ) -> Cow<'a, T>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         if q_start >= q_end || q_start >= self.n {
             return Cow::Borrowed(&self.default_value);
         }
         self.query_recursive(token, 0, 0, self.n, q_start, q_end)
     }
 
-    fn query_recursive<'a>(
+    fn query_recursive<'a, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
+        token: &'a Token,
         node: usize,
         start: usize,
         end: usize,
         q_start: usize,
         q_end: usize,
-    ) -> Cow<'a, T> {
+    ) -> Cow<'a, T>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         if q_start <= start && end <= q_end {
             return Cow::Borrowed(self.tree.borrow(token, node));
         }
@@ -187,17 +205,22 @@ where
     /// Repair the tree consistency after bulk updates via views.
     /// This recomputes all internal nodes based on the values in the leaves.
     /// It is an O(N) operation.
-    pub fn repair(&mut self, token: &mut GhostToken<'brand>) {
+    pub fn repair<Token>(&mut self, token: &mut Token)
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         self.repair_recursive(token, 0, 0, self.n);
     }
 
-    fn repair_recursive(
+    fn repair_recursive<Token>(
         &mut self,
-        token: &mut GhostToken<'brand>,
+        token: &mut Token,
         node: usize,
         start: usize,
         end: usize,
-    ) {
+    ) where
+        Token: GhostBorrowMut<'brand>,
+    {
         if start >= end || start == end - 1 {
             return;
         }

@@ -1,5 +1,5 @@
 use crate::alloc::segregated::manager::ThreadLocalCache;
-use crate::allocator::constants::*;
+use super::super::constants::*;
 use core::cell::RefCell;
 
 pub struct GlobalCaches {

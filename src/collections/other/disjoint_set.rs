@@ -10,7 +10,7 @@
 //! - Path compression and union-by-rank ensure nearly constant time operations.
 
 use crate::collections::BrandedVec;
-use crate::GhostToken;
+use crate::token::traits::{GhostBorrow, GhostBorrowMut};
 use std::cell::Cell;
 
 /// A Disjoint Set (Union-Find) data structure.
@@ -41,7 +41,10 @@ impl<'brand> BrandedDisjointSet<'brand> {
 
     /// Creates a new set containing a single element.
     /// Returns the representative ID of the new set.
-    pub fn make_set(&mut self, _token: &mut GhostToken<'brand>) -> usize {
+    pub fn make_set<Token>(&mut self, _token: &mut Token) -> usize
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         let id = self.parent.len();
         self.parent.push(Cell::new(id));
         self.rank.push(0);
@@ -52,7 +55,10 @@ impl<'brand> BrandedDisjointSet<'brand> {
     ///
     /// This operation is "logically const" but performs internal mutation (path compression).
     /// Thanks to `Cell` and branding, this is safe with a shared `GhostToken`.
-    pub fn find(&self, token: &GhostToken<'brand>, id: usize) -> usize {
+    pub fn find<Token>(&self, token: &Token, id: usize) -> usize
+    where
+        Token: GhostBorrow<'brand>,
+    {
         // Two-pass approach for path compression:
         // 1. Find root
         let mut root = id;
@@ -84,7 +90,10 @@ impl<'brand> BrandedDisjointSet<'brand> {
     /// Returns `true` if they were in different sets, `false` otherwise.
     ///
     /// Requires `&mut GhostToken` because it modifies the structure (union).
-    pub fn union(&mut self, token: &mut GhostToken<'brand>, id1: usize, id2: usize) -> bool {
+    pub fn union<Token>(&mut self, token: &mut Token, id1: usize, id2: usize) -> bool
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         let root1 = self.find(token, id1);
         let root2 = self.find(token, id2);
 
@@ -128,47 +137,10 @@ impl<'brand> Default for BrandedDisjointSet<'brand> {
     }
 }
 
-/// A wrapper around `BrandedDisjointSet` that bundles the token for convenience.
-pub struct ActiveDisjointSet<'a, 'brand> {
-    inner: &'a mut BrandedDisjointSet<'brand>,
-    token: &'a mut GhostToken<'brand>,
-}
-
-impl<'a, 'brand> ActiveDisjointSet<'a, 'brand> {
-    /// Creates a new active disjoint set.
-    pub fn new(inner: &'a mut BrandedDisjointSet<'brand>, token: &'a mut GhostToken<'brand>) -> Self {
-        Self { inner, token }
-    }
-
-    /// Creates a new set.
-    pub fn make_set(&mut self) -> usize {
-        self.inner.make_set(self.token)
-    }
-
-    /// Finds the representative.
-    pub fn find(&mut self, id: usize) -> usize {
-        self.inner.find(self.token, id)
-    }
-
-    /// Unites two sets.
-    pub fn union(&mut self, id1: usize, id2: usize) -> bool {
-        self.inner.union(self.token, id1, id2)
-    }
-
-    /// Returns the number of elements.
-    pub fn len(&self) -> usize {
-        self.inner.len()
-    }
-
-    /// Returns true if empty.
-    pub fn is_empty(&self) -> bool {
-        self.inner.is_empty()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::GhostToken;
 
     #[test]
     fn test_disjoint_set() {
@@ -191,20 +163,6 @@ mod tests {
 
             // Already united
             assert!(!ds.union(&mut token, a, c));
-        });
-    }
-
-    #[test]
-    fn test_active_disjoint_set() {
-        GhostToken::new(|mut token| {
-            let mut ds = BrandedDisjointSet::new();
-            let mut active = ActiveDisjointSet::new(&mut ds, &mut token);
-
-            let a = active.make_set();
-            let b = active.make_set();
-
-            assert!(active.union(a, b));
-            assert_eq!(active.find(a), active.find(b));
         });
     }
 }

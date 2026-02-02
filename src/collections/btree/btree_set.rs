@@ -3,7 +3,7 @@
 //! Implemented as a wrapper around `BrandedBTreeMap`.
 
 use super::btree_map::BrandedBTreeMap;
-use crate::{GhostCell, GhostToken};
+use crate::token::traits::GhostBorrow;
 use std::borrow::Borrow;
 
 /// A B-Tree set.
@@ -41,10 +41,11 @@ where
     }
 
     /// Returns `true` if the set contains the value.
-    pub fn contains<Q: ?Sized>(&self, token: &GhostToken<'brand>, value: &Q) -> bool
+    pub fn contains<Q: ?Sized, Token>(&self, token: &Token, value: &Q) -> bool
     where
         T: Borrow<Q>,
         Q: Ord,
+        Token: GhostBorrow<'brand>,
     {
         self.map.contains_key_with_token(token, value)
     }
@@ -60,10 +61,13 @@ where
     }
 
     /// Returns an iterator over the values in the set.
-    pub fn iter<'a>(
+    pub fn iter<'a, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
-    ) -> super::btree_map::Keys<'a, 'brand, T, ()> {
+        token: &'a Token,
+    ) -> impl Iterator<Item = &'a T> + use<'a, 'brand, T, Token>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         self.map.keys(token)
     }
 }

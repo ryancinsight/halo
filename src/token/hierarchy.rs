@@ -45,6 +45,7 @@ impl<'parent, 'brand, Perm: Permission> GhostBorrow<'brand> for HierarchicalGhos
 impl<'parent, 'brand> GhostBorrowMut<'brand> for HierarchicalGhostToken<'parent, 'brand, FullAccess> {}
 
 // Type alias for convenience
+/// A hierarchical token with read-only permissions.
 pub type ImmutableChild<'parent, 'brand> = HierarchicalGhostToken<'parent, 'brand, ReadOnly>;
 
 impl<'brand> GhostToken<'brand> {
@@ -63,36 +64,30 @@ impl<'brand> GhostToken<'brand> {
 
     /// Splits the token view into N immutable children.
     pub fn split_into<const N: usize>(&self) -> [ImmutableChild<'_, 'brand>; N] {
-        // We can't easily construct an array of non-Copy/Clone items without MaybeUninit or loop.
-        // But ImmutableChild IS Copy? No, we didn't derive Copy.
-        // The requirement says "Children can be freely borrowed concurrently."
-        // And "No Copy/Clone on mutable-capable tokens."
-        // ReadOnly tokens *could* be Copy?
-        // If they are Copy, then `split` is just copying.
+        // Since ImmutableChild is Copy, we can just create one and copy it.
+        [unsafe { HierarchicalGhostToken::new() }; N]
+    }
+}
 
-        // Let's assume they are NOT Copy to maintain linearity discipline if we want to merge them later?
-        // Requirement: "Provide merging/joining to recover the parent capability (linear discipline)."
-        // This implies linearity even for immutable children if we split a *Mutable* token into immutable ones?
-        // But here we are splitting `&self` (immutable borrow).
-        // We can't merge back to `self` because we don't own it.
+impl<'brand> GhostToken<'brand> {
+    /// Creates a hierarchical token with full access permissions.
+    ///
+    /// This borrows the parent token exclusively, preventing any other access
+    /// until the child token is dropped.
+    pub fn borrow_mut<'a>(&'a mut self) -> HierarchicalGhostToken<'a, 'brand, FullAccess> {
+        unsafe { HierarchicalGhostToken::new() }
+    }
+    
+    /// Creates a hierarchical token with read-only permissions.
+    pub fn borrow<'a>(&'a self) -> HierarchicalGhostToken<'a, 'brand, ReadOnly> {
+        unsafe { HierarchicalGhostToken::new() }
+    }
+}
 
-        // However, if we have `&mut self` (exclusive), we can split into immutable children and then merge back?
-        // The method signature in req: `fn split_immutable(&self)`.
-
-        // Let's implement `split_into` using array map or similar.
-        // Since it's ZST, we can just use `[ImmutableChild::new(); N]` conceptually.
-
-        use core::mem::MaybeUninit;
-
-        // Safe because ZST and we construct them safely from &self
-        unsafe {
-            let mut arr: [MaybeUninit<ImmutableChild<'_, 'brand>>; N] = MaybeUninit::uninit().assume_init();
-            for i in 0..N {
-                arr[i] = MaybeUninit::new(HierarchicalGhostToken::new());
-            }
-            // Transmute to initialized array
-            (&arr as *const _ as *const [ImmutableChild<'_, 'brand>; N]).read()
-        }
+impl<'parent, 'brand> HierarchicalGhostToken<'parent, 'brand, FullAccess> {
+    /// Downgrades a full access token to a read-only token.
+    pub fn downgrade(self) -> HierarchicalGhostToken<'parent, 'brand, ReadOnly> {
+        unsafe { HierarchicalGhostToken::new() }
     }
 }
 

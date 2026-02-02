@@ -52,35 +52,41 @@ pub trait BrandedCollection<'brand> {
 /// Extension trait for zero-copy operations on single-item branded collections.
 pub trait ZeroCopyOps<'brand, T> {
     /// Zero-copy find operation.
-    fn find_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<&'a T>
+    fn find_ref<'a, F, Token>(&'a self, token: &'a Token, f: F) -> Option<&'a T>
     where
-        F: Fn(&T) -> bool;
+        F: Fn(&T) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>;
 
     /// Zero-copy any operation with short-circuiting.
-    fn any_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    fn any_ref<F, Token>(&self, token: &Token, f: F) -> bool
     where
-        F: Fn(&T) -> bool;
+        F: Fn(&T) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>;
 
     /// Zero-copy all operation with short-circuiting.
-    fn all_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    fn all_ref<F, Token>(&self, token: &Token, f: F) -> bool
     where
-        F: Fn(&T) -> bool;
+        F: Fn(&T) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>;
 }
 
 /// Extension trait for zero-copy operations on key-value branded collections.
 pub trait ZeroCopyMapOps<'brand, K, V> {
     /// Zero-copy find operation on key-value pairs.
-    fn find_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<(&'a K, &'a V)>
+    fn find_ref<'a, F, Token>(&'a self, token: &'a Token, f: F) -> Option<(&'a K, &'a V)>
     where
-        F: Fn(&K, &V) -> bool;
+        F: Fn(&K, &V) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>;
 
     /// Zero-copy any operation with short-circuiting.
-    fn any_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    fn any_ref<F, Token>(&self, token: &Token, f: F) -> bool
     where
-        F: Fn(&K, &V) -> bool;
+        F: Fn(&K, &V) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>;
 
     /// Zero-copy all operation with short-circuiting.
-    fn all_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    fn all_ref<F, Token>(&self, token: &Token, f: F) -> bool
     where
-        F: Fn(&K, &V) -> bool;
+        F: Fn(&K, &V) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>;
 }

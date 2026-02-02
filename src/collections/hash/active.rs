@@ -96,7 +96,7 @@ where
     }
 
     /// Returns a mutable iterator over the map entries.
-    pub fn iter_mut(&mut self) -> super::hash_map::IterMut<'_, 'brand, K, V> {
+    pub fn iter_mut(&mut self) -> super::hash_map::IterMut<'_, 'brand, K, V, GhostToken<'brand>> {
         self.map.iter_mut(self.token)
     }
 }

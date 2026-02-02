@@ -1,17 +1,19 @@
 use core::sync::atomic::{AtomicUsize, Ordering};
 use core::ptr::NonNull;
 use core::alloc::Layout;
-use crate::GhostToken;
+// use crate::alloc::allocator::AllocError;
+// use crate::GhostToken;
+// use std::mem::MaybeUninit;
 use crate::token::traits::GhostBorrow;
 use crate::alloc::segregated::freelist::BrandedFreelist;
-use crate::alloc::page::{PageAlloc, GlobalPageAlloc};
+use crate::alloc::page::{PageAlloc, GlobalPageAlloc, PAGE_SIZE, align_up};
 
 /// A slab allocator managing a single fixed-size page.
 ///
-/// The `BrandedSlab` struct is embedded at the beginning of the 4KB page.
+/// The `SegregatedSlab` struct is embedded at the beginning of the 4KB page.
 /// Objects are allocated from the remaining space.
 #[repr(C)]
-pub struct BrandedSlab<'brand, const OBJECT_SIZE: usize, const OBJECTS_PER_SLAB: usize> {
+pub struct SegregatedSlab<'brand, const OBJECT_SIZE: usize, const OBJECTS_PER_SLAB: usize> {
     // Linked list next pointer (for SizeClassManager lists).
     // Must be first to allow BrandedFreelist to use it as the link.
     // We use AtomicUsize to ensure size/alignment matches pointer.
@@ -38,13 +40,10 @@ pub struct BrandedSlab<'brand, const OBJECT_SIZE: usize, const OBJECTS_PER_SLAB:
 }
 
 // Safety: All internal state is atomic or lock-free.
-unsafe impl<'brand, const S: usize, const N: usize> Send for BrandedSlab<'brand, S, N> {}
-unsafe impl<'brand, const S: usize, const N: usize> Sync for BrandedSlab<'brand, S, N> {}
+unsafe impl<'brand, const S: usize, const N: usize> Send for SegregatedSlab<'brand, S, N> {}
+unsafe impl<'brand, const S: usize, const N: usize> Sync for SegregatedSlab<'brand, S, N> {}
 
-impl<'brand, const OBJECT_SIZE: usize, const OBJECTS_PER_SLAB: usize> BrandedSlab<'brand, OBJECT_SIZE, OBJECTS_PER_SLAB> {
-    // Constants
-    const PAGE_SIZE: usize = 4096;
-
+impl<'brand, const OBJECT_SIZE: usize, const OBJECTS_PER_SLAB: usize> SegregatedSlab<'brand, OBJECT_SIZE, OBJECTS_PER_SLAB> {
     /// Creates a new slab using the default global page allocator.
     pub fn new() -> Option<NonNull<Self>> {
         Self::new_in(&GlobalPageAlloc)
@@ -57,8 +56,11 @@ impl<'brand, const OBJECT_SIZE: usize, const OBJECTS_PER_SLAB: usize> BrandedSla
         }
 
         let header_size = core::mem::size_of::<Self>();
-        let available = Self::PAGE_SIZE - header_size;
-        let capacity = available / OBJECT_SIZE;
+        let start = align_up(header_size, OBJECT_SIZE);
+        if start >= PAGE_SIZE {
+            return None;
+        }
+        let capacity = (PAGE_SIZE - start) / OBJECT_SIZE;
 
         if capacity < OBJECTS_PER_SLAB {
             // The requested N is too large for the page overhead
@@ -66,7 +68,7 @@ impl<'brand, const OBJECT_SIZE: usize, const OBJECTS_PER_SLAB: usize> BrandedSla
         }
 
         unsafe {
-            let layout = Layout::from_size_align_unchecked(Self::PAGE_SIZE, Self::PAGE_SIZE);
+            let layout = Layout::from_size_align_unchecked(PAGE_SIZE, PAGE_SIZE);
             let ptr = allocator.alloc_page(layout);
             if ptr.is_null() {
                 return None;
@@ -96,16 +98,7 @@ impl<'brand, const OBJECT_SIZE: usize, const OBJECTS_PER_SLAB: usize> BrandedSla
     fn object_area_start(&self) -> usize {
         let self_addr = self as *const _ as usize;
         let header_size = core::mem::size_of::<Self>();
-
-        let mut start = self_addr + header_size;
-
-        // Align start to OBJECT_SIZE to ensure all objects satisfy alignment equal to their size.
-        // We assume OBJECT_SIZE is a power of 2.
-        let align = OBJECT_SIZE;
-        if start % align != 0 {
-            start = (start + align) & !(align - 1);
-        }
-        start
+        align_up(self_addr + header_size, OBJECT_SIZE)
     }
 
     /// Allocates an object from the slab.
@@ -113,7 +106,7 @@ impl<'brand, const OBJECT_SIZE: usize, const OBJECTS_PER_SLAB: usize> BrandedSla
         // 1. Try freelist
         if let Some(ptr) = unsafe { self.freelist.pop(token) } {
             self.alloc_cnt.fetch_add(1, Ordering::Relaxed);
-            return Some(ptr);
+            return Some(ptr.as_ptr());
         }
 
         // 2. Try bump
@@ -133,7 +126,7 @@ impl<'brand, const OBJECT_SIZE: usize, const OBJECTS_PER_SLAB: usize> BrandedSla
                 let offset = idx * OBJECT_SIZE;
 
                 // Safety check
-                if offset + OBJECT_SIZE > (Self::PAGE_SIZE - (start_addr - (self as *const _ as usize))) {
+                if offset + OBJECT_SIZE > (PAGE_SIZE - (start_addr - (self as *const _ as usize))) {
                      return None;
                 }
 
@@ -160,7 +153,7 @@ impl<'brand, const OBJECT_SIZE: usize, const OBJECTS_PER_SLAB: usize> BrandedSla
                 let start_addr = self.object_area_start();
                 let offset = idx * OBJECT_SIZE;
 
-                if offset + count * OBJECT_SIZE > (Self::PAGE_SIZE - (start_addr - (self as *const _ as usize))) {
+                if offset + count * OBJECT_SIZE > (PAGE_SIZE - (start_addr - (self as *const _ as usize))) {
                      return None;
                 }
 
@@ -173,7 +166,7 @@ impl<'brand, const OBJECT_SIZE: usize, const OBJECTS_PER_SLAB: usize> BrandedSla
 
     /// Frees an object. Returns the previous allocated count.
     pub unsafe fn free(&self, token: &impl GhostBorrow<'brand>, ptr: *mut u8) -> usize {
-        self.freelist.push(token, ptr);
+        self.freelist.push(token, core::ptr::NonNull::new_unchecked(ptr));
         self.alloc_cnt.fetch_sub(1, Ordering::Relaxed)
     }
 
@@ -181,7 +174,10 @@ impl<'brand, const OBJECT_SIZE: usize, const OBJECTS_PER_SLAB: usize> BrandedSla
     pub unsafe fn free_batch<I>(&self, token: &impl GhostBorrow<'brand>, iter: I)
     where I: IntoIterator<Item = *mut u8>
     {
-        let count = self.freelist.push_batch(token, iter);
+        let count = self.freelist.push_batch(
+            token,
+            iter.into_iter().map(|p| core::ptr::NonNull::new_unchecked(p)),
+        );
         if count > 0 {
             self.alloc_cnt.fetch_sub(count, Ordering::Relaxed);
         }
@@ -203,7 +199,7 @@ impl<'brand, const OBJECT_SIZE: usize, const OBJECTS_PER_SLAB: usize> BrandedSla
     /// Assumes slab is 4KB aligned.
     pub unsafe fn from_ptr(ptr: *mut u8) -> NonNull<Self> {
         let addr = ptr as usize;
-        let page_addr = addr & !(Self::PAGE_SIZE - 1);
+        let page_addr = addr & !(PAGE_SIZE - 1);
         NonNull::new_unchecked(page_addr as *mut Self)
     }
 }

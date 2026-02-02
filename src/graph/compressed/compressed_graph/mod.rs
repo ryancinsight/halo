@@ -15,7 +15,7 @@
 
 use core::sync::atomic::Ordering;
 
-use crate::{collections::ChunkedVec, graph::access::visited::VisitedSet};
+use crate::graph::access::visited::VisitedSet;
 
 pub use iter::CompressedNeighborIter;
 pub use offsets::CompressedOffsets;

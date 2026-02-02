@@ -6,7 +6,7 @@
 //! Access is controlled via `GhostToken`.
 
 use crate::collections::vec::BrandedVec;
-use crate::GhostToken;
+use crate::token::traits::{GhostBorrow, GhostBorrowMut};
 use std::cmp;
 
 /// A branded bit set.
@@ -53,7 +53,10 @@ impl<'brand> BrandedBitSet<'brand> {
     }
 
     /// Adds a value to the set. Returns `true` if the value was not already present.
-    pub fn insert(&mut self, token: &mut GhostToken<'brand>, bit: usize) -> bool {
+    pub fn insert<Token>(&mut self, token: &mut Token, bit: usize) -> bool
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         let word_idx = bit / 64;
         let bit_idx = bit % 64;
         let mask = 1u64 << bit_idx;
@@ -78,7 +81,10 @@ impl<'brand> BrandedBitSet<'brand> {
     }
 
     /// Removes a value from the set. Returns `true` if the value was present.
-    pub fn remove(&mut self, token: &mut GhostToken<'brand>, bit: usize) -> bool {
+    pub fn remove<Token>(&mut self, token: &mut Token, bit: usize) -> bool
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         let word_idx = bit / 64;
         if word_idx >= self.words.len() {
             return false;
@@ -98,7 +104,10 @@ impl<'brand> BrandedBitSet<'brand> {
     }
 
     /// Returns `true` if the set contains the value.
-    pub fn contains(&self, token: &GhostToken<'brand>, bit: usize) -> bool {
+    pub fn contains<Token>(&self, token: &Token, bit: usize) -> bool
+    where
+        Token: GhostBorrow<'brand>,
+    {
         let word_idx = bit / 64;
         if word_idx >= self.words.len() {
             return false;
@@ -107,8 +116,10 @@ impl<'brand> BrandedBitSet<'brand> {
         let bit_idx = bit % 64;
         let mask = 1u64 << bit_idx;
         let word = self.words.borrow(token, word_idx);
-        (*word & mask) != 0
+
+        *word & mask != 0
     }
+
 
     /// Reserves capacity for at least `additional` bits.
     pub fn reserve(&mut self, additional: usize) {
@@ -121,7 +132,10 @@ impl<'brand> BrandedBitSet<'brand> {
     // --- Set Operations ---
 
     /// Unions with another bit set: `self |= other`.
-    pub fn union_with(&mut self, token: &mut GhostToken<'brand>, other: &BrandedBitSet<'brand>) {
+    pub fn union_with<Token>(&mut self, token: &mut Token, other: &BrandedBitSet<'brand>)
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         let self_len = self.words.len();
         let other_len = other.words.len();
 
@@ -152,7 +166,10 @@ impl<'brand> BrandedBitSet<'brand> {
     }
 
     /// Intersects with another bit set: `self &= other`.
-    pub fn intersect_with(&mut self, token: &mut GhostToken<'brand>, other: &BrandedBitSet<'brand>) {
+    pub fn intersect_with<Token>(&mut self, token: &mut Token, other: &BrandedBitSet<'brand>)
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         let self_len = self.words.len();
         let other_len = other.words.len();
 
@@ -184,7 +201,10 @@ impl<'brand> BrandedBitSet<'brand> {
     }
 
     /// Differences with another bit set: `self &= !other`.
-    pub fn difference_with(&mut self, token: &mut GhostToken<'brand>, other: &BrandedBitSet<'brand>) {
+    pub fn difference_with<Token>(&mut self, token: &mut Token, other: &BrandedBitSet<'brand>)
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         let self_len = self.words.len();
         let other_len = other.words.len();
 
@@ -206,7 +226,10 @@ impl<'brand> BrandedBitSet<'brand> {
     }
 
     /// Symmetric difference with another bit set: `self ^= other`.
-    pub fn symmetric_difference_with(&mut self, token: &mut GhostToken<'brand>, other: &BrandedBitSet<'brand>) {
+    pub fn symmetric_difference_with<Token>(&mut self, token: &mut Token, other: &BrandedBitSet<'brand>)
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         let self_len = self.words.len();
         let other_len = other.words.len();
 
@@ -241,24 +264,28 @@ impl<'brand> BrandedBitSet<'brand> {
 
     // --- Iterators ---
 
-    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> Iter<'a, 'brand> {
+    pub fn iter<'a, Token>(&'a self, token: &'a Token) -> impl Iterator<Item = usize> + 'a + use<'a, 'brand, Token>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         Iter {
             iter: self.words.iter(token).enumerate(),
             current_word: 0,
             word_idx: 0,
-            _marker: std::marker::PhantomData,
         }
     }
 }
 
-pub struct Iter<'a, 'brand> {
-    iter: std::iter::Enumerate<std::slice::Iter<'a, u64>>,
+pub struct Iter<I> {
+    iter: std::iter::Enumerate<I>,
     current_word: u64,
     word_idx: usize,
-    _marker: std::marker::PhantomData<&'brand ()>,
 }
 
-impl<'a, 'brand> Iterator for Iter<'a, 'brand> {
+impl<'a, I> Iterator for Iter<I>
+where
+    I: Iterator<Item = &'a u64>,
+{
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {

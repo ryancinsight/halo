@@ -7,8 +7,10 @@
 
 use core::sync::atomic::Ordering;
 
+use crate::collections::vec::BrandedVec;
 use crate::graph::access::visited::VisitedSet;
 use crate::graph::compressed::ecc_graph::EccEdge;
+use crate::token::traits::GhostBorrow;
 
 mod edges;
 mod iter;
@@ -22,7 +24,7 @@ pub use iter::LelNeighborIter;
 #[repr(C)]
 pub struct GhostLelGraph<'brand> {
     edges: DeltaEncodedEdges,
-    degrees: Vec<usize>,
+    degrees: BrandedVec<'brand, usize>,
     visited: VisitedSet<'brand>,
     node_count: usize,
     edge_count: usize,
@@ -32,7 +34,7 @@ impl<'brand> GhostLelGraph<'brand> {
     /// Create LEL graph from adjacency list.
     pub fn from_adjacency(adjacency: &[Vec<usize>]) -> Self {
         let n = adjacency.len();
-        let mut degrees = vec![0usize; n];
+        let mut degrees = BrandedVec::with_capacity(n);
 
         // For large graphs, pre-calculating total edges prevents expensive reallocations.
         // Benchmarks show a regression for small graphs (N < 20k) due to the extra pass overhead.
@@ -47,7 +49,7 @@ impl<'brand> GhostLelGraph<'brand> {
         };
 
         for (u, neighbors) in adjacency.iter().enumerate() {
-            degrees[u] = neighbors.len();
+            degrees.push(neighbors.len());
             for &v in neighbors {
                 assert!(v < n, "edge {u}->{v} is out of bounds for n={n}");
                 all_edges.push(EccEdge::new(u, v));
@@ -67,28 +69,40 @@ impl<'brand> GhostLelGraph<'brand> {
         }
     }
 
+    /// Returns the number of nodes in the graph.
     #[inline(always)]
     pub fn node_count(&self) -> usize {
         self.node_count
     }
 
+    /// Returns the number of edges in the graph.
     #[inline(always)]
     pub fn edge_count(&self) -> usize {
         self.edge_count
     }
 
+    /// Returns the degree of a specific node.
+    ///
+    /// Requires a `GhostToken` to access the protected degree vector.
     #[inline(always)]
-    pub fn degree(&self, node: usize) -> usize {
+    pub fn degree<Token>(&self, token: &Token, node: usize) -> usize
+    where
+        Token: GhostBorrow<'brand>,
+    {
         assert!(node < self.node_count, "node index out of bounds");
-        self.degrees[node]
+        *self.degrees.borrow(token, node)
     }
 
+    /// Returns an iterator over the neighbors of a node.
     #[inline]
     pub fn neighbors(&self, node: usize) -> LelNeighborIter<'_> {
         assert!(node < self.node_count, "node index out of bounds");
         LelNeighborIter::new(self.edges.edges_from(node))
     }
 
+    /// Checks if an edge exists between two nodes.
+    ///
+    /// Performs a binary search on the neighbor list of `from`.
     #[inline]
     pub fn has_edge(&self, from: usize, to: usize) -> bool {
         // Neighbor slice is sorted by target.
@@ -98,16 +112,23 @@ impl<'brand> GhostLelGraph<'brand> {
             .is_ok()
     }
 
+    /// Clears the visited set for all nodes.
     pub fn clear_visited(&self) {
         self.visited.clear();
     }
 
+    /// Tries to visit a node atomically.
+    ///
+    /// Returns `true` if the node was not previously visited.
     #[inline]
     pub fn try_visit(&self, node: usize) -> bool {
         assert!(node < self.node_count, "node index out of bounds");
         self.visited.try_visit(node, Ordering::AcqRel)
     }
 
+    /// Performs a Breadth-First Search starting from `start`.
+    ///
+    /// Returns a vector of visited nodes in BFS order.
     #[inline]
     pub fn bfs(&self, start: usize) -> Vec<usize> {
         assert!(start < self.node_count, "start out of bounds");
@@ -133,8 +154,17 @@ impl<'brand> GhostLelGraph<'brand> {
         out
     }
 
-    pub fn compression_stats(&self) -> LelCompressionStats {
-        let original_size = self.degrees.iter().sum::<usize>() * core::mem::size_of::<usize>();
+    /// Calculates compression statistics for the graph.
+    pub fn compression_stats<Token>(&self, token: &Token) -> LelCompressionStats
+    where
+        Token: GhostBorrow<'brand>,
+    {
+        let original_size = self
+            .degrees
+            .as_slice(token)
+            .iter()
+            .sum::<usize>()
+            * core::mem::size_of::<usize>();
         let compressed_size = self.edges.sorted_edges.len() * core::mem::size_of::<EccEdge>()
             + self.edges.source_indices.len() * core::mem::size_of::<usize>()
             + self.degrees.len() * core::mem::size_of::<usize>();
@@ -151,13 +181,20 @@ impl<'brand> GhostLelGraph<'brand> {
 /// Compression statistics for LEL format.
 #[derive(Debug, Clone)]
 pub struct LelCompressionStats {
+    /// Size of the graph in bytes if stored as an uncompressed adjacency list.
     pub original_size: usize,
+    /// Size of the graph in bytes in the compressed LEL format.
     pub compressed_size: usize,
+    /// Number of nodes in the graph.
     pub node_count: usize,
+    /// Number of edges in the graph.
     pub edge_count: usize,
 }
 
 impl LelCompressionStats {
+    /// Returns the compression ratio (original / compressed).
+    ///
+    /// A value > 1.0 indicates space savings.
     #[inline]
     pub fn compression_ratio(&self) -> f64 {
         if self.compressed_size == 0 {
@@ -167,6 +204,7 @@ impl LelCompressionStats {
         }
     }
 
+    /// Returns the memory savings as a percentage.
     #[inline]
     pub fn memory_savings_percent(&self) -> f64 {
         if self.original_size == 0 {

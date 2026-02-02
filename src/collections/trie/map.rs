@@ -1,11 +1,13 @@
-use core::cmp::min;
+// use core::cmp::min;
 use core::marker::PhantomData;
-use std::boxed::Box;
+// use std::boxed::Box;
+// use std::ptr::NonNull;
 use std::vec::Vec;
 
 use super::node::{Node, NodePrefix, NodeSlot};
 use crate::collections::{BrandedCollection, BrandedVec, ZeroCopyMapOps};
-use crate::{GhostCell, GhostToken};
+use crate::GhostBorrow;
+use crate::GhostBorrowMut;
 
 /// A high-performance Radix Trie Map (Prefix Tree) optimized for branded usage.
 ///
@@ -115,15 +117,16 @@ impl<'brand, K, V> BrandedRadixTrieMap<'brand, K, V> {
 
     /// Internal DFS traversal that passes constructed keys to a callback.
     /// Returns false if traversal was stopped by callback (callback returned false).
-    fn traverse_dfs<F>(
+    fn traverse_dfs<F, Token>(
         &self,
-        token: &GhostToken<'brand>,
+        token: &Token,
         node_idx: usize,
         key_buf: &mut Vec<u8>,
         f: &mut F,
     ) -> bool
     where
         F: FnMut(&[u8], &V) -> bool,
+        Token: GhostBorrow<'brand>,
     {
         let slot = self.nodes.get(token, node_idx).expect("Corrupted");
         if let NodeSlot::Occupied(node) = slot {
@@ -152,11 +155,20 @@ impl<'brand, K, V> BrandedRadixTrieMap<'brand, K, V> {
         }
     }
 
+    /// Returns an iterator over the map.
+    pub fn iter<'a, Token>(&'a self, token: &'a Token) -> impl Iterator<Item = (crate::alloc::BrandedRc<'brand, BrandedVec<'brand, u8>>, &'a V)> + use<'a, 'brand, K, V, Token>
+    where
+        Token: GhostBorrow<'brand>,
+    {
+        super::iter::Iter::new(self, token)
+    }
+
     /// Iterates over all elements, passing the key (as slice) and value to the closure.
     /// This avoids allocating a new Vec for each key.
-    pub fn for_each<F>(&self, token: &GhostToken<'brand>, mut f: F)
+    pub fn for_each<F, Token>(&self, token: &Token, mut f: F)
     where
         F: FnMut(&[u8], &V),
+        Token: GhostBorrow<'brand>,
     {
         if let Some(root) = self.root {
             let mut key_buf: Vec<u8> = Vec::new();
@@ -174,7 +186,10 @@ where
     K: AsRef<[u8]>,
 {
     /// Inserts a key-value pair into the map.
-    pub fn insert(&mut self, token: &mut GhostToken<'brand>, key: K, value: V) -> Option<V> {
+    pub fn insert<Token>(&mut self, token: &mut Token, key: K, value: V) -> Option<V>
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         let key_bytes = key.as_ref();
 
         if self.root.is_none() {
@@ -304,7 +319,10 @@ where
     }
 
     /// Gets a reference to the value corresponding to the key.
-    pub fn get<'a>(&'a self, token: &'a GhostToken<'brand>, key: K) -> Option<&'a V> {
+    pub fn get<'a, Token>(&'a self, token: &'a Token, key: K) -> Option<&'a V>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         if let Some(mut curr_idx) = self.root {
             let key_bytes = key.as_ref();
             let mut key_offset = 0;
@@ -342,13 +360,16 @@ where
     }
 
     /// Gets a mutable reference to the value.
-    pub fn get_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>, key: K) -> Option<&'a mut V> {
+    pub fn get_mut<'a, Token>(&'a self, token: &'a mut Token, key: K) -> Option<&'a mut V>
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         if let Some(mut curr_idx) = self.root {
             let key_bytes = key.as_ref();
             let mut key_offset = 0;
 
             // Workaround for borrow checker limitation in loops with conditional return
-            let token_ptr = token as *mut GhostToken<'brand>;
+            let token_ptr = token as *mut Token;
 
             loop {
                 // SAFETY: We essentially re-borrow the token for each iteration.
@@ -393,7 +414,10 @@ where
     }
 
     /// Removes a key from the map.
-    pub fn remove(&mut self, token: &mut GhostToken<'brand>, key: K) -> Option<V> {
+    pub fn remove<Token>(&mut self, token: &mut Token, key: K) -> Option<V>
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         let key_bytes = key.as_ref();
         if self.root.is_none() {
             return None;
@@ -529,16 +553,18 @@ impl<'brand, K, V> ZeroCopyMapOps<'brand, K, V> for BrandedRadixTrieMap<'brand, 
 where
     K: AsRef<[u8]>,
 {
-    fn find_ref<'a, F>(&'a self, _token: &'a GhostToken<'brand>, _f: F) -> Option<(&'a K, &'a V)>
+    fn find_ref<'a, F, Token>(&'a self, _token: &'a Token, _f: F) -> Option<(&'a K, &'a V)>
     where
         F: Fn(&K, &V) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         None
     }
 
-    fn any_ref<F>(&self, _token: &GhostToken<'brand>, _f: F) -> bool
+    fn any_ref<F, Token>(&self, _token: &Token, _f: F) -> bool
     where
         F: Fn(&K, &V) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         if let Some(_root) = self.root {
             // Best effort: traverse but we can't invoke f because we can't construct &K
@@ -550,9 +576,10 @@ where
         }
     }
 
-    fn all_ref<F>(&self, _token: &GhostToken<'brand>, _f: F) -> bool
+    fn all_ref<F, Token>(&self, _token: &Token, _f: F) -> bool
     where
         F: Fn(&K, &V) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         true
     }

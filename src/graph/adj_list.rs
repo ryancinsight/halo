@@ -16,11 +16,11 @@
 
 use crate::alloc::{BrandedPool, StaticRc};
 use crate::cell::GhostCell;
+use crate::GhostToken;
 use crate::collections::other::trusted_index::TrustedIndex;
 use super::traversal::{Bfs, Dfs};
-use crate::GhostToken;
+use crate::token::{GhostBorrow, GhostBorrowMut};
 use std::marker::PhantomData;
-use std::ptr::NonNull;
 
 /// Marker trait for graph edge directionality.
 pub trait EdgeType {
@@ -247,14 +247,15 @@ impl<'brand, V, E> AdjListGraph<'brand, V, E, Undirected> {
     }
 
     /// Adds an undirected edge (two directed edges) between two nodes.
-    pub fn add_undirected_edge(
+    pub fn add_undirected_edge<Token>(
         &self,
-        token: &mut GhostToken<'brand>,
+        token: &mut Token,
         u: &NodeHandle<'brand, V>,
         v: &NodeHandle<'brand, V>,
         weight: E,
     ) where
         E: Clone,
+        Token: GhostBorrowMut<'brand>,
     {
         self.add_edge(token, u, v, weight.clone());
         self.add_edge(token, v, u, weight);
@@ -278,7 +279,9 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
     ///
     /// The returned `NodeHandle` represents partial ownership of the node.
     /// The node remains in the graph until `remove_node` is called with this handle.
-    pub fn add_node(&self, token: &mut GhostToken<'brand>, value: V) -> NodeHandle<'brand, V> {
+    pub fn add_node<Token>(&self, token: &mut Token, value: V) -> NodeHandle<'brand, V> 
+    where Token: GhostBorrowMut<'brand>
+    {
         // Create the node data, initially with invalid pool_idx (will set below).
         let node_data = NodeData {
             value,
@@ -331,11 +334,13 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
     ///
     /// Requires the user to surrender their `NodeHandle`.
     /// Returns the value stored in the node.
-    pub fn remove_node(
+    pub fn remove_node<Token>(
         &self,
-        token: &mut GhostToken<'brand>,
+        token: &mut Token,
         handle: NodeHandle<'brand, V>,
-    ) -> V {
+    ) -> V 
+    where Token: GhostBorrowMut<'brand>
+    {
         // 1. Get the pool index from the handle.
         let pool_idx = handle.borrow(token).pool_idx;
 
@@ -390,13 +395,14 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
     }
 
     /// Adds a directed edge between two nodes.
-    pub fn add_edge(
+    pub fn add_edge<Token>(
         &self,
-        token: &mut GhostToken<'brand>,
+        token: &mut Token,
         source: &NodeHandle<'brand, V>,
         target: &NodeHandle<'brand, V>,
         weight: E,
-    ) {
+    ) where Token: GhostBorrowMut<'brand>
+    {
         let source_idx = source.borrow(token).pool_idx;
         let target_idx = target.borrow(token).pool_idx;
 
@@ -450,12 +456,15 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
     }
 
     // Helper to unlink an edge from a node's incoming list
-    unsafe fn unlink_incoming(
+    unsafe fn unlink_incoming<Token>(
         &self,
-        token: &mut GhostToken<'brand>,
+        token: &mut Token,
         node_idx: usize,
         edge_idx: usize,
-    ) {
+    )
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         let (prev, next) = {
             let edges = self.edges.borrow(token);
             let bwd = edges.get_backward_unchecked(edge_idx);
@@ -480,12 +489,15 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
     }
 
     // Helper to unlink an edge from a node's outgoing list
-    unsafe fn unlink_outgoing(
+    unsafe fn unlink_outgoing<Token>(
         &self,
-        token: &mut GhostToken<'brand>,
+        token: &mut Token,
         node_idx: usize,
         edge_idx: usize,
-    ) {
+    )
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         let (prev, next) = {
             let edges = self.edges.borrow(token);
             // Access BackwardEdge to get prev_outgoing
@@ -513,14 +525,17 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
     }
 
     /// Iterates over outgoing neighbors of a node.
-    pub fn neighbors<'a>(
+    pub fn neighbors<'a, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
+        token: &'a Token,
         node: &'a GhostCell<'brand, NodeData<'brand, V>>,
-    ) -> Neighbors<'a, 'brand, V, E, Ty> {
+    ) -> Neighbors<'a, 'brand, V, E, Ty, Token>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         let pool_idx = node.borrow(token).pool_idx;
         let curr_edge = self.node_topology.borrow(token)[pool_idx].head_outgoing;
-        Neighbors {
+        Neighbors::<V, E, Ty, Token> {
             graph: self,
             curr_edge,
             _token: token,
@@ -528,20 +543,26 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
     }
 
     /// Returns the unique integer ID (pool index) of a node.
-    pub fn node_id(
+    pub fn node_id<Token>(
         &self,
-        token: &GhostToken<'brand>,
+        token: &Token,
         handle: &NodeHandle<'brand, V>,
-    ) -> usize {
+    ) -> usize
+    where
+        Token: GhostBorrow<'brand>,
+    {
         handle.borrow(token).pool_idx
     }
 
     /// Returns the unique integer ID (pool index) of a node from its cell.
-    pub fn node_id_from_cell(
+    pub fn node_id_from_cell<Token>(
         &self,
-        token: &GhostToken<'brand>,
+        token: &Token,
         cell: &GhostCell<'brand, NodeData<'brand, V>>,
-    ) -> usize {
+    ) -> usize
+    where
+        Token: GhostBorrow<'brand>,
+    {
         cell.borrow(token).pool_idx
     }
 
@@ -549,11 +570,14 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
     ///
     /// This iterator yields `(target_node_idx, &weight)`. It is faster than `neighbors` because
     /// it avoids accessing the target node's memory to retrieve its data or ID.
-    pub fn neighbor_indices<'a>(
+    pub fn neighbor_indices<'a, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
+        token: &'a Token,
         node: &'a GhostCell<'brand, NodeData<'brand, V>>,
-    ) -> NeighborIndices<'a, 'brand, E> {
+    ) -> NeighborIndices<'a, 'brand, E>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         let pool_idx = node.borrow(token).pool_idx;
         let curr_edge = self.node_topology.borrow(token)[pool_idx].head_outgoing;
         let edges = self.edges.borrow(token);
@@ -567,11 +591,14 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
     ///
     /// This method is fully SoA-optimized: it uses the graph's topology vectors
     /// and edge pool directly, avoiding all heap accesses to `NodeData`.
-    pub fn neighbor_indices_by_id<'a>(
+    pub fn neighbor_indices_by_id<'a, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
+        token: &'a Token,
         node_id: usize,
-    ) -> NeighborIndices<'a, 'brand, E> {
+    ) -> NeighborIndices<'a, 'brand, E>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         // Direct vector access, no GhostCell deref of NodeData!
         // Safety: Caller must ensure node_id is valid (allocated).
         // If out of bounds, Vec index panics (safe).
@@ -585,31 +612,40 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
 
     /// Returns a reference to the node cell given its ID.
     #[inline]
-    pub unsafe fn get_node_unchecked<'a>(
+    pub unsafe fn get_node_unchecked<'a, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
+        token: &'a Token,
         node_id: usize,
-    ) -> &'a GhostCell<'brand, NodeData<'brand, V>> {
+    ) -> &'a GhostCell<'brand, NodeData<'brand, V>>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         let handle = self.nodes.get_unchecked(token, node_id);
         handle.get()
     }
 
     /// Returns a zero-copy BFS iterator starting from `start_node`.
-    pub fn bfs_iter<'a>(
+    pub fn bfs_iter<'a, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
+        token: &'a Token,
         start_node: usize,
-    ) -> Bfs<'a, 'brand, E> {
+    ) -> Bfs<'a, 'brand, E>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         let view = self.as_fast_view(token);
         Bfs::new(view, start_node)
     }
 
     /// Returns a zero-copy DFS iterator starting from `start_node`.
-    pub fn dfs_iter<'a>(
+    pub fn dfs_iter<'a, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
+        token: &'a Token,
         start_node: usize,
-    ) -> Dfs<'a, 'brand, E> {
+    ) -> Dfs<'a, 'brand, E>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         let view = self.as_fast_view(token);
         Dfs::new(view, start_node)
     }
@@ -617,10 +653,13 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
     /// Computes the connected components of the graph.
     ///
     /// Returns a vector where the index is the node ID and the value is the component ID.
-    pub fn connected_components(
+    pub fn connected_components<Token>(
         &self,
-        token: &GhostToken<'brand>,
-    ) -> Vec<usize> {
+        token: &Token,
+    ) -> Vec<usize>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         let view = self.as_fast_view(token);
         super::traversal::connected_components(view)
     }
@@ -631,11 +670,14 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
     /// - Uses `Vec<bool>` for dense visited tracking (cache friendly).
     /// - Uses `neighbor_indices_by_id` to traverse topology without heap accesses.
     /// - Returns a vector of visited node IDs in traversal order.
-    pub fn bfs(
+    pub fn bfs<Token>(
         &self,
-        token: &GhostToken<'brand>,
+        token: &Token,
         start_node: usize,
-    ) -> Vec<usize> {
+    ) -> Vec<usize>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         let topology = self.node_topology.borrow(token);
         let mut visited = vec![false; topology.len()];
         let mut queue = std::collections::VecDeque::new();
@@ -663,11 +705,14 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
     /// Performs a Depth-First Search (DFS) starting from `start_node`.
     ///
     /// This method is fully optimized for the SoA layout.
-    pub fn dfs(
+    pub fn dfs<Token>(
         &self,
-        token: &GhostToken<'brand>,
+        token: &Token,
         start_node: usize,
-    ) -> Vec<usize> {
+    ) -> Vec<usize>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         let topology = self.node_topology.borrow(token);
         let mut visited = vec![false; topology.len()];
         let mut stack = Vec::new();
@@ -752,10 +797,13 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
     /// This view holds references to the internal graph structure, avoiding
     /// the need to repeatedly borrow the `GhostCell`s during traversal.
     /// This is ideal for tight loops or algorithms that access the graph structure frequently.
-    pub fn as_fast_view<'a>(
+    pub fn as_fast_view<'a, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
-    ) -> FastAdjListGraph<'a, 'brand, E> {
+        token: &'a Token,
+    ) -> FastAdjListGraph<'a, 'brand, E>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         FastAdjListGraph {
             topology: self.node_topology.borrow(token),
             edges: self.edges.borrow(token),
@@ -852,13 +900,17 @@ impl<'brand, V, E, Ty> Default for AdjListGraph<'brand, V, E, Ty> {
     }
 }
 
-pub struct Neighbors<'a, 'brand, V, E, Ty> {
+/// Iterator over the neighbors of a node.
+pub struct Neighbors<'a, 'brand, V, E, Ty, Token> {
     graph: &'a AdjListGraph<'brand, V, E, Ty>,
     curr_edge: Option<TrustedIndex<'brand>>,
-    _token: &'a GhostToken<'brand>,
+    _token: &'a Token,
 }
 
-impl<'a, 'brand, V, E, Ty> Iterator for Neighbors<'a, 'brand, V, E, Ty> {
+impl<'a, 'brand, V, E, Ty, Token> Iterator for Neighbors<'a, 'brand, V, E, Ty, Token>
+where
+    Token: GhostBorrow<'brand>,
+{
     type Item = (&'a GhostCell<'brand, NodeData<'brand, V>>, &'a E);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -877,6 +929,7 @@ impl<'a, 'brand, V, E, Ty> Iterator for Neighbors<'a, 'brand, V, E, Ty> {
     }
 }
 
+/// Iterator over the indices of neighbor nodes.
 pub struct NeighborIndices<'a, 'brand, E> {
     edges: &'a EdgeStore<'brand, E>,
     curr_edge: Option<TrustedIndex<'brand>>,
@@ -907,11 +960,14 @@ pub struct SnapshotMap<'brand, V> {
 
 impl<'brand, V> SnapshotMap<'brand, V> {
     /// Retrieves (takes) the new handle corresponding to an old handle.
-    pub fn take_new_handle<'old_brand, OLD_V>(
+    pub fn take_new_handle<'old_brand, OldV, Token>(
         &mut self,
-        token: &GhostToken<'old_brand>,
-        old_handle: &NodeHandle<'old_brand, OLD_V>,
-    ) -> Option<NodeHandle<'brand, V>> {
+        token: &Token,
+        old_handle: &NodeHandle<'old_brand, OldV>,
+    ) -> Option<NodeHandle<'brand, V>>
+    where
+        Token: GhostBorrow<'old_brand>,
+    {
         let idx = old_handle.borrow(token).pool_idx;
         self.map.get_mut(idx).and_then(|opt| opt.take())
     }
@@ -919,9 +975,9 @@ impl<'brand, V> SnapshotMap<'brand, V> {
 
 impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
     /// Creates a deep copy (snapshot) of the graph in a new branding scope.
-    pub fn snapshot<'new_brand>(
+    pub fn snapshot<'new_brand, Token>(
         &self,
-        token: &GhostToken<'brand>,
+        token: &Token,
         _new_token: &mut GhostToken<'new_brand>,
     ) -> (
         AdjListGraph<'new_brand, V, E, Ty>,
@@ -930,6 +986,7 @@ impl<'brand, V, E, Ty> AdjListGraph<'brand, V, E, Ty> {
     where
         V: Clone,
         E: Clone,
+        Token: GhostBorrow<'brand>,
     {
         // 1. Clone nodes
         let (new_nodes, handle_map_vec) = self.nodes.clone_structure(token, |old_handle| {

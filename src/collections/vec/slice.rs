@@ -10,17 +10,24 @@
 //!   mutable access to a vector into disjoint regions that can be mutated in parallel.
 
 use crate::{GhostCell, GhostToken};
+use crate::token::traits::GhostBorrow;
 use std::slice;
 
 /// A slice of token-gated elements, bundled with the token required to read them.
-pub struct BrandedSlice<'a, 'brand, T> {
+pub struct BrandedSlice<'a, 'brand, T, Token = GhostToken<'brand>>
+where
+    Token: GhostBorrow<'brand>,
+{
     pub(crate) slice: &'a [GhostCell<'brand, T>],
-    pub(crate) token: &'a GhostToken<'brand>,
+    pub(crate) token: &'a Token,
 }
 
-impl<'a, 'brand, T> BrandedSlice<'a, 'brand, T> {
+impl<'a, 'brand, T, Token> BrandedSlice<'a, 'brand, T, Token>
+where
+    Token: GhostBorrow<'brand>,
+{
     /// Creates a new branded slice.
-    pub fn new(slice: &'a [GhostCell<'brand, T>], token: &'a GhostToken<'brand>) -> Self {
+    pub fn new(slice: &'a [GhostCell<'brand, T>], token: &'a Token) -> Self {
         Self { slice, token }
     }
 

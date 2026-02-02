@@ -5,7 +5,7 @@
 
 use crate::collections::vec::BrandedVec;
 use crate::collections::ZeroCopyOps;
-use crate::GhostToken;
+use crate::token::traits::{GhostBorrow, GhostBorrowMut};
 use core::cmp::Ord;
 use core::fmt;
 use core::mem::ManuallyDrop;
@@ -108,13 +108,19 @@ impl<'brand, T: Ord> BrandedBinaryHeap<'brand, T> {
     }
 
     /// Pushes an item onto the binary heap.
-    pub fn push(&mut self, _token: &mut GhostToken<'brand>, item: T) {
+    pub fn push<Token>(&mut self, _token: &mut Token, item: T)
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         self.data.push(item);
         self.sift_up(self.data.len() - 1);
     }
 
     /// Pops the greatest item from the binary heap.
-    pub fn pop(&mut self, _token: &mut GhostToken<'brand>) -> Option<T> {
+    pub fn pop<Token>(&mut self, _token: &mut Token) -> Option<T>
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         if self.data.is_empty() {
             return None;
         }
@@ -136,7 +142,10 @@ impl<'brand, T: Ord> BrandedBinaryHeap<'brand, T> {
     }
 
     /// Returns a reference to the greatest item in the binary heap.
-    pub fn peek<'a>(&'a self, token: &'a GhostToken<'brand>) -> Option<&'a T> {
+    pub fn peek<'a, Token>(&'a self, token: &'a Token) -> Option<&'a T>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         self.data.get(token, 0)
     }
 
@@ -193,29 +202,35 @@ impl<'brand, T: Ord> BrandedBinaryHeap<'brand, T> {
 
 impl<'brand, T> BrandedBinaryHeap<'brand, T> {
     /// Iterates over all elements in the heap in arbitrary order.
-    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> core::slice::Iter<'a, T> {
+    pub fn iter<'a, Token>(&'a self, token: &'a Token) -> impl Iterator<Item = &'a T> + use<'a, 'brand, T, Token>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         self.data.iter(token)
     }
 }
 
 impl<'brand, T> ZeroCopyOps<'brand, T> for BrandedBinaryHeap<'brand, T> {
-    fn find_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<&'a T>
+    fn find_ref<'a, F, Token>(&'a self, token: &'a Token, f: F) -> Option<&'a T>
     where
         F: Fn(&T) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         self.data.find_ref(token, f)
     }
 
-    fn any_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    fn any_ref<F, Token>(&self, token: &Token, f: F) -> bool
     where
         F: Fn(&T) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         self.data.any_ref(token, f)
     }
 
-    fn all_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    fn all_ref<F, Token>(&self, token: &Token, f: F) -> bool
     where
         F: Fn(&T) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         self.data.all_ref(token, f)
     }

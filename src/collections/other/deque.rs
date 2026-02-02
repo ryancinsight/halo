@@ -17,45 +17,62 @@
 //! - Memory: Fixed-size ring buffer with zero dynamic allocation
 
 use crate::collections::ZeroCopyOps;
-use crate::{GhostCell, GhostToken};
+use crate::token::traits::{GhostBorrow, GhostBorrowMut};
+use crate::GhostCell;
 use core::mem::MaybeUninit;
 
 /// Zero-cost iterator for BrandedDeque.
-pub struct BrandedDequeIter<'a, 'brand, T, const CAPACITY: usize> {
+struct BrandedDequeIter<'a, 'brand, T, const CAPACITY: usize, Token>
+where
+    Token: GhostBorrow<'brand>,
+{
     deque: &'a BrandedDeque<'brand, T, CAPACITY>,
-    index: usize,
-    token: &'a GhostToken<'brand>,
+    range: core::ops::Range<usize>,
+    token: &'a Token,
 }
 
-impl<'a, 'brand, T, const CAPACITY: usize> Iterator for BrandedDequeIter<'a, 'brand, T, CAPACITY> {
+impl<'a, 'brand, T, const CAPACITY: usize, Token> Iterator
+    for BrandedDequeIter<'a, 'brand, T, CAPACITY, Token>
+where
+    Token: GhostBorrow<'brand>,
+{
     type Item = &'a T;
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index >= self.deque.len {
-            return None;
-        }
-        let actual_idx = (self.deque.head + self.index) % CAPACITY;
-        self.index += 1;
-        unsafe {
-            let cell = self
-                .deque
-                .buffer
-                .get_unchecked(actual_idx)
-                .assume_init_ref();
-            Some(cell.borrow(self.token))
-        }
+        let i = self.range.next()?;
+        self.deque.get(self.token, i)
     }
 
     #[inline(always)]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.deque.len - self.index;
-        (remaining, Some(remaining))
+        self.range.size_hint()
     }
 }
 
-impl<'a, 'brand, T, const CAPACITY: usize> ExactSizeIterator
-    for BrandedDequeIter<'a, 'brand, T, CAPACITY>
+impl<'a, 'brand, T, const CAPACITY: usize, Token> DoubleEndedIterator
+    for BrandedDequeIter<'a, 'brand, T, CAPACITY, Token>
+where
+    Token: GhostBorrow<'brand>,
+{
+    #[inline(always)]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        let i = self.range.next_back()?;
+        self.deque.get(self.token, i)
+    }
+}
+
+impl<'a, 'brand, T, const CAPACITY: usize, Token> std::iter::FusedIterator
+    for BrandedDequeIter<'a, 'brand, T, CAPACITY, Token>
+where
+    Token: GhostBorrow<'brand>,
+{
+}
+
+impl<'a, 'brand, T, const CAPACITY: usize, Token> ExactSizeIterator
+    for BrandedDequeIter<'a, 'brand, T, CAPACITY, Token>
+where
+    Token: GhostBorrow<'brand>,
 {
 }
 
@@ -203,7 +220,10 @@ impl<'brand, T, const CAPACITY: usize> BrandedDeque<'brand, T, CAPACITY> {
 
     /// Returns a token-gated reference to the front element.
     #[inline]
-    pub fn front<'a>(&'a self, token: &'a GhostToken<'brand>) -> Option<&'a T> {
+    pub fn front<'a, Token>(&'a self, token: &'a Token) -> Option<&'a T>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         if self.is_empty() {
             return None;
         }
@@ -215,7 +235,10 @@ impl<'brand, T, const CAPACITY: usize> BrandedDeque<'brand, T, CAPACITY> {
 
     /// Returns a token-gated reference to the back element.
     #[inline]
-    pub fn back<'a>(&'a self, token: &'a GhostToken<'brand>) -> Option<&'a T> {
+    pub fn back<'a, Token>(&'a self, token: &'a Token) -> Option<&'a T>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         if self.is_empty() {
             return None;
         }
@@ -232,7 +255,10 @@ impl<'brand, T, const CAPACITY: usize> BrandedDeque<'brand, T, CAPACITY> {
 
     /// Returns a token-gated reference to the element at the given index.
     #[inline]
-    pub fn get<'a>(&'a self, token: &'a GhostToken<'brand>, index: usize) -> Option<&'a T> {
+    pub fn get<'a, Token>(&'a self, token: &'a Token, index: usize) -> Option<&'a T>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         if index >= self.len {
             return None;
         }
@@ -245,11 +271,14 @@ impl<'brand, T, const CAPACITY: usize> BrandedDeque<'brand, T, CAPACITY> {
 
     /// Returns a token-gated mutable reference to the element at the given index.
     #[inline]
-    pub fn get_mut<'a>(
+    pub fn get_mut<'a, Token>(
         &'a self,
-        token: &'a mut GhostToken<'brand>,
+        token: &'a mut Token,
         index: usize,
-    ) -> Option<&'a mut T> {
+    ) -> Option<&'a mut T>
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         if index >= self.len {
             return None;
         }
@@ -263,13 +292,16 @@ impl<'brand, T, const CAPACITY: usize> BrandedDeque<'brand, T, CAPACITY> {
 
     /// Iterates over the elements.
     #[inline]
-    pub fn iter<'a>(
+    pub fn iter<'a, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
-    ) -> BrandedDequeIter<'a, 'brand, T, CAPACITY> {
+        token: &'a Token,
+    ) -> impl Iterator<Item = &'a T> + ExactSizeIterator + 'a + use<'a, 'brand, T, CAPACITY, Token>
+    where
+        Token: GhostBorrow<'brand>,
+    {
         BrandedDequeIter {
             deque: self,
-            index: 0,
+            range: 0..self.len,
             token,
         }
     }
@@ -279,9 +311,10 @@ impl<'brand, T, const CAPACITY: usize> BrandedDeque<'brand, T, CAPACITY> {
     /// This provides maximum efficiency for bulk operations by avoiding
     /// individual bounds checks and function call overhead.
     #[inline]
-    pub fn for_each<F>(&self, token: &GhostToken<'brand>, mut f: F)
+    pub fn for_each<F, Token>(&self, token: &Token, mut f: F)
     where
         F: FnMut(&T),
+        Token: GhostBorrow<'brand>,
     {
         for i in 0..self.len {
             let actual_idx = (self.head + i) % CAPACITY;
@@ -294,9 +327,10 @@ impl<'brand, T, const CAPACITY: usize> BrandedDeque<'brand, T, CAPACITY> {
 
     /// Applies a mutable function to all elements in the deque.
     #[inline]
-    pub fn for_each_mut<F>(&self, token: &mut GhostToken<'brand>, mut f: F)
+    pub fn for_each_mut<F, Token>(&self, token: &mut Token, mut f: F)
     where
         F: FnMut(&mut T),
+        Token: GhostBorrowMut<'brand>,
     {
         for i in 0..self.len {
             let actual_idx = (self.head + i) % CAPACITY;
@@ -337,25 +371,28 @@ impl<'brand, T, const CAPACITY: usize> ZeroCopyOps<'brand, T>
     for BrandedDeque<'brand, T, CAPACITY>
 {
     #[inline(always)]
-    fn find_ref<'a, F>(&'a self, token: &'a GhostToken<'brand>, f: F) -> Option<&'a T>
+    fn find_ref<'a, F, Token>(&'a self, token: &'a Token, f: F) -> Option<&'a T>
     where
         F: Fn(&T) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         self.iter(token).find(|&item| f(item))
     }
 
     #[inline(always)]
-    fn any_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    fn any_ref<F, Token>(&self, token: &Token, f: F) -> bool
     where
         F: Fn(&T) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         self.iter(token).any(|item| f(item))
     }
 
     #[inline(always)]
-    fn all_ref<F>(&self, token: &GhostToken<'brand>, f: F) -> bool
+    fn all_ref<F, Token>(&self, token: &Token, f: F) -> bool
     where
         F: Fn(&T) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         self.iter(token).all(|item| f(item))
     }

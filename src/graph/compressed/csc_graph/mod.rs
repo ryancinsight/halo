@@ -8,13 +8,8 @@
 //! - `row_indices`: chunked contiguous `usize` row indices for each column
 //! - `visited`: `VisitedSet<'brand>` for lock-free concurrent traversals
 
-use core::sync::atomic::Ordering;
-
-use crate::{
-    collections::ChunkedVec,
-    concurrency::worklist::{GhostChaseLevDeque, GhostTreiberStack},
-    graph::access::visited::VisitedSet,
-};
+use crate::collections::ChunkedVec;
+use crate::graph::access::visited::VisitedSet;
 
 /// A CSC graph whose visited bitmap is branded.
 ///

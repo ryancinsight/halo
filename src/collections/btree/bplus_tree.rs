@@ -1,10 +1,12 @@
 //! `BrandedBPlusTree` — a B+Tree implementation using `BrandedPool` for node storage.
 
-use crate::alloc::pool::{BrandedPool, PoolSlot};
-use crate::{GhostCell, GhostToken};
+use crate::alloc::BrandedPool;
+use crate::collections::ZeroCopyMapOps;
+use crate::GhostCell;
+// use crate::{GhostCell, GhostToken};
 use core::mem::MaybeUninit;
 use core::ptr;
-use std::borrow::Borrow;
+// Removed unused import: use std::borrow::Borrow;
 
 pub const B: usize = 6;
 pub const MAX_KEYS: usize = 2 * B - 1;
@@ -173,26 +175,31 @@ impl<'brand, K, V> BrandedBPlusTree<'brand, K, V> {
     }
 
     #[inline]
-    fn get_node<'a>(
+    fn get_node<'a, Token>(
         &'a self,
-        token: &'a GhostToken<'brand>,
+        token: &'a Token,
         index: usize,
-    ) -> &'a Node<'brand, K, V> {
+    ) -> &'a Node<'brand, K, V> 
+    where Token: crate::token::traits::GhostBorrow<'brand>
+    {
         self.pool.get(token, index).expect("Node should exist")
     }
 
     #[inline]
-    fn get_node_mut<'a>(
+    fn get_node_mut<'a, Token>(
         &'a self,
-        token: &'a mut GhostToken<'brand>,
+        token: &'a mut Token,
         index: usize,
-    ) -> &'a mut Node<'brand, K, V> {
+    ) -> &'a mut Node<'brand, K, V> 
+    where Token: crate::token::traits::GhostBorrowMut<'brand>
+    {
         self.pool.get_mut(token, index).expect("Node should exist")
     }
 
-    pub fn get<'a>(&'a self, token: &'a GhostToken<'brand>, key: &K) -> Option<&'a V>
+    pub fn get<'a, Token>(&'a self, token: &'a Token, key: &K) -> Option<&'a V>
     where
         K: Ord,
+        Token: crate::token::traits::GhostBorrow<'brand>
     {
         if let Some(root_idx) = self.root {
             let mut node_idx = root_idx;
@@ -241,9 +248,10 @@ impl<'brand, K, V> BrandedBPlusTree<'brand, K, V> {
         }
     }
 
-    pub fn get_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>, key: &K) -> Option<&'a mut V>
+    pub fn get_mut<'a, Token>(&'a self, token: &'a mut Token, key: &K) -> Option<&'a mut V>
     where
         K: Ord,
+        Token: crate::token::traits::GhostBorrowMut<'brand>
     {
         if let Some(root_idx) = self.root {
             let mut node_idx = root_idx;
@@ -305,7 +313,9 @@ impl<'brand, K, V> BrandedBPlusTree<'brand, K, V> {
         }
     }
 
-    pub fn iter<'a>(&'a self, token: &'a GhostToken<'brand>) -> Iter<'a, 'brand, K, V> {
+    pub fn iter<'a, Token>(&'a self, token: &'a Token) -> impl Iterator<Item = (&'a K, &'a V)> + use<'a, 'brand, K, V, Token>
+    where Token: crate::token::traits::GhostBorrow<'brand>
+    {
         let mut leaf_idx = None;
         if let Some(mut idx) = self.root {
             loop {
@@ -322,7 +332,7 @@ impl<'brand, K, V> BrandedBPlusTree<'brand, K, V> {
             }
         }
 
-        Iter {
+        Iter::<_, _, Token> {
             tree: self,
             token,
             leaf_idx,
@@ -330,9 +340,10 @@ impl<'brand, K, V> BrandedBPlusTree<'brand, K, V> {
         }
     }
 
-    pub fn insert(&mut self, token: &mut GhostToken<'brand>, key: K, value: V) -> Option<V>
+    pub fn insert<Token>(&mut self, token: &mut Token, key: K, value: V) -> Option<V>
     where
         K: Ord + Clone,
+        Token: crate::token::traits::GhostBorrowMut<'brand>,
     {
         if self.root.is_none() {
             let mut root = Node::new_leaf();
@@ -364,13 +375,14 @@ impl<'brand, K, V> BrandedBPlusTree<'brand, K, V> {
         res
     }
 
-    fn split_child(
+    fn split_child<Token>(
         &self,
-        token: &mut GhostToken<'brand>,
+        token: &mut Token,
         parent_idx: usize,
         child_index_in_parent: usize,
     ) where
         K: Clone,
+        Token: crate::token::traits::GhostBorrowMut<'brand>,
     {
         let child_idx = self
             .get_node(token, parent_idx)
@@ -469,15 +481,16 @@ impl<'brand, K, V> BrandedBPlusTree<'brand, K, V> {
         }
     }
 
-    fn insert_non_full(
+    fn insert_non_full<Token>(
         &mut self,
-        token: &mut GhostToken<'brand>,
+        token: &mut Token,
         node_idx: usize,
         key: K,
         value: V,
     ) -> Option<V>
     where
         K: Ord + Clone,
+        Token: crate::token::traits::GhostBorrowMut<'brand>,
     {
         let node = self.get_node_mut(token, node_idx);
 
@@ -522,8 +535,8 @@ impl<'brand, K, V> BrandedBPlusTree<'brand, K, V> {
 
                 if self.get_node(token, child_idx).is_full() {
                     self.split_child(token, node_idx, idx);
-                    let k = unsafe { self.get_node(token, node_idx).key_at(idx) };
-                    if key > *k {
+                    let k = self.get_node(token, node_idx).key_at(idx);
+                    if key >= *k {
                         idx += 1;
                     }
                     let new_child_idx = self.get_node(token, node_idx).child_at(idx);
@@ -542,14 +555,17 @@ impl<'brand, K, V> Default for BrandedBPlusTree<'brand, K, V> {
     }
 }
 
-pub struct Iter<'a, 'brand, K, V> {
+pub struct Iter<'a, 'brand, K, V, Token> {
     tree: &'a BrandedBPlusTree<'brand, K, V>,
-    token: &'a GhostToken<'brand>,
+    token: &'a Token,
     leaf_idx: Option<usize>,
     key_idx: usize,
 }
 
-impl<'a, 'brand, K, V> Iterator for Iter<'a, 'brand, K, V> {
+impl<'a, 'brand, K, V, Token> Iterator for Iter<'a, 'brand, K, V, Token>
+where
+    Token: crate::token::traits::GhostBorrow<'brand>,
+{
     type Item = (&'a K, &'a V);
     fn next(&mut self) -> Option<Self::Item> {
         let idx = self.leaf_idx?;
@@ -579,6 +595,32 @@ impl<'a, 'brand, K, V> Iterator for Iter<'a, 'brand, K, V> {
             self.leaf_idx = None;
             return None;
         }
+    }
+}
+
+impl<'brand, K, V> ZeroCopyMapOps<'brand, K, V> for BrandedBPlusTree<'brand, K, V> {
+    fn find_ref<'a, F, Token>(&'a self, token: &'a Token, f: F) -> Option<(&'a K, &'a V)>
+    where
+        F: Fn(&K, &V) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
+    {
+        self.iter(token).find(|(k, v)| f(k, v))
+    }
+
+    fn any_ref<F, Token>(&self, token: &Token, f: F) -> bool
+    where
+        F: Fn(&K, &V) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
+    {
+        self.iter(token).any(|(k, v)| f(k, v))
+    }
+
+    fn all_ref<F, Token>(&self, token: &Token, f: F) -> bool
+    where
+        F: Fn(&K, &V) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
+    {
+        self.iter(token).all(|(k, v)| f(k, v))
     }
 }
 

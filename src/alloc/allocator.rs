@@ -1,4 +1,5 @@
-use crate::GhostToken;
+// use crate::GhostToken;
+use crate::token::traits::GhostBorrow;
 use core::alloc::Layout;
 use core::ptr::NonNull;
 
@@ -8,7 +9,7 @@ use core::ptr::NonNull;
 /// the `GhostCell` ecosystem. The allocated memory is tied to the `'brand` lifetime.
 ///
 /// This trait requires the allocator to be thread-safe (`Sync`) and support
-/// concurrent allocation via a shared `&GhostToken`.
+/// concurrent allocation via a shared token (implementing `GhostBorrow`).
 pub trait GhostAlloc<'brand>: Sync {
     /// Allocates memory according to the given layout.
     ///
@@ -16,7 +17,7 @@ pub trait GhostAlloc<'brand>: Sync {
     /// Returns `AllocError` if allocation fails.
     fn allocate(
         &self,
-        token: &GhostToken<'brand>,
+        token: &impl GhostBorrow<'brand>,
         layout: Layout,
     ) -> Result<NonNull<u8>, AllocError>;
 
@@ -29,7 +30,7 @@ pub trait GhostAlloc<'brand>: Sync {
     /// The hint is advisory; the allocator may ignore it or normalize it.
     fn allocate_in(
         &self,
-        token: &GhostToken<'brand>,
+        token: &impl GhostBorrow<'brand>,
         layout: Layout,
         _shard_hint: Option<usize>,
     ) -> Result<NonNull<u8>, AllocError> {
@@ -43,7 +44,7 @@ pub trait GhostAlloc<'brand>: Sync {
     /// `layout` must be the same layout that was used to allocate that block of memory.
     unsafe fn deallocate(
         &self,
-        token: &GhostToken<'brand>,
+        token: &impl GhostBorrow<'brand>,
         ptr: NonNull<u8>,
         layout: Layout,
     );

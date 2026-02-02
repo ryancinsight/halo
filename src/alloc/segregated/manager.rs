@@ -1,10 +1,11 @@
 use crate::GhostToken;
 use crate::token::traits::GhostBorrow;
 use crate::alloc::segregated::size_class::SizeClass;
-use crate::alloc::segregated::slab::BrandedSlab;
+use crate::alloc::segregated::slab::SegregatedSlab;
 use crate::alloc::segregated::freelist::BrandedFreelist;
-use crate::alloc::page::{PageAlloc, GlobalPageAlloc};
-use core::sync::atomic::{AtomicPtr, Ordering};
+use crate::alloc::page::{PageAlloc, PAGE_SIZE};
+use crate::concurrency::sync::{wait_on_u32, wake_one_u32, wake_all_u32};
+use core::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
 use core::ptr::{self};
 use core::alloc::Layout;
 use core::marker::PhantomData;
@@ -13,11 +14,14 @@ use core::marker::PhantomData;
 /// `SIZE` must be equal to `SC::SIZE`.
 pub struct SizeClassManager<'brand, SC: SizeClass, PA: PageAlloc + Default, const SIZE: usize, const N: usize> {
     // Active slab (allocating)
-    active: AtomicPtr<BrandedSlab<'brand, SIZE, N>>,
+    active: AtomicPtr<SegregatedSlab<'brand, SIZE, N>>,
     // Available slabs (Partial + Empty)
     available: BrandedFreelist<'brand>,
     // Track all allocated slabs to free them on drop
-    all_slabs: AtomicPtr<BrandedSlab<'brand, SIZE, N>>,
+    all_slabs: AtomicPtr<SegregatedSlab<'brand, SIZE, N>>,
+    // Lock to serialize slab creation and prevent storming the page allocator
+    // 0 = unlocked, 1 = locked
+    creation_lock: AtomicU32,
     _marker: PhantomData<(SC, PA)>,
 }
 
@@ -30,6 +34,7 @@ impl<'brand, SC: SizeClass, PA: PageAlloc + Default, const SIZE: usize, const N:
             active: AtomicPtr::new(ptr::null_mut()),
             available: BrandedFreelist::new(),
             all_slabs: AtomicPtr::new(ptr::null_mut()),
+            creation_lock: AtomicU32::new(0),
             _marker: PhantomData,
         }
     }
@@ -46,13 +51,65 @@ impl<'brand, SC: SizeClass, PA: PageAlloc + Default, const SIZE: usize, const N:
             }
 
             // Need new active.
-            let new_active = if let Some(slab_ptr) = unsafe { self.available.pop(token) } {
-                slab_ptr as *mut BrandedSlab<'brand, SIZE, N>
-            } else {
+            // First, try to pop from available slabs.
+            if let Some(slab_ptr) = unsafe { self.available.pop(token) } {
+                let new_active = slab_ptr.as_ptr() as *mut SegregatedSlab<'brand, SIZE, N>;
+                // Try install new active
+                match self.active.compare_exchange(
+                    active_ptr,
+                    new_active,
+                    Ordering::AcqRel,
+                    Ordering::Acquire
+                ) {
+                    Ok(old_ptr) => {
+                        // We replaced old_ptr with new_active.
+                        // Check if old_ptr needs to be saved (maybe it became non-full?).
+                        if old_ptr != ptr::null_mut() {
+                             let old_slab = unsafe { &*old_ptr };
+                             if !old_slab.is_full() {
+                                 unsafe { self.available.push(token, core::ptr::NonNull::new_unchecked(old_ptr as *mut u8)); }
+                             }
+                        }
+                        // Now alloc from the new active
+                        let slab = unsafe { &*new_active };
+                        if let Some(p) = slab.alloc(token) {
+                            return Some(p);
+                        }
+                        // If failed (should not happen if we just popped it), loop again.
+                        continue;
+                    },
+                    Err(_) => {
+                        // Race. Someone else installed active.
+                        // Push our popped slab back to available.
+                        unsafe { self.available.push(token, core::ptr::NonNull::new_unchecked(new_active as *mut u8)); }
+                        continue;
+                    }
+                }
+            }
+
+            // Available is empty. We need to allocate a new slab.
+            // Use futex lock to prevent multiple threads from allocating simultaneously.
+            if self.creation_lock.compare_exchange(0, 1, Ordering::Acquire, Ordering::Relaxed).is_ok() {
+                // Acquired lock.
+                // Double check available in case someone pushed while we were acquiring
+                if let Some(slab_ptr) = unsafe { self.available.pop(token) } {
+                     // Someone filled available. Use it.
+                     self.creation_lock.store(0, Ordering::Release);
+                     wake_all_u32(&self.creation_lock);
+                     
+                     // We just use the normal flow by pushing it back and continuing
+                     unsafe { self.available.push(token, slab_ptr); }
+                     continue; 
+                }
+
                 // Alloc new
-                let slab = match BrandedSlab::new_in(&PA::default()) {
+                let slab = match SegregatedSlab::new_in(&PA::default()) {
                     Some(non_null) => non_null.as_ptr(),
-                    None => return None,
+                    None => {
+                        self.creation_lock.store(0, Ordering::Release);
+                        wake_one_u32(&self.creation_lock);
+                        return None;
+                    }
                 };
 
                 // Register in all_slabs
@@ -71,39 +128,23 @@ impl<'brand, SC: SizeClass, PA: PageAlloc + Default, const SIZE: usize, const N:
                         Err(actual) => current_all = actual,
                     }
                 }
-                slab
-            };
-
-            // Try install new active
-            match self.active.compare_exchange(
-                active_ptr,
-                new_active,
-                Ordering::AcqRel,
-                Ordering::Acquire
-            ) {
-                Ok(old_ptr) => {
-                    // We replaced old_ptr with new_active.
-                    // Check if old_ptr needs to be saved (maybe it became non-full?).
-                    if old_ptr != ptr::null_mut() {
-                         let old_slab = unsafe { &*old_ptr };
-                         if !old_slab.is_full() {
-                             unsafe { self.available.push(token, old_ptr as *mut u8); }
-                         }
-                    }
-                },
-                Err(_) => {
-                    // Race. Someone else installed active.
-                    // We have new_active (either from available or new).
-                    // Push it back to available so we don't leak it.
-                    unsafe { self.available.push(token, new_active as *mut u8); }
-                }
+                
+                // We have a new slab. Push to available and let loop handle it.
+                // This is simpler than trying to install it directly and handling races again.
+                unsafe { self.available.push(token, core::ptr::NonNull::new_unchecked(slab as *mut u8)); }
+                
+                self.creation_lock.store(0, Ordering::Release);
+                wake_one_u32(&self.creation_lock);
+            } else {
+                // Failed to acquire lock. Wait.
+                wait_on_u32(&self.creation_lock, 1);
             }
         }
     }
 
     pub unsafe fn free(&self, token: &impl GhostBorrow<'brand>, ptr: *mut u8) {
         // Find slab
-        let slab_ptr = BrandedSlab::<'brand, SIZE, N>::from_ptr(ptr);
+        let slab_ptr = SegregatedSlab::<'brand, SIZE, N>::from_ptr(ptr);
         let slab = slab_ptr.as_ref();
 
         let prev_count = slab.free(token, ptr);
@@ -111,7 +152,7 @@ impl<'brand, SC: SizeClass, PA: PageAlloc + Default, const SIZE: usize, const N:
         if prev_count == N {
             // Transitioned from Full (N) to Available (N-1).
             // We are the thread that broke the fullness.
-            self.available.push(token, slab_ptr.as_ptr() as *mut u8);
+            self.available.push(token, core::ptr::NonNull::new_unchecked(slab_ptr.as_ptr() as *mut u8));
         }
     }
 
@@ -149,7 +190,7 @@ impl<'brand, SC: SizeClass, PA: PageAlloc + Default, const SIZE: usize, const N:
     fn drop(&mut self) {
         // We only need to iterate all_slabs and free them.
         let mut current = self.all_slabs.load(Ordering::Relaxed);
-        let layout = unsafe { Layout::from_size_align_unchecked(4096, 4096) };
+        let layout = unsafe { Layout::from_size_align_unchecked(PAGE_SIZE, PAGE_SIZE) };
 
         while !current.is_null() {
             unsafe {
@@ -160,7 +201,7 @@ impl<'brand, SC: SizeClass, PA: PageAlloc + Default, const SIZE: usize, const N:
                 ptr::drop_in_place(current);
                 PA::default().dealloc_page(current as *mut u8, layout);
 
-                current = next_val as *mut BrandedSlab<'brand, SIZE, N>;
+                current = next_val as *mut SegregatedSlab<'brand, SIZE, N>;
             }
         }
     }

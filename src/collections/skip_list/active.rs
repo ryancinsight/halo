@@ -1,22 +1,27 @@
 //! Active wrapper for `BrandedSkipList`.
 
-use super::branded::{Iter, IterMut};
 use super::BrandedSkipList;
 use crate::collections::BrandedCollection;
-use crate::GhostToken;
+// use crate::GhostToken;
 use std::borrow::Borrow;
 
 /// A wrapper around a mutable reference to a `BrandedSkipList` and a mutable reference to a `GhostToken`.
-pub struct ActiveSkipList<'a, 'brand, K, V> {
+pub struct ActiveSkipList<'a, 'brand, K, V, Token>
+where
+    Token: crate::token::traits::GhostBorrowMut<'brand>,
+{
     list: &'a mut BrandedSkipList<'brand, K, V>,
-    token: &'a mut GhostToken<'brand>,
+    token: &'a mut Token,
 }
 
-impl<'a, 'brand, K, V> ActiveSkipList<'a, 'brand, K, V> {
+impl<'a, 'brand, K, V, Token> ActiveSkipList<'a, 'brand, K, V, Token>
+where
+    Token: crate::token::traits::GhostBorrowMut<'brand>,
+{
     /// Creates a new active skip list handle.
     pub fn new(
         list: &'a mut BrandedSkipList<'brand, K, V>,
-        token: &'a mut GhostToken<'brand>,
+        token: &'a mut Token,
     ) -> Self {
         Self { list, token }
     }
@@ -58,36 +63,42 @@ impl<'a, 'brand, K, V> ActiveSkipList<'a, 'brand, K, V> {
     }
 
     /// Iterates over the list elements.
-    pub fn iter(&self) -> Iter<'_, 'brand, K, V> {
+    pub fn iter(&self) -> impl Iterator<Item = (&K, &V)> + '_ + use<'_, 'brand, K, V, Token> {
         self.list.iter(self.token)
     }
 
     /// Iterates over the list elements mutably.
-    pub fn iter_mut(&mut self) -> IterMut<'_, 'brand, K, V> {
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&K, &mut V)> + '_ + use<'_, 'brand, K, V, Token> {
         self.list.iter_mut(self.token)
     }
 }
 
 /// Extension trait to easily create ActiveSkipList from BrandedSkipList.
 pub trait ActivateSkipList<'brand, K, V> {
-    fn activate<'a>(
+    fn activate<'a, Token>(
         &'a mut self,
-        token: &'a mut GhostToken<'brand>,
-    ) -> ActiveSkipList<'a, 'brand, K, V>;
+        token: &'a mut Token,
+    ) -> ActiveSkipList<'a, 'brand, K, V, Token>
+    where
+        Token: crate::token::traits::GhostBorrowMut<'brand>;
 }
 
 impl<'brand, K, V> ActivateSkipList<'brand, K, V> for BrandedSkipList<'brand, K, V> {
-    fn activate<'a>(
+    fn activate<'a, Token>(
         &'a mut self,
-        token: &'a mut GhostToken<'brand>,
-    ) -> ActiveSkipList<'a, 'brand, K, V> {
+        token: &'a mut Token,
+    ) -> ActiveSkipList<'a, 'brand, K, V, Token>
+    where
+        Token: crate::token::traits::GhostBorrowMut<'brand>,
+    {
         ActiveSkipList::new(self, token)
     }
 }
 
-impl<'a, 'brand, K, V> Extend<(K, V)> for ActiveSkipList<'a, 'brand, K, V>
+impl<'a, 'brand, K, V, Token> Extend<(K, V)> for ActiveSkipList<'a, 'brand, K, V, Token>
 where
     K: Ord,
+    Token: crate::token::traits::GhostBorrowMut<'brand>,
 {
     fn extend<T: IntoIterator<Item = (K, V)>>(&mut self, iter: T) {
         for (k, v) in iter {

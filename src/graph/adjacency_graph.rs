@@ -2,7 +2,7 @@
 //!
 //! This representation prioritizes **dynamic updates** (edge/vertex insertion and deletion)
 //! while preserving halo's **ghost-token** aliasing discipline:
-//! - adjacency lists are stored as `GhostCell<'brand, Vec<usize>>`
+//! - adjacency lists are stored as `GhostCell<'brand, BrandedVec<'brand, usize>>`
 //! - reading requires `&GhostToken<'brand>`
 //! - mutation requires `&mut GhostToken<'brand>`
 //!
@@ -34,7 +34,7 @@ use crate::{
 /// | `out_degree` | \(O(1)\) | returns `Vec::len` |
 /// | `in_degree` | \(O(n + m)\) | Scans all adjacency lists |
 pub struct GhostAdjacencyGraph<'brand> {
-    adjacency: BrandedVec<'brand, Vec<usize>>,
+    adjacency: BrandedVec<'brand, BrandedVec<'brand, usize>>,
     visited: VisitedFlags<'brand>,
 }
 
@@ -43,7 +43,7 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
     pub fn new(vertex_count: usize) -> Self {
         let mut adjacency = BrandedVec::with_capacity(vertex_count);
         for _ in 0..vertex_count {
-            adjacency.push(Vec::new());
+            adjacency.push(BrandedVec::new());
         }
         let visited = VisitedFlags::new(vertex_count);
 
@@ -70,7 +70,8 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
         }
         let mut adjacency = BrandedVec::with_capacity(vertex_count);
         for list in adjacency_lists {
-            adjacency.push(list);
+            let branded_list: BrandedVec<'brand, usize> = list.into_iter().collect();
+            adjacency.push(branded_list);
         }
         let visited = VisitedFlags::new(vertex_count);
 
@@ -83,7 +84,7 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
     #[inline]
     pub fn add_vertex(&mut self) -> usize {
         let idx = self.adjacency.len();
-        self.adjacency.push(Vec::new());
+        self.adjacency.push(BrandedVec::new());
         self.visited.push();
         idx
     }
@@ -107,16 +108,23 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
             }
             let nbrs = self.adjacency.borrow_mut(token, u);
 
-            // Remove vertex if present
-            // Since sorted, we could use binary search, but we need to shift anyway.
-            nbrs.retain(|&v| v != vertex);
-
-            // Shift indices above removed vertex.
-            for v in nbrs.iter_mut() {
-                if *v > vertex {
-                    *v -= 1;
+            // Remove vertex if present and shift indices above `vertex`.
+            let mut write = 0usize;
+            {
+                let slice = nbrs.as_mut_slice_exclusive();
+                for read in 0..slice.len() {
+                    let mut value = slice[read];
+                    if value == vertex {
+                        continue;
+                    }
+                    if value > vertex {
+                        value -= 1;
+                    }
+                    slice[write] = value;
+                    write += 1;
                 }
             }
+            nbrs.truncate(write);
         }
 
         // Remove the vertex itself (outgoing edges are dropped here).
@@ -139,7 +147,8 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
         assert!(to < self.vertex_count(), "to vertex {to} out of bounds");
         let nbrs = self.adjacency.borrow_mut(token, from);
 
-        match nbrs.binary_search(&to) {
+        let search = nbrs.as_mut_slice_exclusive().binary_search(&to);
+        match search {
             Ok(_) => {} // Already exists
             Err(pos) => nbrs.insert(pos, to),
         }
@@ -158,7 +167,7 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
         assert!(to < self.vertex_count(), "to vertex {to} out of bounds");
         let nbrs = self.adjacency.borrow_mut(token, from);
 
-        if let Ok(pos) = nbrs.binary_search(&to) {
+        if let Ok(pos) = nbrs.as_mut_slice_exclusive().binary_search(&to) {
             nbrs.remove(pos);
             true
         } else {
@@ -215,7 +224,7 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
         );
         assert!(to < self.vertex_count(), "to vertex {to} out of bounds");
         let nbrs = self.adjacency.borrow(token, from);
-        nbrs.binary_search(&to).is_ok()
+        nbrs.as_slice(token).binary_search(&to).is_ok()
     }
 
     /// Returns the out-neighbors of a vertex.
@@ -224,12 +233,12 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
         &'a self,
         token: &'a GhostToken<'brand>,
         vertex: usize,
-    ) -> impl Iterator<Item = usize> + 'a {
+    ) -> impl Iterator<Item = usize> + 'a + use<'a, 'brand> {
         assert!(
             vertex < self.vertex_count(),
             "vertex {vertex} out of bounds"
         );
-        self.adjacency.borrow(token, vertex).iter().copied()
+        self.adjacency.borrow(token, vertex).iter(token).copied()
     }
 
     /// Returns the in-neighbors of a vertex.
@@ -266,14 +275,14 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
 
         self.reset_visited();
         self.visited.mark(start, Ordering::Relaxed);
-        stack.push(start);
+        stack.push(token, start);
 
         let mut count = 1;
 
-        while let Some(vertex) = stack.pop() {
+        while let Some(vertex) = stack.pop(token) {
             for neighbor in self.out_neighbors(token, vertex) {
                 if self.visited.try_visit(neighbor, Ordering::Relaxed) {
-                    stack.push(neighbor);
+                    stack.push(token, neighbor);
                     count += 1;
                 }
             }
@@ -296,14 +305,15 @@ impl<'brand> GhostAdjacencyGraph<'brand> {
 
         self.reset_visited();
         self.visited.mark(start, Ordering::Relaxed);
-        assert!(deque.push_bottom(start), "deque capacity too small");
+        assert!(deque.push_bottom(token, start), "deque capacity too small");
+        let steal_token = token.split_immutable().0;
 
         let mut count = 1;
 
-        while let Some(vertex) = deque.steal() {
+        while let Some(vertex) = deque.steal(&steal_token) {
             for neighbor in self.out_neighbors(token, vertex) {
                 if self.visited.try_visit(neighbor, Ordering::Relaxed) {
-                    assert!(deque.push_bottom(neighbor), "deque capacity too small");
+                    assert!(deque.push_bottom(token, neighbor), "deque capacity too small");
                     count += 1;
                 }
             }

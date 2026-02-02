@@ -129,6 +129,13 @@ pub use token::{
     SharedGhostToken,
 };
 
+// TODO(ghost-stdlib): BrandedArc with hierarchical permissions and zero-sized brand markers.
+// TODO(ghost-stdlib): Lock-free GhostMutex/GhostRwLock equivalents using token-gated access.
+// TODO(ghost-stdlib): GhostCondvar/GhostBarrier for scoped synchronization with token gating.
+// TODO(ghost-stdlib): GhostOnceLock mirroring std::sync::OnceLock with branded access.
+// TODO(ghost-stdlib): GhostMpscChannel and GhostOneshotChannel with branded payload access.
+// TODO(ghost-stdlib): BrandedPath/OsString wrappers for token-gated access to shared buffers.
+
 // Note: std::cell::Cell is not re-exported to maintain naming consistency
 // Use GhostCell for the halo ecosystem, or import std::cell::Cell directly
 
@@ -169,4 +176,3 @@ const _: () = {
     assert!(mem::size_of::<GhostLazyCell<'static, u64>>() <= mem::size_of::<usize>() * 6);
     assert!(mem::size_of::<GhostLazyLock<'static, u64>>() <= mem::size_of::<usize>() * 6);
 };
-pub mod allocator;

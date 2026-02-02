@@ -2,229 +2,37 @@
 name = "halo"
 version = "0.1.0"
 edition = "2021"
-authors = ["Ryan Clanton <ryanclanton@outlook.com>"]
-description = "A protective toolkit for safe, high-performance data structures using ghost tokens"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/ryancinsight/halo"
-readme = "README.md"
-keywords = ["ghost-cell", "data-structures", "concurrency", "memory-safety", "performance"]
-categories = ["data-structures", "concurrency", "memory-management"]
 
 [dependencies]
+rand = "0.8"
+smallvec = "1.11"
+crossbeam = "0.8"
+parking_lot = "0.12"
+tracing = "0.1"
+tokio = { version = "1.36", features = ["full"] }
 anyhow = "1.0"
-crossbeam-utils = "0.8"
-rayon = { version = "1.8", optional = true }
-tracing = { version = "0.1", optional = true }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-num-traits = "0.2"
-zerocopy = "0.7"
+rayon = "1.10"
+rkyv = "0.7"
+wgpu = "0.19"
+bytemuck = "1.14"
+futures = "0.3"
+syn = "2.0"
+quote = "1.0"
+proc-macro2 = "1.0"
+windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_System_Memory", "Win32_System_Threading"] }
 proptest = { version = "1.4", optional = true }
-libc = "0.2"
-windows-sys = { version = "0.52", features = ["Win32_System_Memory", "Win32_Foundation", "Win32_System_SystemInformation"] }
 
 [dev-dependencies]
 criterion = "0.5"
 proptest = "1.4"
-loom = "0.7"
-petgraph = "0.6"
-mimalloc = "0.1"
-snmalloc-rs = "0.3"
-
-[[bench]]
-name = "halo_benchmark"
-harness = false
-
-[[bench]]
-name = "ghostcell_benchmark"
-harness = false
-
-[[bench]]
-name = "collections_benchmark"
-harness = false
-
-[[bench]]
-name = "dag_benchmark"
-harness = false
-
-[[bench]]
-name = "collection_performance"
-harness = false
-
-[[bench]]
-name = "binary_heap_benchmark"
-harness = false
-
-[[bench]]
-name = "lru_cache_benchmark"
-harness = false
-
-[[bench]]
-name = "iterators_benchmark"
-harness = false
-
-[[bench]]
-name = "linked_list_benchmark"
-harness = false
-
-[[bench]]
-name = "small_vec_benchmark"
-harness = false
-
-[[bin]]
-name = "analyze_performance"
-path = "analyze_performance.rs"
 
 [features]
-default = []
-parallel = ["rayon"]
-tracing = ["dep:tracing"]
 proptest = ["dep:proptest"]
-
-[profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
-panic = "abort"
-debug = true
-[[bench]]
-name = "skip_list_benchmark"
-harness = false
-
-[[bench]]
-name = "slot_map_benchmark"
-harness = false
-
-[[bench]]
-name = "index_map_benchmark"
-harness = false
-
-[[bench]]
-name = "alloc_benchmark"
-harness = false
-
-[[bench]]
-name = "interval_map_benchmark"
-harness = false
-
-[[bench]]
-name = "trie_benchmark"
-harness = false
-[[bench]]
-name = "active_map_benchmark"
-harness = false
-
-[[bench]]
-name = "shared_token_benchmark"
-harness = false
-
-[[bench]]
-name = "matrix_benchmark"
-harness = false
-
-[[bench]]
-name = "string_benchmark"
-harness = false
-
-[[bench]]
-name = "active_set_benchmark"
-harness = false
 
 [[bench]]
 name = "bplus_tree_benchmark"
 harness = false
 
-[[bench]]
-name = "memory_primitives_benchmark"
-harness = false
-
-[[bench]]
-name = "segment_tree_benchmark"
-harness = false
-
-[[bench]]
-name = "tripod_list_benchmark"
-harness = false
-
-[[bench]]
-name = "fenwick_benchmark"
-harness = false
-
-[[bench]]
-name = "disjoint_set_benchmark"
-harness = false
-[[bench]]
-name = "vec_deque_drain_benchmark"
-harness = false
-
-[[bench]]
-name = "sync_benchmark"
-harness = false
-
-[[bench]]
-name = "btree_benchmark"
-harness = false
-
-[[bench]]
-name = "graph_benchmark"
-harness = false
-
-[[bench]]
-name = "csr_benchmark"
-harness = false
-
-[[bench]]
-name = "interner_benchmark"
-harness = false
-
-[[bench]]
-name = "bloom_benchmark"
-harness = false
-
-[[bench]]
-name = "amt_graph_benchmark"
-harness = false
-
-[[bench]]
-name = "compressed_graph_benchmark"
-harness = false
-
-[[bench]]
-name = "cow_strings_benchmark"
-harness = false
-
-[[bench]]
-name = "alloc_mimalloc"
-harness = false
-
-[[bench]]
-name = "alloc_snmalloc"
-harness = false
-
-[[bench]]
-name = "static_token_benchmark"
-harness = false
-
-[[bench]]
-name = "hierarchy_benchmark"
-harness = false
-
-[[bench]]
-name = "segregated_alloc_bench"
-harness = false
-
-[[bench]]
-name = "bootstrap_bench"
-harness = false
-
-[[bench]]
-name = "alloc_halo"
-harness = false
-
-[[bench]]
-name = "alloc_system"
-harness = false
-
-[[bench]]
-name = "lel_graph_benchmark"
-harness = false
+[[test]]
+name = "bplus_tree_proptest"
+path = "tests/bplus_tree_proptest.rs"

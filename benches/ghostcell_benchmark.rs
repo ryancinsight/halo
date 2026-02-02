@@ -408,8 +408,12 @@ fn bench_parallel_graph_traversal(c: &mut Criterion) {
             let g = halo::GhostCsrGraph::<1024>::from_csr_parts(offsets.clone(), edges.clone());
             let stack: halo::concurrency::worklist::GhostTreiberStack<'_> =
                 halo::concurrency::worklist::GhostTreiberStack::new(N);
+            let visited: halo::concurrency::atomic::GhostAtomicBitset<'_> =
+                halo::concurrency::atomic::GhostAtomicBitset::new(N);
             b.iter(|| {
-                black_box(g.parallel_reachable_count_batched_with_stack(0, THREADS, &stack, BATCH))
+                black_box(g.parallel_reachable_count_batched_with_stack_bitset(
+                    0, THREADS, &stack, BATCH, &visited,
+                ))
             });
         });
     });
@@ -459,9 +463,13 @@ fn bench_parallel_graph_traversal_high_contention(c: &mut Criterion) {
                 let g = halo::GhostCsrGraph::<1024>::from_csr_parts(offsets.clone(), edges.clone());
                 let stack: halo::concurrency::worklist::GhostTreiberStack<'_> =
                     halo::concurrency::worklist::GhostTreiberStack::new(N);
+                let visited: halo::concurrency::atomic::GhostAtomicBitset<'_> =
+                    halo::concurrency::atomic::GhostAtomicBitset::new(N);
                 b.iter(|| {
                     black_box(
-                        g.parallel_reachable_count_batched_with_stack(0, THREADS, &stack, BATCH),
+                        g.parallel_reachable_count_batched_with_stack_bitset(
+                            0, THREADS, &stack, BATCH, &visited,
+                        ),
                     )
                 });
             });

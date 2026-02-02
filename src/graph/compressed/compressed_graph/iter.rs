@@ -8,6 +8,7 @@ pub struct CompressedNeighborIter<'a> {
 }
 
 impl<'a> CompressedNeighborIter<'a> {
+    /// Creates a new neighbor iterator.
     #[inline]
     pub fn new(edges: &'a [usize], start: usize, end: usize) -> Self {
         Self {

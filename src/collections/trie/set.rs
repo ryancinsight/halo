@@ -1,8 +1,9 @@
-use core::marker::PhantomData;
+// use core::marker::PhantomData;
 
 use super::map::BrandedRadixTrieMap;
 use crate::collections::{BrandedCollection, ZeroCopyOps};
-use crate::GhostToken;
+use crate::GhostBorrow;
+use crate::GhostBorrowMut;
 
 /// A high-performance Radix Trie Set optimized for branded usage.
 ///
@@ -43,9 +44,10 @@ impl<'brand, T> BrandedRadixTrieSet<'brand, T> {
 
     /// Iterates over all elements, passing the value (as slice) to the closure.
     /// This avoids allocating a new Vec for each value.
-    pub fn for_each<F>(&self, token: &GhostToken<'brand>, mut f: F)
+    pub fn for_each<F, Token>(&self, token: &Token, mut f: F)
     where
         F: FnMut(&[u8]),
+        Token: GhostBorrow<'brand>,
     {
         self.map.for_each(token, |k, _| f(k));
     }
@@ -57,19 +59,36 @@ where
 {
     /// Adds a value to the set.
     /// Returns whether the value was newly inserted.
-    pub fn insert(&mut self, token: &mut GhostToken<'brand>, value: T) -> bool {
+    pub fn insert<Token>(&mut self, token: &mut Token, value: T) -> bool
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         self.map.insert(token, value, ()).is_none()
     }
 
     /// Returns true if the set contains the value.
-    pub fn contains(&self, token: &GhostToken<'brand>, value: T) -> bool {
+    pub fn contains<Token>(&self, token: &Token, value: T) -> bool
+    where
+        Token: GhostBorrow<'brand>,
+    {
         self.map.get(token, value).is_some()
     }
 
     /// Removes a value from the set.
     /// Returns whether the value was present.
-    pub fn remove(&mut self, token: &mut GhostToken<'brand>, value: T) -> bool {
+    pub fn remove<Token>(&mut self, token: &mut Token, value: T) -> bool
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         self.map.remove(token, value).is_some()
+    }
+
+    /// Returns an iterator over the keys in the set.
+    pub fn iter<'a, Token>(&'a self, token: &'a Token) -> impl Iterator<Item = crate::alloc::BrandedRc<'brand, crate::collections::vec::BrandedVec<'brand, u8>>> + use<'a, 'brand, T, Token>
+    where
+        Token: GhostBorrow<'brand>,
+    {
+        self.map.iter(token).map(|(k, _)| k)
     }
 }
 
@@ -92,16 +111,18 @@ where
     // The keys are implicit.
     // So find_ref is hard.
 
-    fn find_ref<'a, F>(&'a self, _token: &'a GhostToken<'brand>, _f: F) -> Option<&'a T>
+    fn find_ref<'a, F, Token>(&'a self, _token: &'a Token, _f: F) -> Option<&'a T>
     where
         F: Fn(&T) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         None // Placeholder
     }
 
-    fn any_ref<F>(&self, _token: &GhostToken<'brand>, _f: F) -> bool
+    fn any_ref<F, Token>(&self, _token: &Token, _f: F) -> bool
     where
         F: Fn(&T) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         // For sets, T is implicit in keys. Iterating keys is expensive for `any_ref`?
         // We can traverse.
@@ -110,9 +131,10 @@ where
         false
     }
 
-    fn all_ref<F>(&self, _token: &GhostToken<'brand>, _f: F) -> bool
+    fn all_ref<F, Token>(&self, _token: &Token, _f: F) -> bool
     where
         F: Fn(&T) -> bool,
+        Token: crate::token::traits::GhostBorrow<'brand>,
     {
         true
     }

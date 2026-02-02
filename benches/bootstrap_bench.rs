@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use halo::allocator::bootstrap::arena::BootstrapArena;
+use halo::alloc::bootstrap::arena::BootstrapArena;
 
 fn bootstrap_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("bootstrap");

@@ -416,7 +416,7 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
     where
         F: FnMut(&mut T),
     {
-        let mut state = self.state.borrow_mut(token);
+        let state = self.state.borrow_mut(token);
 
         // Process nursery with mutation capability
         state.nursery.for_each_mut_exclusive(|value| f(value));
@@ -463,10 +463,10 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
     /// Based on research in adaptive memory management and cache-oblivious algorithms.
     #[inline]
     pub fn maintenance(&self, token: &mut GhostToken<'brand>) {
-        let mut state = self.state.borrow_mut(token);
+        let state = self.state.borrow_mut(token);
 
         // Cache-oblivious adaptive threshold tuning
-        Self::adapt_threshold_cache_oblivious_inner(&mut state, CHUNK);
+        Self::adapt_threshold_cache_oblivious_inner(state, CHUNK);
 
         // Advance epoch for deferred reclamation tracking
         state.allocation_epoch = state.allocation_epoch.wrapping_add(1);
@@ -564,7 +564,7 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
     /// - Aims for optimal balance between nursery and mature generations
     #[inline]
     pub fn adapt_threshold(&self, token: &mut GhostToken<'brand>) {
-        let mut state = self.state.borrow_mut(token);
+        let state = self.state.borrow_mut(token);
         let stats = Self::memory_stats_inner(&state, CHUNK);
         let efficiency = stats.cache_efficiency_ratio();
 
@@ -727,7 +727,7 @@ impl<'brand, T, const CHUNK: usize> BrandedArena<'brand, T, CHUNK> {
     where
         F: FnMut(&mut T),
     {
-        let mut state = self.state.borrow_mut(token);
+        let state = self.state.borrow_mut(token);
 
         // Process nursery first for cache locality
         state.nursery.for_each_mut_exclusive(|elem| f(elem));

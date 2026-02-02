@@ -11,6 +11,7 @@
 use core::sync::atomic::{fence, Ordering};
 
 use crate::concurrency::atomic::GhostAtomicUsize;
+use crate::token::{GhostBorrowMut, ImmutableChild};
 
 use super::treiber_stack::NONE;
 
@@ -40,7 +41,8 @@ impl<'brand> GhostChaseLevDeque<'brand> {
 
     /// Clears the deque (logical reset).
     #[inline]
-    pub fn clear(&self) {
+    pub fn clear<T: GhostBorrowMut<'brand>>(&self, token: &T) {
+        let _ = token;
         self.top.store(0, Ordering::Relaxed);
         self.bottom.store(0, Ordering::Relaxed);
     }
@@ -48,7 +50,8 @@ impl<'brand> GhostChaseLevDeque<'brand> {
     /// Attempts to push `x` to the bottom. Owner-only.
     ///
     /// Returns `false` if the deque is full.
-    pub fn push_bottom(&self, x: usize) -> bool {
+    pub fn push_bottom<T: GhostBorrowMut<'brand>>(&self, token: &T, x: usize) -> bool {
+        let _ = token;
         debug_assert!(x != NONE);
         let b = self.bottom.load(Ordering::Relaxed);
         let t = self.top.load(Ordering::Acquire);
@@ -67,7 +70,8 @@ impl<'brand> GhostChaseLevDeque<'brand> {
     }
 
     /// Attempts to pop from the bottom. Owner-only.
-    pub fn pop_bottom(&self) -> Option<usize> {
+    pub fn pop_bottom<T: GhostBorrowMut<'brand>>(&self, token: &T) -> Option<usize> {
+        let _ = token;
         // Load bottom first; if empty, avoid underflow.
         let b = self.bottom.load(Ordering::Relaxed);
         let t0 = self.top.load(Ordering::Acquire);
@@ -103,7 +107,8 @@ impl<'brand> GhostChaseLevDeque<'brand> {
     }
 
     /// Attempts to steal from the top. Multi-stealer.
-    pub fn steal(&self) -> Option<usize> {
+    pub fn steal<'a>(&self, token: &ImmutableChild<'a, 'brand>) -> Option<usize> {
+        let _ = token;
         loop {
             let t = self.top.load(Ordering::Acquire);
             fence(Ordering::SeqCst);

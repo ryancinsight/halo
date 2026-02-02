@@ -1,7 +1,7 @@
 use super::branded_box::BrandedBox;
 use crate::cell::GhostCell;
 use crate::token::InvariantLifetime;
-use crate::GhostToken;
+use crate::token::{GhostBorrow, GhostBorrowMut};
 use core::alloc::Layout;
 use core::mem::{self, MaybeUninit};
 use core::ops::Deref;
@@ -84,18 +84,16 @@ impl<'id, T, const N: usize, const D: usize> StaticRc<'id, T, N, D> {
         mem::forget(self);
 
         // SAFETY: We are just splitting ownership, ptr remains valid.
-        unsafe {
-            (
-                StaticRc {
-                    ptr,
-                    _brand: InvariantLifetime::default(),
-                },
-                StaticRc {
-                    ptr,
-                    _brand: InvariantLifetime::default(),
-                },
-            )
-        }
+        (
+            StaticRc {
+                ptr,
+                _brand: InvariantLifetime::default(),
+            },
+            StaticRc {
+                ptr,
+                _brand: InvariantLifetime::default(),
+            },
+        )
     }
 
     /// Adjusts the total density `D` using type-level arithmetic.
@@ -110,11 +108,9 @@ impl<'id, T, const N: usize, const D: usize> StaticRc<'id, T, N, D> {
         assert_eq!(N * NEW_D, NEW_N * D, "Ownership fraction must be preserved");
         let ptr = self.ptr;
         mem::forget(self);
-        unsafe {
-            StaticRc {
-                ptr,
-                _brand: InvariantLifetime::default(),
-            }
+        StaticRc {
+            ptr,
+            _brand: InvariantLifetime::default(),
         }
     }
 
@@ -142,11 +138,9 @@ impl<'id, T, const N: usize, const D: usize> StaticRc<'id, T, N, D> {
         mem::forget(self);
         mem::forget(other);
 
-        unsafe {
-            StaticRc {
-                ptr,
-                _brand: InvariantLifetime::default(),
-            }
+        StaticRc {
+            ptr,
+            _brand: InvariantLifetime::default(),
         }
     }
 
@@ -216,11 +210,9 @@ impl<'id, T, const D: usize> StaticRc<'id, T, D, D> {
     /// This reuses the allocation.
     pub fn from_branded_box(b: BrandedBox<'id, T>) -> Self {
         let ptr = b.into_raw();
-        unsafe {
-            Self {
-                ptr,
-                _brand: InvariantLifetime::default(),
-            }
+        Self {
+            ptr,
+            _brand: InvariantLifetime::default(),
         }
     }
 
@@ -354,14 +346,20 @@ impl<'id, 'brand, T, const N: usize, const D: usize> StaticRc<'id, GhostCell<'br
     /// Borrows the inner `GhostCell` immutably using the provided token.
     ///
     /// This is a convenience method that forwards to `GhostCell::borrow`.
-    pub fn borrow<'a>(&'a self, token: &'a GhostToken<'brand>) -> &'a T {
+    pub fn borrow<'a, Token>(&'a self, token: &'a Token) -> &'a T
+    where
+        Token: GhostBorrow<'brand>,
+    {
         self.get().borrow(token)
     }
 
     /// Borrows the inner `GhostCell` mutably using the provided token.
     ///
     /// This is a convenience method that forwards to `GhostCell::borrow_mut`.
-    pub fn borrow_mut<'a>(&'a self, token: &'a mut GhostToken<'brand>) -> &'a mut T {
+    pub fn borrow_mut<'a, Token>(&'a self, token: &'a mut Token) -> &'a mut T
+    where
+        Token: GhostBorrowMut<'brand>,
+    {
         self.get().borrow_mut(token)
     }
 }
