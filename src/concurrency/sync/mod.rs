@@ -1,10 +1,15 @@
 pub mod ghost_barrier;
+pub mod ghost_channel;
 pub mod ghost_condvar;
 pub mod ghost_mutex;
 pub mod ghost_once_lock;
 pub mod mpmc;
 
 pub use ghost_barrier::GhostBarrier;
+pub use ghost_channel::{
+    ghost_channel, ghost_oneshot, GhostOneshotReceiver, GhostOneshotSender, GhostReceiver,
+    GhostSender, OneshotRecvError, OneshotSendError, RecvError, SendError, TryRecvError,
+};
 pub use ghost_condvar::GhostCondvar;
 pub use ghost_mutex::{GhostMutex, GhostMutexGuard};
 pub use ghost_once_lock::GhostOnceLock;
