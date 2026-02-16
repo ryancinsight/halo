@@ -128,11 +128,11 @@ pub use token::{
     GhostBorrow, GhostBorrowMut, GhostToken, HierarchicalGhostToken, ImmutableChild,
     SharedGhostToken,
 };
+pub use concurrency::sync::GhostOnceLock;
 
 // TODO(ghost-stdlib): BrandedArc with hierarchical permissions and zero-sized brand markers.
 // TODO(ghost-stdlib): Lock-free GhostMutex/GhostRwLock equivalents using token-gated access.
 // TODO(ghost-stdlib): GhostCondvar/GhostBarrier for scoped synchronization with token gating.
-// TODO(ghost-stdlib): GhostOnceLock mirroring std::sync::OnceLock with branded access.
 // TODO(ghost-stdlib): GhostMpscChannel and GhostOneshotChannel with branded payload access.
 // TODO(ghost-stdlib): BrandedPath/OsString wrappers for token-gated access to shared buffers.
 
@@ -175,4 +175,5 @@ const _: () = {
     assert!(mem::size_of::<GhostOnceCell<'static, u64>>() <= mem::size_of::<usize>() * 4);
     assert!(mem::size_of::<GhostLazyCell<'static, u64>>() <= mem::size_of::<usize>() * 6);
     assert!(mem::size_of::<GhostLazyLock<'static, u64>>() <= mem::size_of::<usize>() * 6);
+    assert!(mem::size_of::<GhostOnceLock<'static, u64>>() <= mem::size_of::<usize>() * 4);
 };

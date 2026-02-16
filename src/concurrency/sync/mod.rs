@@ -1,4 +1,7 @@
+pub mod ghost_once_lock;
 pub mod mpmc;
+
+pub use ghost_once_lock::GhostOnceLock;
 pub use mpmc::GhostRingBuffer;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize};
