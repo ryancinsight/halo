@@ -380,6 +380,7 @@ impl<'a, 'brand, T> BrandedMatrixViewMut<'a, 'brand, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::GhostToken;
 
     #[test]
     fn test_matrix_basic() {

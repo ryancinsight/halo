@@ -118,9 +118,9 @@ pub use cell::{
 pub use collections::{
     ActivateVec, ActiveDisjointSet, ActiveVec, BrandedArray, BrandedChain, BrandedCow,
     BrandedCowStrings, BrandedDisjointSet, BrandedDoublyLinkedList, BrandedHashMap, BrandedHashSet,
-    BrandedInterner, BrandedIntervalMap, BrandedMatrix, BrandedMatrixViewMut, BrandedSegmentTree,
-    BrandedSegmentTreeViewMut, BrandedSlice, BrandedSliceMut, BrandedSlotMap, BrandedString,
-    BrandedVec, BrandedVecDeque, InternId, SlotKey,
+    BrandedInterner, BrandedIntervalMap, BrandedMatrix, BrandedMatrixViewMut, BrandedOsString,
+    BrandedPathBuf, BrandedSegmentTree, BrandedSegmentTreeViewMut, BrandedSlice, BrandedSliceMut,
+    BrandedSlotMap, BrandedString, BrandedVec, BrandedVecDeque, InternId, SlotKey,
 };
 pub use alloc::{BrandedRc, StaticRc};
 pub use graph::{GhostAdjacencyGraph, GhostBipartiteGraph, GhostCscGraph, GhostCsrGraph, GhostDag};
@@ -134,7 +134,6 @@ pub use concurrency::sync::GhostOnceLock;
 // TODO(ghost-stdlib): Lock-free GhostMutex/GhostRwLock equivalents using token-gated access.
 // TODO(ghost-stdlib): GhostCondvar/GhostBarrier for scoped synchronization with token gating.
 // TODO(ghost-stdlib): GhostMpscChannel and GhostOneshotChannel with branded payload access.
-// TODO(ghost-stdlib): BrandedPath/OsString wrappers for token-gated access to shared buffers.
 
 // Note: std::cell::Cell is not re-exported to maintain naming consistency
 // Use GhostCell for the halo ecosystem, or import std::cell::Cell directly

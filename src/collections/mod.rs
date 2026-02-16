@@ -9,6 +9,7 @@
 pub mod btree;
 pub mod hash;
 pub mod other;
+pub mod path;
 pub mod skip_list;
 pub mod string;
 pub mod trie;
@@ -26,6 +27,7 @@ pub use other::{
     BrandedLruCache, BrandedSegmentTree, BrandedSegmentTreeViewMut, BrandedSlotMap, InternId,
     SlotKey, TripodList,
 };
+pub use path::{BrandedOsString, BrandedPathBuf};
 pub use skip_list::{ActivateSkipList, ActiveSkipList, BrandedSkipList};
 pub use trie::{BrandedRadixTrieMap, BrandedRadixTrieSet};
 pub use vec::{

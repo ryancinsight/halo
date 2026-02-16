@@ -20,6 +20,7 @@ syn = "2.0"
 quote = "1.0"
 proc-macro2 = "1.0"
 windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_System_Memory", "Win32_System_Threading"] }
+libc = "0.2"
 proptest = { version = "1.4", optional = true }
 
 [dev-dependencies]
