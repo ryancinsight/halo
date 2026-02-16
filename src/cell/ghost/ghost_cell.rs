@@ -12,7 +12,7 @@ use core::ptr;
 /// A branded cell that can only be accessed using a token of the same brand.
 #[repr(transparent)]
 #[derive(Debug)]
-pub struct GhostCell<'brand, T> {
+pub struct GhostCell<'brand, T: ?Sized> {
     pub(super) inner: GhostUnsafeCell<'brand, T>,
 }
 
@@ -29,6 +29,36 @@ impl<'brand, T> GhostCell<'brand, T> {
         self.inner.into_inner()
     }
 
+    /// Replaces the contained value, returning the old value.
+    #[inline]
+    pub fn replace(&self, token: &mut impl GhostBorrowMut<'brand>, value: T) -> T {
+        self.inner.replace(value, token)
+    }
+
+    /// Swaps the values of two `GhostCell`s.
+    #[inline]
+    pub fn swap(&self, token: &mut impl GhostBorrowMut<'brand>, other: &Self) {
+        let a = self.inner.as_mut_ptr(token);
+        let b = other.inner.as_mut_ptr(token);
+
+        // SAFETY:
+        // - `token` is a linear capability, so safe code cannot concurrently access
+        //   either cell mutably.
+        // - `ptr::swap` is safe for possibly-equal pointers.
+        unsafe { ptr::swap(a, b) };
+    }
+
+}
+
+impl<'brand, T: ?Sized> GhostCell<'brand, T> {
+    /// Maps the cell's value into a new `GhostCell` of the same brand.
+    #[inline]
+    pub fn map<F, U>(&self, token: &impl GhostBorrow<'brand>, f: F) -> GhostCell<'brand, U>
+    where
+        F: FnOnce(&T) -> U,
+    {
+        GhostCell::new(f(self.borrow(token)))
+    }
     /// Returns a reference to the contained value.
     ///
     /// Requires a token with read permission (implementing `GhostBorrow`).
@@ -52,25 +82,6 @@ impl<'brand, T> GhostCell<'brand, T> {
     #[inline(always)]
     pub fn get_mut(&mut self) -> &mut T {
         self.inner.get_mut_exclusive()
-    }
-
-    /// Replaces the contained value, returning the old value.
-    #[inline]
-    pub fn replace(&self, token: &mut impl GhostBorrowMut<'brand>, value: T) -> T {
-        self.inner.replace(value, token)
-    }
-
-    /// Swaps the values of two `GhostCell`s.
-    #[inline]
-    pub fn swap(&self, token: &mut impl GhostBorrowMut<'brand>, other: &Self) {
-        let a = self.inner.as_mut_ptr(token);
-        let b = other.inner.as_mut_ptr(token);
-
-        // SAFETY:
-        // - `token` is a linear capability, so safe code cannot concurrently access
-        //   either cell mutably.
-        // - `ptr::swap` is safe for possibly-equal pointers.
-        unsafe { ptr::swap(a, b) };
     }
 
     /// Returns a raw pointer to the contained value.
@@ -111,15 +122,6 @@ impl<'brand, T> GhostCell<'brand, T> {
     {
         f(self.borrow_mut(token));
     }
-
-    /// Maps the cell's value into a new `GhostCell` of the same brand.
-    #[inline]
-    pub fn map<F, U>(&self, token: &impl GhostBorrow<'brand>, f: F) -> GhostCell<'brand, U>
-    where
-        F: FnOnce(&T) -> U,
-    {
-        GhostCell::new(f(self.borrow(token)))
-    }
 }
 
 impl<'brand, T: Copy> GhostCell<'brand, T> {
@@ -157,8 +159,8 @@ impl<'brand, T> From<T> for GhostCell<'brand, T> {
 }
 
 // SAFETY: same reasoning as `GhostUnsafeCell` — safe access is token-gated.
-unsafe impl<'brand, T: Send> Send for GhostCell<'brand, T> {}
-unsafe impl<'brand, T: Sync> Sync for GhostCell<'brand, T> {}
+unsafe impl<'brand, T: ?Sized + Send> Send for GhostCell<'brand, T> {}
+unsafe impl<'brand, T: ?Sized + Sync> Sync for GhostCell<'brand, T> {}
 
 #[cfg(feature = "proptest")]
 impl<'brand, T: proptest::arbitrary::Arbitrary> proptest::arbitrary::Arbitrary
