@@ -15,6 +15,11 @@ use core::ptr::NonNull;
 use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::alloc::{alloc, dealloc};
 use std::cell::UnsafeCell;
+use std::sync::Mutex;
+
+// Global Page Pool (Treiber Stack) for eager return.
+// Stores pages that were freed eagerly.
+static GLOBAL_PAGE_POOL: CachePadded<AtomicUsize> = CachePadded::new(AtomicUsize::new(0));
 
 // Unique Thread ID generator for Page Ownership
 static NEXT_THREAD_ID: AtomicU64 = AtomicU64::new(1);
@@ -47,6 +52,7 @@ const STATE_FULL: usize = 3;
 pub(crate) struct Page {
     next: AtomicUsize, // Linked list of available pages (Stack link)
     all_next: AtomicUsize, // Linked list of all pages (for Drop/Compact)
+    all_prev: AtomicUsize, // Previous page in all_heads list (Doubly linked)
     block_size: usize,
     remote_free_head: AtomicUsize, // Stack of blocks freed by other threads (Atomic)
     local_free_head: UnsafeCell<usize>, // Stack of blocks available for local allocation (Non-Atomic)
@@ -57,9 +63,9 @@ pub(crate) struct Page {
     owner_thread: AtomicU64, // Unique ID of the thread that owns `local_free_head`
     // Padding to ensure the header size is a multiple of cache line (128 bytes)
     // to prevent false sharing between the header (metadata) and the first block (user data).
-    // Current size: 10*8 = 80 bytes (on 64-bit).
-    // We need 48 bytes of padding.
-    _padding: [u8; 48],
+    // Current size: 11*8 = 88 bytes (on 64-bit).
+    // We need 40 bytes of padding.
+    _padding: [u8; 40],
 }
 
 // Safety: `local_free_head` is only accessed by the thread that owns the Page (removed from `heads`).
@@ -68,8 +74,8 @@ unsafe impl Sync for Page {}
 
 impl Page {
     /// Allocates a new 4KB page and initializes it as a Page with blocks of `block_size`.
-    /// `next_ptr` is for `all_next` list. `next` (available stack) is initialized to 0 (detached).
-    fn new(block_size: usize, next_all_ptr: usize, shard_index: usize) -> Option<NonNull<Page>> {
+    /// `next` (available stack) is initialized to 0 (detached).
+    fn new(block_size: usize, shard_index: usize) -> Option<NonNull<Page>> {
         // Ensure alignment is 4KB so we can find the header via masking
         let layout = Layout::from_size_align(PAGE_SIZE, PAGE_SIZE).ok()?;
 
@@ -79,7 +85,7 @@ impl Page {
                 return None;
             }
 
-            match Self::init_from_ptr(ptr, block_size, next_all_ptr, shard_index) {
+            match Self::init_from_ptr(ptr, block_size, shard_index) {
                 Some(p) => Some(p),
                 None => {
                     dealloc(ptr, layout);
@@ -96,7 +102,6 @@ impl Page {
     pub(crate) unsafe fn init_from_ptr(
         ptr: *mut u8,
         block_size: usize,
-        next_all_ptr: usize,
         shard_index: usize
     ) -> Option<NonNull<Page>> {
         let page_ptr = ptr as *mut Page;
@@ -131,7 +136,8 @@ impl Page {
         // Note: local_free_head starts at 0. remote_free_head at NONE.
         std::ptr::write(page_ptr, Page {
             next: AtomicUsize::new(0), // Initially detached from available stack
-            all_next: AtomicUsize::new(next_all_ptr),
+            all_next: AtomicUsize::new(0),
+            all_prev: AtomicUsize::new(0),
             block_size,
             remote_free_head: AtomicUsize::new(NONE),
             local_free_head: UnsafeCell::new(0),
@@ -140,7 +146,7 @@ impl Page {
             shard_index,
             in_stack: AtomicUsize::new(STATE_DETACHED), // Initially detached
             owner_thread: AtomicU64::new(current_thread_id()),
-            _padding: [0; 48],
+            _padding: [0; 40],
         });
 
         Some(NonNull::new_unchecked(page_ptr))
@@ -247,14 +253,15 @@ struct SlabState {
     heads: [[CachePadded<AtomicUsize>; SHARD_COUNT]; SLAB_CLASS_COUNT],
     // Array of all page lists, one for each size class.
     // Used for memory reclamation on Drop.
-    all_heads: [[CachePadded<AtomicUsize>; SHARD_COUNT]; SLAB_CLASS_COUNT],
+    // Protected by Mutex to allow concurrent removal (for eager return).
+    all_heads: [[CachePadded<Mutex<usize>>; SHARD_COUNT]; SLAB_CLASS_COUNT],
 }
 
 impl SlabState {
     fn new() -> Self {
         Self {
             heads: core::array::from_fn(|_| core::array::from_fn(|_| CachePadded::new(AtomicUsize::new(0)))),
-            all_heads: core::array::from_fn(|_| core::array::from_fn(|_| CachePadded::new(AtomicUsize::new(0)))),
+            all_heads: core::array::from_fn(|_| core::array::from_fn(|_| CachePadded::new(Mutex::new(0)))),
         }
     }
 }
@@ -264,9 +271,9 @@ impl Drop for SlabState {
         unsafe {
             let layout = Layout::from_size_align_unchecked(PAGE_SIZE, PAGE_SIZE);
             for class_heads in &mut self.all_heads {
-                for head_atomic in class_heads {
-                    // We have exclusive access in Drop, so we can use load(Relaxed) or get_mut
-                    let mut page_ptr_val = *head_atomic.get_mut();
+                for head_mutex in class_heads {
+                    // We have exclusive access in Drop, so we can use get_mut
+                    let mut page_ptr_val = *head_mutex.get_mut().unwrap();
                     while page_ptr_val != 0 {
                         let page = &mut *(page_ptr_val as *mut Page);
                         let next_val = *page.all_next.get_mut(); // Iterate all_next list
@@ -282,6 +289,43 @@ impl Drop for SlabState {
 }
 
 // --- Stack / List Helpers ---
+
+unsafe fn push_global(page_ptr: NonNull<Page>) {
+    let page = page_ptr.as_ref();
+    let mut current = GLOBAL_PAGE_POOL.load(Ordering::Acquire);
+    loop {
+        page.all_next.store(current, Ordering::Relaxed);
+        match GLOBAL_PAGE_POOL.compare_exchange_weak(
+            current,
+            page_ptr.as_ptr() as usize,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => return,
+            Err(actual) => current = actual,
+        }
+    }
+}
+
+unsafe fn pop_global() -> Option<NonNull<Page>> {
+    let mut current = GLOBAL_PAGE_POOL.load(Ordering::Acquire);
+    loop {
+        if current == 0 {
+            return None;
+        }
+        let page = &*(current as *const Page);
+        let next = page.all_next.load(Ordering::Relaxed);
+        match GLOBAL_PAGE_POOL.compare_exchange_weak(
+            current,
+            next,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => return NonNull::new(current as *mut Page),
+            Err(actual) => current = actual,
+        }
+    }
+}
 
 unsafe fn push_page(head_atomic: &AtomicUsize, page_ptr: NonNull<Page>) {
     let page = page_ptr.as_ref();
@@ -300,21 +344,47 @@ unsafe fn push_page(head_atomic: &AtomicUsize, page_ptr: NonNull<Page>) {
     }
 }
 
-unsafe fn push_all_list(head_atomic: &AtomicUsize, page_ptr: NonNull<Page>) {
+unsafe fn link_to_all_heads(head_mutex: &Mutex<usize>, page_ptr: NonNull<Page>) {
+    let mut head_guard = head_mutex.lock().unwrap();
+    let current_head_ptr = *head_guard;
+
     let page = page_ptr.as_ref();
-    let mut current = head_atomic.load(Ordering::Acquire);
-    loop {
-        page.all_next.store(current, Ordering::Relaxed);
-        match head_atomic.compare_exchange_weak(
-            current,
-            page_ptr.as_ptr() as usize,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        ) {
-            Ok(_) => return,
-            Err(actual) => current = actual,
-        }
+    // Link next
+    page.all_next.store(current_head_ptr, Ordering::Relaxed);
+    // Link prev (new head has no prev)
+    page.all_prev.store(0, Ordering::Relaxed);
+
+    if current_head_ptr != 0 {
+        let current_head = &*(current_head_ptr as *const Page);
+        current_head.all_prev.store(page_ptr.as_ptr() as usize, Ordering::Relaxed);
     }
+
+    *head_guard = page_ptr.as_ptr() as usize;
+}
+
+unsafe fn unlink_from_all_heads(head_mutex: &Mutex<usize>, page_ptr: NonNull<Page>) {
+    let mut head_guard = head_mutex.lock().unwrap();
+    let page = page_ptr.as_ref();
+
+    let prev_ptr = page.all_prev.load(Ordering::Relaxed);
+    let next_ptr = page.all_next.load(Ordering::Relaxed);
+
+    if prev_ptr != 0 {
+        let prev_page = &*(prev_ptr as *const Page);
+        prev_page.all_next.store(next_ptr, Ordering::Relaxed);
+    } else {
+        // We were head
+        *head_guard = next_ptr;
+    }
+
+    if next_ptr != 0 {
+        let next_page = &*(next_ptr as *const Page);
+        next_page.all_prev.store(prev_ptr, Ordering::Relaxed);
+    }
+
+    // Clear links
+    page.all_next.store(0, Ordering::Relaxed);
+    page.all_prev.store(0, Ordering::Relaxed);
 }
 
 /// A branded slab allocator.
@@ -328,10 +398,6 @@ unsafe fn push_all_list(head_atomic: &AtomicUsize, page_ptr: NonNull<Page>) {
 ///
 /// - **TODO(perf): Restartable Sequences (RSEQ)**:
 ///   On Linux, using RSEQ could allow faster per-cpu operations without atomics for the fast path.
-///
-/// - **TODO(mem): Eager Page Return**:
-///   Currently, empty pages are only returned when the Slab is dropped. Implementing logic to
-///   return pages to the OS (or a global pool) when they become empty would reduce memory footprint.
 pub struct BrandedSlab<'brand> {
     state: GhostCell<'brand, SlabState>,
 }
@@ -357,11 +423,10 @@ impl<'brand> BrandedSlab<'brand> {
         if let Some(class_idx) = get_size_class_index(size) {
             let shard_idx = page.shard_index;
             let head_atomic = &mut state.heads[class_idx][shard_idx];
-            let all_head_atomic = &mut state.all_heads[class_idx][shard_idx];
+            let all_head_mutex = &mut state.all_heads[class_idx][shard_idx];
 
             // Link into all_heads
-            *page.all_next.get_mut() = *all_head_atomic.get_mut();
-            *all_head_atomic.get_mut() = page_ptr.as_ptr() as usize;
+            link_to_all_heads(all_head_mutex, NonNull::new_unchecked(page_ptr.as_ptr() as *mut Page));
 
             // Link into heads (Available)
             *page.next.get_mut() = *head_atomic.get_mut();
@@ -396,26 +461,8 @@ impl<'brand> BrandedSlab<'brand> {
                             }
 
                             // Unlink from all_heads
-                            let all_head_atomic = &mut state.all_heads[class_idx][shard_idx];
-                            let mut curr_all = *all_head_atomic.get_mut();
-                            let mut prev_all = 0;
-                            let target = current_ptr_val;
-
-                            while curr_all != 0 {
-                                if curr_all == target {
-                                    let p = &mut *(curr_all as *mut Page);
-                                    if prev_all == 0 {
-                                        *all_head_atomic.get_mut() = *p.all_next.get_mut();
-                                    } else {
-                                        let prev_p = &mut *(prev_all as *mut Page);
-                                        *prev_p.all_next.get_mut() = *p.all_next.get_mut();
-                                    }
-                                    break;
-                                }
-                                let p = &mut *(curr_all as *mut Page);
-                                prev_all = curr_all;
-                                curr_all = *p.all_next.get_mut();
-                            }
+                            let all_head_mutex = &mut state.all_heads[class_idx][shard_idx];
+                            unlink_from_all_heads(all_head_mutex, NonNull::new_unchecked(current_ptr_val as *mut Page));
 
                             // Free
                             dealloc(current_ptr_val as *mut u8, layout);
@@ -447,7 +494,7 @@ impl<'brand> BrandedSlab<'brand> {
             let block_size = get_block_size(class_idx);
             let shard_idx = current_shard_index();
             let head_atomic = &mut state.heads[class_idx][shard_idx];
-            let all_heads_atomic = &mut state.all_heads[class_idx][shard_idx];
+            let all_heads_mutex = &mut state.all_heads[class_idx][shard_idx];
 
             // Iterate and drain full pages from the stack head
             loop {
@@ -481,11 +528,18 @@ impl<'brand> BrandedSlab<'brand> {
             }
 
             // Head full or empty, allocate new page
-            let current_all_head = *all_heads_atomic.get_mut();
-            if let Some(mut new_page) = Page::new(block_size, current_all_head, shard_idx) {
+            // Try global pool first
+            let mut new_page_opt = unsafe { pop_global() };
+            if let Some(p) = new_page_opt {
+                unsafe { Page::init_from_ptr(p.as_ptr() as *mut u8, block_size, shard_idx); }
+                new_page_opt = Some(p);
+            } else {
+                new_page_opt = Page::new(block_size, shard_idx);
+            }
+
+            if let Some(mut new_page) = new_page_opt {
                 unsafe {
-                    // Update all_heads
-                    *all_heads_atomic.get_mut() = new_page.as_ptr() as usize;
+                    link_to_all_heads(all_heads_mutex, new_page);
 
                     let page = new_page.as_mut();
                     let ptr = page.alloc_local().ok_or(AllocError)?;
@@ -576,24 +630,8 @@ impl<'brand> BrandedSlab<'brand> {
 
         // Unlink from all_heads (All)
         {
-            let head_atomic = &mut state.all_heads[class_idx][shard_idx];
-            let mut current_ptr_val = *head_atomic.get_mut();
-
-            if current_ptr_val == target_ptr_val {
-                 let page = &mut *(current_ptr_val as *mut Page);
-                 *head_atomic.get_mut() = *page.all_next.get_mut();
-            } else {
-                while current_ptr_val != 0 {
-                    let page = &mut *(current_ptr_val as *mut Page);
-                    let next_val = *page.all_next.get_mut();
-                    if next_val == target_ptr_val {
-                        let target_page = &mut *(target_ptr_val as *mut Page);
-                        *page.all_next.get_mut() = *target_page.all_next.get_mut();
-                        break;
-                    }
-                    current_ptr_val = next_val;
-                }
-            }
+            let head_mutex = &mut state.all_heads[class_idx][shard_idx];
+            unlink_from_all_heads(head_mutex, page_ptr);
         }
 
         // Free the page
@@ -689,11 +727,19 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
 
             // 2. Create new page
             let block_size = get_block_size(class_idx);
-            let all_heads_atomic = &state.all_heads[class_idx][shard_idx];
+            let all_heads_mutex = &state.all_heads[class_idx][shard_idx];
 
-            if let Some(mut new_page) = Page::new(block_size, 0, shard_idx) {
+            let mut new_page_opt = unsafe { pop_global() };
+            if let Some(p) = new_page_opt {
+                unsafe { Page::init_from_ptr(p.as_ptr() as *mut u8, block_size, shard_idx); }
+                new_page_opt = Some(p);
+            } else {
+                new_page_opt = Page::new(block_size, shard_idx);
+            }
+
+            if let Some(mut new_page) = new_page_opt {
                 unsafe {
-                    push_all_list(all_heads_atomic, new_page);
+                    link_to_all_heads(all_heads_mutex, new_page);
 
                     let page = new_page.as_mut();
                     let ptr = page.alloc_local().ok_or(AllocError)?;
@@ -730,6 +776,24 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
             page.dealloc_remote(ptr);
             let prev = page.allocated_count.fetch_sub(1, Ordering::Relaxed);
 
+            // Eager return: If allocated_count becomes 0
+            if prev == 1 {
+                let state = self.state.borrow(token);
+                let head_atomic = &state.heads[class_idx][page.shard_index];
+                let current_head = head_atomic.load(Ordering::Acquire);
+
+                // Only detach if at head
+                if current_head == page_ptr.as_ptr() as usize {
+                     let next = page.next.load(Ordering::Relaxed);
+                     if head_atomic.compare_exchange(current_head, next, Ordering::AcqRel, Ordering::Acquire).is_ok() {
+                          let all_heads_mutex = &state.all_heads[class_idx][page.shard_index];
+                          unlink_from_all_heads(all_heads_mutex, page_ptr);
+                          push_global(page_ptr);
+                          return;
+                     }
+                }
+            }
+
             // If transitioned from Full (capacity) to Available (capacity - 1)
             if prev == page.capacity {
                 loop {
@@ -748,9 +812,6 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
                                 break;
                             }
                         },
-                        // We removed STATE_FULL usage in allocate_in, but if we add it back or if logic implies it.
-                        // STATE_IN_LIST means it's in the list, so we don't need to push.
-                        // STATE_LOCKED is not used in new allocate_in.
                         _ => {
                             break;
                         }
@@ -903,5 +964,5 @@ pub unsafe fn init_slab_page(
     block_size: usize,
     shard_index: usize
 ) -> bool {
-    Page::init_from_ptr(ptr.as_ptr(), block_size, 0, shard_index).is_some()
+    Page::init_from_ptr(ptr.as_ptr(), block_size, shard_index).is_some()
 }
