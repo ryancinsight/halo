@@ -12,6 +12,7 @@ tracing = "0.1"
 tokio = { version = "1.36", features = ["full"] }
 anyhow = "1.0"
 rayon = "1.10"
+libc = "0.2"
 rkyv = "0.7"
 wgpu = "0.19"
 bytemuck = "1.14"

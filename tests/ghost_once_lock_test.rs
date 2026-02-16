@@ -61,31 +61,34 @@ fn test_ghost_once_lock_take() {
 #[test]
 fn test_ghost_once_lock_concurrent() {
     GhostToken::new(|token| {
-        let shared_token = Arc::new(SharedGhostToken::new(token));
-        let lock = Arc::new(GhostOnceLock::new());
-        let mut handles = Vec::new();
+        let shared_token = SharedGhostToken::new(token);
+        let lock = GhostOnceLock::new();
 
-        for i in 0..10 {
-            let t = shared_token.clone();
-            let l = lock.clone();
-            handles.push(thread::spawn(move || {
-                let token_guard = t.read();
-                l.get_or_init(&*token_guard, || i)
-            }));
-        }
+        thread::scope(|s| {
+            let mut handles = Vec::new();
 
-        let mut values = Vec::new();
-        for h in handles {
-            values.push(*h.join().unwrap());
-        }
+            for i in 0..10 {
+                let t = &shared_token;
+                let l = &lock;
+                handles.push(s.spawn(move || {
+                    let token_guard = t.read();
+                    *l.get_or_init(&*token_guard, || i)
+                }));
+            }
 
-        // All threads should see the same value (the one from the thread that won the race)
-        let first = values[0];
-        for v in values {
-            assert_eq!(v, first);
-        }
+            let mut values = Vec::new();
+            for h in handles {
+                values.push(h.join().unwrap());
+            }
 
-        let token_guard = shared_token.read();
-        assert_eq!(lock.get(&*token_guard), Some(&first));
+            // All threads should see the same value (the one from the thread that won the race)
+            let first = values[0];
+            for v in values {
+                assert_eq!(v, first);
+            }
+
+            let token_guard = shared_token.read();
+            assert_eq!(lock.get(&*token_guard), Some(&first));
+        });
     });
 }
