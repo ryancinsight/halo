@@ -48,6 +48,9 @@ impl<'brand, T> GhostCell<'brand, T> {
         unsafe { ptr::swap(a, b) };
     }
 
+}
+
+impl<'brand, T: ?Sized> GhostCell<'brand, T> {
     /// Maps the cell's value into a new `GhostCell` of the same brand.
     #[inline]
     pub fn map<F, U>(&self, token: &impl GhostBorrow<'brand>, f: F) -> GhostCell<'brand, U>
@@ -56,9 +59,6 @@ impl<'brand, T> GhostCell<'brand, T> {
     {
         GhostCell::new(f(self.borrow(token)))
     }
-}
-
-impl<'brand, T: ?Sized> GhostCell<'brand, T> {
     /// Returns a reference to the contained value.
     ///
     /// Requires a token with read permission (implementing `GhostBorrow`).
