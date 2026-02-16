@@ -12,7 +12,7 @@
 //!   without requiring the global `GhostToken`. This enables splitting the matrix recursively.
 
 use crate::collections::vec::{slice::BrandedSlice, slice::BrandedSliceMut, BrandedVec};
-use crate::GhostCell;
+use crate::{GhostCell, GhostToken};
 use std::marker::PhantomData;
 use std::slice;
 

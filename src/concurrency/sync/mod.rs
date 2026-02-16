@@ -1,10 +1,16 @@
+pub mod ghost_barrier;
+pub mod ghost_condvar;
+pub mod ghost_mutex;
 pub mod ghost_once_lock;
 pub mod mpmc;
 
+pub use ghost_barrier::GhostBarrier;
+pub use ghost_condvar::GhostCondvar;
+pub use ghost_mutex::{GhostMutex, GhostMutexGuard};
 pub use ghost_once_lock::GhostOnceLock;
 pub use mpmc::GhostRingBuffer;
 
-use core::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
 #[cfg(windows)]
 use windows_sys::Win32::System::Threading::{
@@ -154,30 +160,4 @@ pub fn wait_on_u32(addr: &AtomicU32, expected: u32) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::atomic::Ordering;
-    use std::sync::{Arc, Barrier};
-    use std::thread;
-
-    #[test]
-    fn test_wait_on_u32_wake() {
-        let flag = Arc::new(AtomicU32::new(0));
-        let barrier = Arc::new(Barrier::new(2));
-        let flag_thread = flag.clone();
-        let barrier_thread = barrier.clone();
-
-        let handle = thread::spawn(move || {
-            barrier_thread.wait();
-            wait_on_u32(&flag_thread, 0);
-            flag_thread.load(Ordering::SeqCst)
-        });
-
-        barrier.wait();
-        flag.store(1, Ordering::SeqCst);
-        wake_all_u32(&flag);
-
-        let value = handle.join().unwrap();
-        assert_eq!(value, 1);
-    }
-}
+mod tests;
