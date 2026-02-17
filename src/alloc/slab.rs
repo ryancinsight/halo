@@ -346,9 +346,18 @@ unsafe fn push_page(head_atomic: &AtomicUsize, page_ptr: NonNull<Page>) {
 
 unsafe fn link_to_all_heads(head_mutex: &Mutex<usize>, page_ptr: NonNull<Page>) {
     let mut head_guard = head_mutex.lock().unwrap();
-    let current_head_ptr = *head_guard;
+    link_to_all_heads_internal(&mut *head_guard, page_ptr);
+}
 
+unsafe fn link_to_all_heads_mut(head_mutex: &mut Mutex<usize>, page_ptr: NonNull<Page>) {
+    let head_ptr = head_mutex.get_mut().unwrap();
+    link_to_all_heads_internal(head_ptr, page_ptr);
+}
+
+unsafe fn link_to_all_heads_internal(head_ptr: &mut usize, page_ptr: NonNull<Page>) {
+    let current_head_ptr = *head_ptr;
     let page = page_ptr.as_ref();
+
     // Link next
     page.all_next.store(current_head_ptr, Ordering::Relaxed);
     // Link prev (new head has no prev)
@@ -359,11 +368,29 @@ unsafe fn link_to_all_heads(head_mutex: &Mutex<usize>, page_ptr: NonNull<Page>) 
         current_head.all_prev.store(page_ptr.as_ptr() as usize, Ordering::Relaxed);
     }
 
-    *head_guard = page_ptr.as_ptr() as usize;
+    *head_ptr = page_ptr.as_ptr() as usize;
+}
+
+unsafe fn try_unlink_from_all_heads(head_mutex: &Mutex<usize>, page_ptr: NonNull<Page>) -> bool {
+    if let Ok(mut head_guard) = head_mutex.try_lock() {
+        unlink_from_all_heads_internal(&mut *head_guard, page_ptr);
+        true
+    } else {
+        false
+    }
 }
 
 unsafe fn unlink_from_all_heads(head_mutex: &Mutex<usize>, page_ptr: NonNull<Page>) {
     let mut head_guard = head_mutex.lock().unwrap();
+    unlink_from_all_heads_internal(&mut *head_guard, page_ptr);
+}
+
+unsafe fn unlink_from_all_heads_mut(head_mutex: &mut Mutex<usize>, page_ptr: NonNull<Page>) {
+    let head_ptr = head_mutex.get_mut().unwrap();
+    unlink_from_all_heads_internal(head_ptr, page_ptr);
+}
+
+unsafe fn unlink_from_all_heads_internal(head_ptr: &mut usize, page_ptr: NonNull<Page>) {
     let page = page_ptr.as_ref();
 
     let prev_ptr = page.all_prev.load(Ordering::Relaxed);
@@ -374,7 +401,7 @@ unsafe fn unlink_from_all_heads(head_mutex: &Mutex<usize>, page_ptr: NonNull<Pag
         prev_page.all_next.store(next_ptr, Ordering::Relaxed);
     } else {
         // We were head
-        *head_guard = next_ptr;
+        *head_ptr = next_ptr;
     }
 
     if next_ptr != 0 {
@@ -462,7 +489,7 @@ impl<'brand> BrandedSlab<'brand> {
 
                             // Unlink from all_heads
                             let all_head_mutex = &mut state.all_heads[class_idx][shard_idx];
-                            unlink_from_all_heads(all_head_mutex, NonNull::new_unchecked(current_ptr_val as *mut Page));
+                            unlink_from_all_heads_mut(all_head_mutex, NonNull::new_unchecked(current_ptr_val as *mut Page));
 
                             // Free
                             dealloc(current_ptr_val as *mut u8, layout);
@@ -529,17 +556,17 @@ impl<'brand> BrandedSlab<'brand> {
 
             // Head full or empty, allocate new page
             // Try global pool first
-            let new_page_opt = match unsafe { pop_global() } {
-                Some(p) => {
-                    unsafe { Page::init_from_ptr(p.as_ptr() as *mut u8, block_size, shard_idx); }
-                    Some(p)
-                }
-                None => Page::new(block_size, shard_idx),
-            };
+            let mut new_page_opt = unsafe { pop_global() };
+            if let Some(p) = new_page_opt {
+                unsafe { Page::init_from_ptr(p.as_ptr() as *mut u8, block_size, shard_idx); }
+                new_page_opt = Some(p);
+            } else {
+                new_page_opt = Page::new(block_size, shard_idx);
+            }
 
             if let Some(mut new_page) = new_page_opt {
                 unsafe {
-                    link_to_all_heads(all_heads_mutex, new_page);
+                    link_to_all_heads_mut(all_heads_mutex, new_page);
 
                     let page = new_page.as_mut();
                     let ptr = page.alloc_local().ok_or(AllocError)?;
@@ -729,13 +756,13 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
             let block_size = get_block_size(class_idx);
             let all_heads_mutex = &state.all_heads[class_idx][shard_idx];
 
-            let new_page_opt = match unsafe { pop_global() } {
-                Some(p) => {
-                    unsafe { Page::init_from_ptr(p.as_ptr() as *mut u8, block_size, shard_idx); }
-                    Some(p)
-                }
-                None => Page::new(block_size, shard_idx),
-            };
+            let mut new_page_opt = unsafe { pop_global() };
+            if let Some(p) = new_page_opt {
+                unsafe { Page::init_from_ptr(p.as_ptr() as *mut u8, block_size, shard_idx); }
+                new_page_opt = Some(p);
+            } else {
+                new_page_opt = Page::new(block_size, shard_idx);
+            }
 
             if let Some(mut new_page) = new_page_opt {
                 unsafe {
@@ -784,13 +811,19 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
 
                 // Only detach if at head
                 if current_head == page_ptr.as_ptr() as usize {
-                     let next = page.next.load(Ordering::Relaxed);
-                     if head_atomic.compare_exchange(current_head, next, Ordering::AcqRel, Ordering::Acquire).is_ok() {
-                          let all_heads_mutex = &state.all_heads[class_idx][page.shard_index];
-                          unlink_from_all_heads(all_heads_mutex, page_ptr);
-                          push_global(page_ptr);
-                          return;
-                     }
+                    let next = page.next.load(Ordering::Relaxed);
+                    if head_atomic.compare_exchange(current_head, next, Ordering::AcqRel, Ordering::Acquire).is_ok() {
+                        // We own the page now.
+                        let all_heads_mutex = &state.all_heads[class_idx][page.shard_index];
+                        if try_unlink_from_all_heads(all_heads_mutex, page_ptr) {
+                            // Success: Global pool
+                            push_global(page_ptr);
+                            return;
+                        } else {
+                            // Failed to lock all_heads: Push back to heads (abort eager return)
+                            push_page(head_atomic, page_ptr);
+                        }
+                    }
                 }
             }
 
