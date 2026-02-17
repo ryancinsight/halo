@@ -729,13 +729,13 @@ impl<'brand> GhostAlloc<'brand> for BrandedSlab<'brand> {
             let block_size = get_block_size(class_idx);
             let all_heads_mutex = &state.all_heads[class_idx][shard_idx];
 
-            let mut new_page_opt = unsafe { pop_global() };
-            if let Some(p) = new_page_opt {
-                unsafe { Page::init_from_ptr(p.as_ptr() as *mut u8, block_size, shard_idx); }
-                new_page_opt = Some(p);
-            } else {
-                new_page_opt = Page::new(block_size, shard_idx);
-            }
+            let new_page_opt = match unsafe { pop_global() } {
+                Some(p) => {
+                    unsafe { Page::init_from_ptr(p.as_ptr() as *mut u8, block_size, shard_idx); }
+                    Some(p)
+                }
+                None => Page::new(block_size, shard_idx),
+            };
 
             if let Some(mut new_page) = new_page_opt {
                 unsafe {
