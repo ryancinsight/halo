@@ -529,13 +529,13 @@ impl<'brand> BrandedSlab<'brand> {
 
             // Head full or empty, allocate new page
             // Try global pool first
-            let mut new_page_opt = unsafe { pop_global() };
-            if let Some(p) = new_page_opt {
-                unsafe { Page::init_from_ptr(p.as_ptr() as *mut u8, block_size, shard_idx); }
-                new_page_opt = Some(p);
-            } else {
-                new_page_opt = Page::new(block_size, shard_idx);
-            }
+            let new_page_opt = match unsafe { pop_global() } {
+                Some(p) => {
+                    unsafe { Page::init_from_ptr(p.as_ptr() as *mut u8, block_size, shard_idx); }
+                    Some(p)
+                }
+                None => Page::new(block_size, shard_idx),
+            };
 
             if let Some(mut new_page) = new_page_opt {
                 unsafe {
