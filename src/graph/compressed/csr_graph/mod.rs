@@ -64,23 +64,18 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCsrGraph<'brand, EDGE_CHUNK> {
         edges.reserve(total_edges);
 
         // Pre-calculate in-degrees for CSC construction
-        let mut in_degrees = vec![0; n];
+        let mut in_offsets = vec![0; n + 1];
 
         for (u, nbrs) in adjacency.iter().enumerate() {
             for &v in nbrs {
                 assert!(v < n, "edge {u}->{v} is out of bounds for n={n}");
                 edges.push(v);
-                in_degrees[v] += 1;
+                in_offsets[v + 1] += 1;
             }
         }
 
-        // Build in_offsets
-        let mut in_offsets = Vec::with_capacity(n + 1);
-        in_offsets.push(0);
-        let mut running_sum = 0;
-        for &d in &in_degrees {
-            running_sum += d;
-            in_offsets.push(running_sum);
+        for i in 0..n {
+            in_offsets[i + 1] += in_offsets[i];
         }
 
         // Build in_edges (CSC)
@@ -132,17 +127,13 @@ impl<'brand, const EDGE_CHUNK: usize> GhostCsrGraph<'brand, EDGE_CHUNK> {
         }
 
         // Build CSC from CSR
-        let mut in_degrees = vec![0; n];
+        let mut in_offsets = vec![0; n + 1];
         for &v in &edges {
-            in_degrees[v] += 1;
+            in_offsets[v + 1] += 1;
         }
 
-        let mut in_offsets = Vec::with_capacity(n + 1);
-        in_offsets.push(0);
-        let mut running_sum = 0;
-        for &d in &in_degrees {
-            running_sum += d;
-            in_offsets.push(running_sum);
+        for i in 0..n {
+            in_offsets[i + 1] += in_offsets[i];
         }
 
         let mut buckets = in_offsets[0..n].to_vec();
