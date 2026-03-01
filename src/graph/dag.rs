@@ -244,16 +244,10 @@ impl<'brand, const EDGE_CHUNK: usize> GhostDag<'brand, EDGE_CHUNK> {
         self.topological_sort()?;
 
         let n = self.graph.node_count();
-        let mut indeg = vec![0usize; n];
-        for u in 0..n {
-            for v in self.graph.neighbors(u) {
-                indeg[v] += 1;
-            }
-        }
 
         let mut dist = vec![usize::MAX; n];
         for u in 0..n {
-            if indeg[u] == 0 {
+            if self.transpose.in_degree(u) == 0 {
                 dist[u] = 0;
             }
         }
